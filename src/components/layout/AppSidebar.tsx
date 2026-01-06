@@ -30,6 +30,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 const alwaysActiveItems = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Engagements', href: '/engagements', icon: Briefcase },
+  { name: 'Compliance Applicability', href: '/compliance-applicability', icon: Shield },
 ];
 
 // Items that require an engagement to be selected
