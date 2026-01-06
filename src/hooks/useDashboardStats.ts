@@ -1,0 +1,148 @@
+import { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+
+interface DashboardStats {
+  engagements: {
+    total: number;
+    active: number;
+    planning: number;
+    completed: number;
+  };
+  risks: {
+    total: number;
+    high: number;
+    medium: number;
+    low: number;
+    open: number;
+  };
+  procedures: {
+    total: number;
+    notStarted: number;
+    inProgress: number;
+    completed: number;
+    reviewed: number;
+  };
+  evidence: {
+    totalFiles: number;
+    totalSize: number;
+  };
+  recentActivity: {
+    id: string;
+    user_name: string;
+    action: string;
+    entity: string;
+    details: string | null;
+    created_at: string;
+  }[];
+  latestEngagement: {
+    id: string;
+    name: string;
+    client_name: string;
+    status: string;
+    financial_year: string;
+    materiality_amount: number | null;
+    performance_materiality: number | null;
+  } | null;
+}
+
+export function useDashboardStats() {
+  const [stats, setStats] = useState<DashboardStats>({
+    engagements: { total: 0, active: 0, planning: 0, completed: 0 },
+    risks: { total: 0, high: 0, medium: 0, low: 0, open: 0 },
+    procedures: { total: 0, notStarted: 0, inProgress: 0, completed: 0, reviewed: 0 },
+    evidence: { totalFiles: 0, totalSize: 0 },
+    recentActivity: [],
+    latestEngagement: null,
+  });
+  const [loading, setLoading] = useState(true);
+
+  const fetchStats = async () => {
+    try {
+      // Fetch all data in parallel
+      const [
+        engagementsRes,
+        risksRes,
+        proceduresRes,
+        evidenceRes,
+        activityRes,
+      ] = await Promise.all([
+        supabase.from('engagements').select('id, name, client_name, status, financial_year, materiality_amount, performance_materiality'),
+        supabase.from('risks').select('id, combined_risk, status'),
+        supabase.from('audit_procedures').select('id, status'),
+        supabase.from('evidence_files').select('id, file_size'),
+        supabase.from('activity_logs').select('id, user_name, action, entity, details, created_at').order('created_at', { ascending: false }).limit(10),
+      ]);
+
+      // Calculate engagement stats
+      const engagements = engagementsRes.data || [];
+      const engagementStats = {
+        total: engagements.length,
+        active: engagements.filter(e => e.status === 'fieldwork' || e.status === 'review').length,
+        planning: engagements.filter(e => e.status === 'planning').length,
+        completed: engagements.filter(e => e.status === 'completed' || e.status === 'archived').length,
+      };
+
+      // Calculate risk stats
+      const risks = risksRes.data || [];
+      const riskStats = {
+        total: risks.length,
+        high: risks.filter(r => r.combined_risk === 'high').length,
+        medium: risks.filter(r => r.combined_risk === 'medium').length,
+        low: risks.filter(r => r.combined_risk === 'low').length,
+        open: risks.filter(r => r.status === 'open').length,
+      };
+
+      // Calculate procedure stats
+      const procedures = proceduresRes.data || [];
+      const procedureStats = {
+        total: procedures.length,
+        notStarted: procedures.filter(p => p.status === 'not_started').length,
+        inProgress: procedures.filter(p => p.status === 'in_progress').length,
+        completed: procedures.filter(p => p.status === 'completed' || p.status === 'done').length,
+        reviewed: procedures.filter(p => p.status === 'reviewed').length,
+      };
+
+      // Calculate evidence stats
+      const evidence = evidenceRes.data || [];
+      const evidenceStats = {
+        totalFiles: evidence.length,
+        totalSize: evidence.reduce((acc, f) => acc + (f.file_size || 0), 0),
+      };
+
+      // Get latest engagement
+      const latestEngagement = engagements.length > 0 ? engagements[0] : null;
+
+      setStats({
+        engagements: engagementStats,
+        risks: riskStats,
+        procedures: procedureStats,
+        evidence: evidenceStats,
+        recentActivity: activityRes.data || [],
+        latestEngagement,
+      });
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+
+    // Subscribe to realtime updates for key tables
+    const channel = supabase
+      .channel('dashboard-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagements' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'risks' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_procedures' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, fetchStats)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  return { stats, loading, refetch: fetchStats };
+}

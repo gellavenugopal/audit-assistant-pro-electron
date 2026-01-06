@@ -1,0 +1,10 @@
+project_id = "jrwfgfdxhlvwhzwqvwkl"
+
+[functions.send-invite]
+verify_jwt = false
+
+[functions.admin-reset-password]
+verify_jwt = false
+
+[functions.tally-bridge]
+verify_jwt = false
