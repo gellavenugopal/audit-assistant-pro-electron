@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTabShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEngagement } from "@/contexts/EngagementContext";
 import { useTallyConnection } from "@/hooks/useTallyConnection";
+import { useTallyODBC } from "@/hooks/useTallyODBC";
 import { useTally, TallyTrialBalanceLine, TallyMonthWiseLine, TallyGSTNotFeedLine } from "@/contexts/TallyContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "lucide-react";
@@ -83,7 +84,7 @@ const ToolCard = ({ title, description, icon, status = "available", onClick }: T
   );
 };
 
-type ConnectionMode = "bridge" | "excel";
+type ConnectionMode = "bridge" | "odbc" | "excel";
 
 const TallyTools = () => {
   const { toast } = useToast();
@@ -101,10 +102,10 @@ const TallyTools = () => {
   
   // Month wise data fetch state
   const [showMonthWiseDialog, setShowMonthWiseDialog] = useState(false);
-  const [mwFyStartYear, setMwFyStartYear] = useState(new Date().getFullYear());
+  const [mwFyStartYear, setMwFyStartYear] = useState(new Date().getFullYear() - 1);
   const [mwTargetMonth, setMwTargetMonth] = useState("Mar");
   const [isFetchingMW, setIsFetchingMW] = useState(false);
-  const [fetchedMWData, setFetchedMWData] = useState<{ lines: TallyMonthWiseLine[]; months: string[] } | null>(null);
+  const [fetchedMWData, setFetchedMWData] = useState<{ plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[] } | null>(null);
   
   // GST Not Feeded state
   const [showGSTNotFeedDialog, setShowGSTNotFeedDialog] = useState(false);
@@ -118,24 +119,37 @@ const TallyTools = () => {
   // Direct connection (kept for fallback reference, but won't work due to CORS)
   const directConnection = useTallyConnection();
   
+  // ODBC connection
+  const odbcConnection = useTallyODBC();
+  
   // Bridge connection using global context (persists across navigation)
   const tallyConnection = useTally();
   
   // Use the active connection based on mode
-  const isConnected = connectionMode === "bridge" ? tallyConnection.isConnected : directConnection.isConnected;
-  const isConnecting = connectionMode === "bridge" ? tallyConnection.isConnecting : directConnection.isConnecting;
-  const companyInfo = connectionMode === "bridge" ? tallyConnection.companyInfo : directConnection.companyInfo;
+  const isConnected = connectionMode === "bridge" ? tallyConnection.isConnected : 
+                     connectionMode === "odbc" ? odbcConnection.isConnected : 
+                     directConnection.isConnected;
+  const isConnecting = connectionMode === "bridge" ? tallyConnection.isConnecting : 
+                      connectionMode === "odbc" ? odbcConnection.isConnecting : 
+                      directConnection.isConnecting;
+  const companyInfo = connectionMode === "bridge" ? tallyConnection.companyInfo : 
+                     connectionMode === "odbc" ? odbcConnection.companyInfo : 
+                     directConnection.companyInfo;
 
   const handleConnect = () => {
     if (isConnected) {
       if (connectionMode === "bridge") {
         tallyConnection.disconnect();
+      } else if (connectionMode === "odbc") {
+        odbcConnection.disconnect();
       } else {
         directConnection.disconnect();
       }
     } else {
       if (connectionMode === "bridge") {
         tallyConnection.connectWithSession(sessionCode);
+      } else if (connectionMode === "odbc") {
+        odbcConnection.testConnection();
       } else {
         directConnection.connectToTally(tallyPort);
       }
@@ -145,7 +159,14 @@ const TallyTools = () => {
   const handleFetchTrialBalance = async () => {
     setIsFetchingTB(true);
     try {
-      const result = await tallyConnection.fetchTrialBalance(tbFromDate, tbToDate);
+      let result;
+      if (connectionMode === "odbc") {
+        const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
+        result = { success: true, lines };
+      } else {
+        result = await tallyConnection.fetchTrialBalance(tbFromDate, tbToDate);
+      }
+      
       if (result && result.success) {
         setFetchedTBData(result.lines);
         toast({
@@ -160,41 +181,124 @@ const TallyTools = () => {
 
   const handleExportToExcel = () => {
     if (!fetchedTBData || fetchedTBData.length === 0) return;
-    
-    // Separate P&L and Balance Sheet items like Python code
-    const plItems = fetchedTBData.filter(line => line.isRevenue);
-    const bsItems = fetchedTBData.filter(line => !line.isRevenue);
-    
-    const formatRow = (line: TallyTrialBalanceLine) => ({
-      "Account Name": line.accountName,
-      "Primary Group": line.primaryGroup,
-      "Parent": line.parentGroup,
-      "Opening Dr": line.openingDr > 0 ? line.openingDr : "",
-      "Opening Cr": line.openingCr > 0 ? line.openingCr : "",
-      "Debit Totals": line.debitTotals > 0 ? line.debitTotals : "",
-      "Credit Totals": line.creditTotals > 0 ? line.creditTotals : "",
-      "Closing Dr": line.closingDr > 0 ? line.closingDr : "",
-      "Closing Cr": line.closingCr > 0 ? line.closingCr : "",
-    });
-    
+
+    // Function to get category
+    const getCategory = (primaryGroup: string, isRevenue: boolean) => {
+      const assetGroups = ['Fixed Assets', 'Current Assets', 'Investments', 'Loans & Advances', 'Cash-in-hand', 'Bank Accounts', 'Deposits (Asset)', 'Stock-in-hand', 'Miscellaneous Expenses (Asset)', 'Advance Tax', 'Sundry Debtors'];
+      const liabilityGroups = ['Capital Account', 'Loans (Liability)', 'Current Liabilities', 'Provisions', 'Reserves & Surplus', 'Sundry Creditors', 'Duties & Taxes', 'Secured Loans', 'Unsecured Loans'];
+      const incomeGroups = ['Sales Accounts', 'Direct Income', 'Indirect Income', 'Service Income'];
+      const expenseGroups = ['Direct Expenses', 'Indirect Expenses', 'Administrative Expenses', 'Selling Expenses', 'Miscellaneous Expenses'];
+
+      const lowerGroup = primaryGroup.toLowerCase();
+
+      if (assetGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Asset';
+      if (liabilityGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Liability';
+      if (incomeGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Income';
+      if (expenseGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Expense';
+
+      // Default based on isRevenue
+      return isRevenue ? 'Income' : 'Asset';
+    };
+
+    // Function to build hierarchy levels
+    const buildHierarchy = (data: TallyTrialBalanceLine[]) => {
+      return data.map(line => {
+        const hierarchy = [line.accountHead];
+        const category = getCategory(line.primaryGroup, line.isRevenue);
+        
+        // Build hierarchy based on category
+        if (category === 'Income') {
+          hierarchy.push(line.parent || 'Income Accounts');
+          hierarchy.push('Revenue from Operations');
+          hierarchy.push('Income');
+          hierarchy.push('');
+        } else if (category === 'Expense') {
+          hierarchy.push(line.parent || 'Expense Accounts');
+          hierarchy.push('Expenses');
+          hierarchy.push('Expense');
+          hierarchy.push('');
+        } else if (category === 'Asset') {
+          hierarchy.push(line.parent || line.primaryGroup);
+          if (['Bank Accounts', 'Cash-in-hand', 'Deposits', 'Loans & Advances', 'Sundry Debtors'].includes(line.primaryGroup)) {
+            hierarchy.push('Current Assets');
+          } else {
+            hierarchy.push('Non-Current Assets');
+          }
+          hierarchy.push('Asset');
+          hierarchy.push('');
+        } else if (category === 'Liability') {
+          hierarchy.push(line.parent || line.primaryGroup);
+          if (['Sundry Creditors', 'Duties & Taxes', 'Provisions'].includes(line.primaryGroup)) {
+            hierarchy.push('Current Liabilities');
+          } else {
+            hierarchy.push('Non-Current Liabilities');
+          }
+          hierarchy.push('Liability');
+          hierarchy.push('');
+        } else {
+          // Default
+          hierarchy.push(line.parent || line.primaryGroup);
+          hierarchy.push(category);
+          hierarchy.push('');
+          hierarchy.push('');
+        }
+        
+        return {
+          "Account Head": hierarchy[0],
+          "Parent 1": hierarchy[1],
+          "Parent 2": hierarchy[2],
+          "Parent 3": hierarchy[3],
+          "Parent 4": hierarchy[4] || '',
+          "Category": category,
+        };
+      });
+    };
+
     const wb = XLSX.utils.book_new();
-    
-    // P&L Sheet
-    if (plItems.length > 0) {
-      const plData = plItems.map(formatRow);
-      const plWs = XLSX.utils.json_to_sheet(plData);
-      XLSX.utils.book_append_sheet(wb, plWs, "P&L Item");
-    }
-    
-    // Balance Sheet
-    if (bsItems.length > 0) {
-      const bsData = bsItems.map(formatRow);
-      const bsWs = XLSX.utils.json_to_sheet(bsData);
-      XLSX.utils.book_append_sheet(wb, bsWs, "Balance Sheet");
-    }
-    
+
+    // Sheet 1: Trial Balance Data
+    const trialBalanceData = fetchedTBData.map(line => ({
+      "Account Head": line.accountHead,
+      "Opening Balance": line.openingBalance,
+      "Total Debit": line.totalDebit,
+      "Total Credit": line.totalCredit,
+      "Closing Balance": line.closingBalance,
+      "Account Code": line.accountCode,
+      "Branch": line.branch,
+    }));
+
+    const trialBalanceWs = XLSX.utils.json_to_sheet(trialBalanceData);
+    const colWidths = [
+      { wch: 30 }, // Account Head
+      { wch: 15 }, // Opening Balance
+      { wch: 12 }, // Total Debit
+      { wch: 12 }, // Total Credit
+      { wch: 15 }, // Closing Balance
+      { wch: 15 }, // Account Code
+      { wch: 10 }, // Branch
+    ];
+    trialBalanceWs['!cols'] = colWidths;
+    XLSX.utils.book_append_sheet(wb, trialBalanceWs, "Trial Balance");
+
+    // Sheet 2: Hierarchy
+    const hierarchyData = buildHierarchy(fetchedTBData);
+    const hierarchyWs = XLSX.utils.json_to_sheet(hierarchyData);
+    const hierarchyColWidths = [
+      { wch: 30 }, // Account Head
+      { wch: 25 }, // Parent 1
+      { wch: 25 }, // Parent 2
+      { wch: 20 }, // Parent 3
+      { wch: 20 }, // Parent 4
+      { wch: 15 }, // Category
+    ];
+    hierarchyWs['!cols'] = hierarchyColWidths;
+    XLSX.utils.book_append_sheet(wb, hierarchyWs, "Hierarchy");
+
     const fileName = `Trial_Balance_${tbFromDate}_to_${tbToDate}.xlsx`;
     XLSX.writeFile(wb, fileName);
+    
+    const plItems = fetchedTBData.filter(line => line.isRevenue);
+    const bsItems = fetchedTBData.filter(line => !line.isRevenue);
     
     toast({
       title: "Export Complete",
@@ -205,7 +309,18 @@ const TallyTools = () => {
   const handleFetchMonthWiseData = async () => {
     setIsFetchingMW(true);
     try {
-      const result = await tallyConnection.fetchMonthWiseData(mwFyStartYear, mwTargetMonth);
+      let result;
+      if (connectionMode === "odbc") {
+        const data = await odbcConnection.fetchMonthWise(mwFyStartYear, mwTargetMonth);
+        if (data) {
+          result = { success: true, lines: data.lines, months: data.months };
+        } else {
+          result = { success: false };
+        }
+      } else {
+        result = await tallyConnection.fetchMonthWiseData(mwFyStartYear, mwTargetMonth);
+      }
+      
       if (result && result.success) {
         setFetchedMWData({ lines: result.lines, months: result.months });
         toast({
@@ -226,6 +341,16 @@ const TallyTools = () => {
     // Separate P&L and Balance Sheet items
     const plItems = lines.filter(line => line.isRevenue);
     const bsItems = lines.filter(line => !line.isRevenue);
+    
+    // Sort items
+    plItems.sort((a, b) => {
+      if (a.primaryGroup !== b.primaryGroup) return a.primaryGroup.localeCompare(b.primaryGroup);
+      return a.accountName.localeCompare(b.accountName);
+    });
+    bsItems.sort((a, b) => {
+      if (a.primaryGroup !== b.primaryGroup) return a.primaryGroup.localeCompare(b.primaryGroup);
+      return a.accountName.localeCompare(b.accountName);
+    });
     
     const formatRow = (line: TallyMonthWiseLine, isPL: boolean) => {
       const row: Record<string, string | number> = {
@@ -295,6 +420,15 @@ const TallyTools = () => {
   };
 
   const handleFetchGSTNotFeed = async () => {
+    if (connectionMode !== "bridge") {
+      toast({
+        title: "Feature Not Available",
+        description: "GST not feeded data is currently only available with Tally Bridge connection",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsFetchingGSTNotFeed(true);
     try {
       const result = await tallyConnection.fetchGSTNotFeeded();
@@ -408,8 +542,7 @@ const TallyTools = () => {
     }).format(value);
   };
 
-  const totalClosingDr = fetchedTBData?.reduce((sum, line) => sum + line.closingDr, 0) || 0;
-  const totalClosingCr = fetchedTBData?.reduce((sum, line) => sum + line.closingCr, 0) || 0;
+  const totalClosingBalance = fetchedTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
 
   const handleDownloadBridgeApp = async () => {
     const zip = new JSZip();
@@ -846,6 +979,15 @@ For issues, contact your AuditPro administrator.
           Tally Bridge (Recommended)
         </Button>
         <Button
+          variant={connectionMode === "odbc" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setConnectionMode("odbc")}
+          disabled={isConnected}
+        >
+          <Database className="h-4 w-4 mr-2" />
+          ODBC Direct
+        </Button>
+        <Button
           variant={connectionMode === "excel" ? "default" : "outline"}
           size="sm"
           onClick={() => setConnectionMode("excel")}
@@ -921,7 +1063,61 @@ For issues, contact your AuditPro administrator.
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  onClick={() => tallyConnection.disconnect()}
+                  onClick={handleConnect}
+                  className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                >
+                  <Unplug className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ODBC Mode UI */}
+      {connectionMode === "odbc" && (
+        <div className="bg-muted/50 rounded-lg p-4 border space-y-4">
+          <div className="flex items-start gap-3">
+            <Database className="h-5 w-5 text-green-500 mt-0.5" />
+            <div className="text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">Direct ODBC Connection to Tally</p>
+              <p>Connect directly to Tally using ODBC. Ensure Tally is running with ODBC enabled and Python is installed on your system.</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-4 flex-wrap">
+            {isConnected ? (
+              <Button onClick={handleConnect} size="sm" variant="outline" className="border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950">
+                <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                ODBC Connected
+              </Button>
+            ) : (
+              <Button onClick={handleConnect} size="sm" disabled={isConnecting}>
+                {isConnecting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Testing Connection...
+                  </>
+                ) : (
+                  <>
+                    <Database className="h-4 w-4 mr-2" />
+                    Test ODBC Connection
+                  </>
+                )}
+              </Button>
+            )}
+
+            {/* Show connection status */}
+            {isConnected && (
+              <div className="flex items-center gap-4 ml-2 pl-4 border-l">
+                <div className="flex items-center gap-2">
+                  <Database className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium text-sm">ODBC Connection Active</span>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => odbcConnection.disconnect()}
                   className="h-7 px-2 text-muted-foreground hover:text-destructive"
                 >
                   <Unplug className="h-4 w-4" />
@@ -958,7 +1154,8 @@ For issues, contact your AuditPro administrator.
           status={isConnected ? "available" : "beta"}
           onClick={() => {
             if (!isConnected) {
-              toast({ title: "Not Connected", description: "Connect to Tally first using the Bridge app" });
+              const modeName = connectionMode === "bridge" ? "Bridge app" : connectionMode === "odbc" ? "ODBC" : "selected method";
+              toast({ title: "Not Connected", description: `Connect to Tally first using the ${modeName}` });
             } else {
               setShowTBDialog(true);
             }
@@ -1082,43 +1279,33 @@ For issues, contact your AuditPro administrator.
                   <table className="w-full text-sm">
                     <thead className="bg-muted sticky top-0">
                       <tr>
-                        <th className="text-left p-2 font-medium">Account Name</th>
-                        <th className="text-left p-2 font-medium">Primary Group</th>
-                        <th className="text-left p-2 font-medium">Parent</th>
-                        <th className="text-center p-2 font-medium text-xs">Type</th>
-                        <th className="text-right p-2 font-medium">Opening Dr</th>
-                        <th className="text-right p-2 font-medium">Opening Cr</th>
-                        <th className="text-right p-2 font-medium">Debit</th>
-                        <th className="text-right p-2 font-medium">Credit</th>
-                        <th className="text-right p-2 font-medium">Closing Dr</th>
-                        <th className="text-right p-2 font-medium">Closing Cr</th>
+                        <th className="text-left p-2 font-medium">Account Head</th>
+                        <th className="text-right p-2 font-medium">Opening Balance</th>
+                        <th className="text-right p-2 font-medium">Total Debit</th>
+                        <th className="text-right p-2 font-medium">Total Credit</th>
+                        <th className="text-right p-2 font-medium">Closing Balance</th>
+                        <th className="text-left p-2 font-medium">Account Code</th>
+                        <th className="text-left p-2 font-medium">Branch</th>
                       </tr>
                     </thead>
                     <tbody>
                       {fetchedTBData.map((line, idx) => (
                         <tr key={idx} className="border-t hover:bg-muted/50">
-                          <td className="p-2">{line.accountName}</td>
-                          <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                          <td className="p-2 text-muted-foreground text-xs">{line.parentGroup}</td>
-                          <td className="p-2 text-center">
-                            <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
-                              {line.isRevenue ? "P&L" : "BS"}
-                            </Badge>
-                          </td>
-                          <td className="p-2 text-right font-mono text-xs">{line.openingDr > 0 ? formatCurrency(line.openingDr) : '-'}</td>
-                          <td className="p-2 text-right font-mono text-xs">{line.openingCr > 0 ? formatCurrency(line.openingCr) : '-'}</td>
-                          <td className="p-2 text-right font-mono text-xs">{line.debitTotals > 0 ? formatCurrency(line.debitTotals) : '-'}</td>
-                          <td className="p-2 text-right font-mono text-xs">{line.creditTotals > 0 ? formatCurrency(line.creditTotals) : '-'}</td>
-                          <td className="p-2 text-right font-mono">{line.closingDr > 0 ? formatCurrency(line.closingDr) : '-'}</td>
-                          <td className="p-2 text-right font-mono">{line.closingCr > 0 ? formatCurrency(line.closingCr) : '-'}</td>
+                          <td className="p-2">{line.accountHead}</td>
+                          <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.openingBalance)}</td>
+                          <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.totalDebit)}</td>
+                          <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.totalCredit)}</td>
+                          <td className="p-2 text-right font-mono">{formatCurrency(line.closingBalance)}</td>
+                          <td className="p-2 text-muted-foreground text-xs">{line.accountCode}</td>
+                          <td className="p-2 text-muted-foreground text-xs">{line.branch}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot className="bg-muted font-medium sticky bottom-0">
                       <tr className="border-t-2">
-                        <td colSpan={8} className="p-2 text-right">Total Closing:</td>
-                        <td className="p-2 text-right font-mono">{formatCurrency(totalClosingDr)}</td>
-                        <td className="p-2 text-right font-mono">{formatCurrency(totalClosingCr)}</td>
+                        <td colSpan={4} className="p-2 text-right">Total Closing Balance:</td>
+                        <td className="p-2 text-right font-mono">{formatCurrency(totalClosingBalance)}</td>
+                        <td colSpan={2}></td>
                       </tr>
                     </tfoot>
                   </table>
@@ -1127,10 +1314,13 @@ For issues, contact your AuditPro administrator.
                 {/* Summary & Save */}
                 <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
                   <div className="text-sm text-muted-foreground">
-                    {fetchedTBData.length} accounts ({fetchedTBData.filter(l => l.isRevenue).length} P&L, {fetchedTBData.filter(l => !l.isRevenue).length} BS) • 
-                    Difference: {formatCurrency(Math.abs(totalClosingDr - totalClosingCr))}
-                    {totalClosingDr !== totalClosingCr && (
-                      <Badge variant="destructive" className="ml-2 text-xs">Unbalanced</Badge>
+                    {fetchedTBData.length} accounts • 
+                    Total Closing Balance: {formatCurrency(totalClosingBalance)}
+                    {Math.abs(totalClosingBalance) > 0.01 && (
+                      <Badge variant="destructive" className="ml-2 text-xs">Out of Balance</Badge>
+                    )}
+                    {Math.abs(totalClosingBalance) <= 0.01 && (
+                      <Badge variant="default" className="ml-2 text-xs bg-green-500">Balanced</Badge>
                     )}
                   </div>
                   <div className="flex gap-2">

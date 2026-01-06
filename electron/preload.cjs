@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on(channel, (event, ...args) => func(...args));
     }
   },
+  // ODBC methods
+  odbcTestConnection: () => ipcRenderer.invoke('odbc-test-connection'),
+  odbcFetchTrialBalance: () => ipcRenderer.invoke('odbc-fetch-trial-balance'),
+  odbcFetchMonthWise: (fyStartYear, targetMonth) => ipcRenderer.invoke('odbc-fetch-month-wise', fyStartYear, targetMonth),
+  odbcDisconnect: () => ipcRenderer.invoke('odbc-disconnect'),
 });
 
 // Log when preload script is loaded
