@@ -112,6 +112,7 @@ const ComplianceApplicability: React.FC = () => {
 
       const small_company =
         is_company &&
+        constitution !== "Public Limited Company (Unlisted)" &&
         !is_listed &&
         !is_opc &&
         !is_section8 &&
@@ -150,9 +151,10 @@ const ComplianceApplicability: React.FC = () => {
       let ifc = "";
       if (!is_company) ifc = "Not Applicable";
       else if (is_listed) ifc = "Yes";
+      else if (constitution === "Public Limited Company (Unlisted)") ifc = "Yes";
       else if (
-        constitution === "Public Limited Company (Unlisted)" &&
-        (cy_capital >= 500_000_000 || py_turnover >= 2_500_000_000 || py_borrowings >= 250_000_000)
+        constitution === "Private Limited Company" &&
+        (py_turnover >= 500_000_000 || py_borrowings >= 250_000_000)
       ) {
         ifc = "Yes";
       } else ifc = "No";
