@@ -66,7 +66,8 @@ export interface TallyMonthWiseLine {
 
 export interface TallyMonthWiseResponse {
   success: boolean;
-  lines: TallyMonthWiseLine[];
+  plLines: TallyMonthWiseLine[];
+  bsLines: TallyMonthWiseLine[];
   months: string[];
   fyStartYear: number;
   targetMonth: string;

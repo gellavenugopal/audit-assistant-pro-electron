@@ -43,40 +43,6 @@ export interface TallyGSTNotFeedLine {
   gstRegistrationType?: string; // Alias for compatibility
 }
 
-// Extend Window interface for Electron API
-declare global {
-  interface Window {
-    electronAPI: {
-      odbcCheckConnection: () => Promise<{ success: boolean; isConnected?: boolean; error?: string }>;
-      odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
-      odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
-      odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
-      odbcFetchOldTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
-      odbcFetchNewTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
-      odbcCompareOpeningBalances: (data: { oldData: any[]; newData: any[] }) => Promise<{
-        success: boolean;
-        error?: string;
-        comparison?: {
-          balanceMismatches: any[];
-          nameMismatches: any[];
-        };
-        xml?: string;
-      }>;
-      odbcFetchMonthWiseData: (data: { fyStartYear: number; targetMonth: string }) => Promise<{
-        success: boolean;
-        error?: string;
-        lines?: any[];
-        months?: string[];
-      }>;
-      odbcFetchGSTNotFeeded: () => Promise<{
-        success: boolean;
-        error?: string;
-        lines?: any[];
-      }>;
-    };
-  }
-}
-
 import { useOpeningBalanceMatching } from "@/hooks/useOpeningBalanceMatching";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "lucide-react";
@@ -164,10 +130,10 @@ const TallyTools = () => {
   
   // Month wise data fetch state
   const [showMonthWiseDialog, setShowMonthWiseDialog] = useState(false);
-  const [mwFyStartYear, setMwFyStartYear] = useState(new Date().getFullYear());
+  const [mwFyStartYear, setMwFyStartYear] = useState(new Date().getFullYear() - 1);
   const [mwTargetMonth, setMwTargetMonth] = useState("Mar");
   const [isFetchingMW, setIsFetchingMW] = useState(false);
-  const [fetchedMWData, setFetchedMWData] = useState<{ lines: TallyMonthWiseLine[]; months: string[] } | null>(null);
+  const [fetchedMWData, setFetchedMWData] = useState<{ plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[] } | null>(null);
   
   // GST Not Feeded state
   const [showGSTNotFeedDialog, setShowGSTNotFeedDialog] = useState(false);
@@ -226,45 +192,65 @@ const TallyTools = () => {
   const handleExportToExcel = () => {
     if (!fetchedTBData || fetchedTBData.length === 0) return;
 
+    // Function to get category
+    const getCategory = (primaryGroup: string, isRevenue: boolean) => {
+      const assetGroups = ['Fixed Assets', 'Current Assets', 'Investments', 'Loans & Advances', 'Cash-in-hand', 'Bank Accounts', 'Deposits (Asset)', 'Stock-in-hand', 'Miscellaneous Expenses (Asset)', 'Advance Tax', 'Sundry Debtors'];
+      const liabilityGroups = ['Capital Account', 'Loans (Liability)', 'Current Liabilities', 'Provisions', 'Reserves & Surplus', 'Sundry Creditors', 'Duties & Taxes', 'Secured Loans', 'Unsecured Loans'];
+      const incomeGroups = ['Sales Accounts', 'Direct Income', 'Indirect Income', 'Service Income'];
+      const expenseGroups = ['Direct Expenses', 'Indirect Expenses', 'Administrative Expenses', 'Selling Expenses', 'Miscellaneous Expenses'];
+
+      const lowerGroup = primaryGroup.toLowerCase();
+
+      if (assetGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Asset';
+      if (liabilityGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Liability';
+      if (incomeGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Income';
+      if (expenseGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Expense';
+
+      // Default based on isRevenue
+      return isRevenue ? 'Income' : 'Asset';
+    };
+
     // Function to build hierarchy levels
     const buildHierarchy = (data: TallyTrialBalanceLine[]) => {
       return data.map(line => {
         const hierarchy = [line.accountHead];
+        const category = getCategory(line.primaryGroup, line.isRevenue);
         
-        // Build hierarchy based on primary group and revenue type
-        if (line.isRevenue) {
-          // Revenue accounts
-          hierarchy.push(line.parent || 'Revenue Accounts');
+        // Build hierarchy based on category
+        if (category === 'Income') {
+          hierarchy.push(line.parent || 'Income Accounts');
           hierarchy.push('Revenue from Operations');
           hierarchy.push('Income');
-          hierarchy.push(''); // Level 5
-        } else {
-          // Balance sheet accounts
+          hierarchy.push('');
+        } else if (category === 'Expense') {
+          hierarchy.push(line.parent || 'Expense Accounts');
+          hierarchy.push('Expenses');
+          hierarchy.push('Expense');
+          hierarchy.push('');
+        } else if (category === 'Asset') {
           hierarchy.push(line.parent || line.primaryGroup);
-          
-          // Determine main category based on primary group
           if (['Bank Accounts', 'Cash-in-hand', 'Deposits', 'Loans & Advances', 'Sundry Debtors'].includes(line.primaryGroup)) {
             hierarchy.push('Current Assets');
-            hierarchy.push('Assets');
-            hierarchy.push('');
-          } else if (['Sundry Creditors', 'Duties & Taxes', 'Provisions'].includes(line.primaryGroup)) {
-            hierarchy.push('Current Liabilities');
-            hierarchy.push('Liabilities');
-            hierarchy.push('');
-          } else if (['Share Capital', 'Reserves & Surplus'].includes(line.primaryGroup)) {
-            hierarchy.push('Shareholders\' Funds');
-            hierarchy.push('Liabilities');
-            hierarchy.push('');
-          } else if (['Fixed Assets', 'Investments'].includes(line.primaryGroup)) {
-            hierarchy.push('Non-Current Assets');
-            hierarchy.push('Assets');
-            hierarchy.push('');
           } else {
-            // Default categorization
-            hierarchy.push(line.primaryGroup);
-            hierarchy.push('Assets'); // Default to assets
-            hierarchy.push('');
+            hierarchy.push('Non-Current Assets');
           }
+          hierarchy.push('Asset');
+          hierarchy.push('');
+        } else if (category === 'Liability') {
+          hierarchy.push(line.parent || line.primaryGroup);
+          if (['Sundry Creditors', 'Duties & Taxes', 'Provisions'].includes(line.primaryGroup)) {
+            hierarchy.push('Current Liabilities');
+          } else {
+            hierarchy.push('Non-Current Liabilities');
+          }
+          hierarchy.push('Liability');
+          hierarchy.push('');
+        } else {
+          // Default
+          hierarchy.push(line.parent || line.primaryGroup);
+          hierarchy.push(category);
+          hierarchy.push('');
+          hierarchy.push('');
         }
         
         return {
@@ -272,8 +258,8 @@ const TallyTools = () => {
           "Parent 1": hierarchy[1],
           "Parent 2": hierarchy[2],
           "Parent 3": hierarchy[3],
-          "Parent 4": hierarchy[4],
-          "Parent 5": hierarchy[5] || '',
+          "Parent 4": hierarchy[4] || '',
+          "Category": category,
         };
       });
     };
@@ -313,7 +299,7 @@ const TallyTools = () => {
       { wch: 25 }, // Parent 2
       { wch: 20 }, // Parent 3
       { wch: 20 }, // Parent 4
-      { wch: 20 }, // Parent 5
+      { wch: 15 }, // Category
     ];
     hierarchyWs['!cols'] = hierarchyColWidths;
     XLSX.utils.book_append_sheet(wb, hierarchyWs, "Hierarchy");
@@ -342,23 +328,16 @@ const TallyTools = () => {
     
     setIsFetchingMW(true);
     try {
-      if (!window.electronAPI || typeof window.electronAPI.odbcFetchMonthWiseData !== 'function') {
-        throw new Error('Electron API not available. Please restart the application.');
-      }
+      const result = await odbcConnection.fetchMonthWise(mwFyStartYear, mwTargetMonth);
       
-      const result = await window.electronAPI.odbcFetchMonthWiseData({
-        fyStartYear: mwFyStartYear,
-        targetMonth: mwTargetMonth,
-      });
-      
-      if (result && result.success) {
-        setFetchedMWData({ lines: result.lines, months: result.months });
+      if (result) {
+        setFetchedMWData(result);
         toast({
           title: "Month wise Data Fetched",
-          description: `Retrieved ${result.lines.length} ledger accounts for ${result.months.join(", ")}`,
+          description: `Retrieved ${result.plLines.length + result.bsLines.length} ledger accounts (${result.plLines.length} P&L, ${result.bsLines.length} BS) for ${result.months.join(", ")}`,
         });
       } else {
-        throw new Error(result?.error || "Failed to fetch month wise data");
+        throw new Error("Failed to fetch month wise data");
       }
     } catch (error) {
       toast({
@@ -372,13 +351,19 @@ const TallyTools = () => {
   };
 
   const handleExportMonthWiseToExcel = () => {
-    if (!fetchedMWData || fetchedMWData.lines.length === 0) return;
+    if (!fetchedMWData || (fetchedMWData.plLines.length === 0 && fetchedMWData.bsLines.length === 0)) return;
     
-    const { lines, months } = fetchedMWData;
+    const { plLines: plItems, bsLines: bsItems, months } = fetchedMWData;
     
-    // Separate P&L and Balance Sheet items
-    const plItems = lines.filter(line => line.isRevenue);
-    const bsItems = lines.filter(line => !line.isRevenue);
+    // Sort items
+    plItems.sort((a, b) => {
+      if (a.primaryGroup !== b.primaryGroup) return a.primaryGroup.localeCompare(b.primaryGroup);
+      return a.accountName.localeCompare(b.accountName);
+    });
+    bsItems.sort((a, b) => {
+      if (a.primaryGroup !== b.primaryGroup) return a.primaryGroup.localeCompare(b.primaryGroup);
+      return a.accountName.localeCompare(b.accountName);
+    });
     
     const formatRow = (line: TallyMonthWiseLine, isPL: boolean) => {
       const row: Record<string, string | number> = {
@@ -988,7 +973,7 @@ const TallyTools = () => {
             </div>
 
             {/* Results Table */}
-            {fetchedMWData && fetchedMWData.lines.length > 0 && (
+            {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (
               <div className="border rounded-lg overflow-hidden">
                 <div className="max-h-[400px] overflow-auto">
                   <table className="w-full text-sm">
@@ -1003,7 +988,7 @@ const TallyTools = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {fetchedMWData.lines.slice(0, 100).map((line, idx) => (
+                      {[...fetchedMWData.plLines, ...fetchedMWData.bsLines].slice(0, 100).map((line, idx) => (
                         <tr key={idx} className="border-t hover:bg-muted/50">
                           <td className="p-2">{line.accountName}</td>
                           <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
@@ -1028,8 +1013,8 @@ const TallyTools = () => {
                 {/* Summary & Export */}
                 <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
                   <div className="text-sm text-muted-foreground">
-                    {fetchedMWData.lines.length} accounts ({fetchedMWData.lines.filter(l => l.isRevenue).length} P&L, {fetchedMWData.lines.filter(l => !l.isRevenue).length} BS)
-                    {fetchedMWData.lines.length > 100 && (
+                    {fetchedMWData.plLines.length + fetchedMWData.bsLines.length} accounts ({fetchedMWData.plLines.length} P&L, {fetchedMWData.bsLines.length} BS)
+                    {(fetchedMWData.plLines.length + fetchedMWData.bsLines.length) > 100 && (
                       <span className="ml-2 text-amber-600">(showing first 100)</span>
                     )}
                   </div>
@@ -1046,7 +1031,7 @@ const TallyTools = () => {
               </div>
             )}
 
-            {fetchedMWData && fetchedMWData.lines.length === 0 && (
+            {fetchedMWData && fetchedMWData.plLines.length === 0 && fetchedMWData.bsLines.length === 0 && (
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>

@@ -62,12 +62,53 @@ def fetch_ledger_data(conn):
         df['$DebitTotals'] = df['$DebitTotals'].abs()
         df['$CreditTotals'] = df['$CreditTotals'].abs()
 
+        # Add Category based on Primary Group
+        df['Category'] = df['$_PrimaryGroup'].apply(get_category)
+
         return df
 
     except Exception as e:
         logging.error(f"Error fetching data from Tally: {e}")
         print(f"Error fetching data from Tally: {e}")
         return pd.DataFrame() # Return empty DF on failure
+
+def get_category(primary_group):
+    """
+    Maps the primary group to one of the four main categories: Asset, Liability, Income, Expense.
+    """
+    if not primary_group:
+        return 'Other'
+    
+    asset_groups = [
+        'Fixed Assets', 'Current Assets', 'Investments', 'Loans & Advances', 
+        'Cash-in-hand', 'Bank Accounts', 'Deposits (Asset)', 'Stock-in-hand', 
+        'Miscellaneous Expenses (Asset)', 'Advance Tax', 'Sundry Debtors'
+    ]
+    liability_groups = [
+        'Capital Account', 'Loans (Liability)', 'Current Liabilities', 'Provisions', 
+        'Reserves & Surplus', 'Sundry Creditors', 'Duties & Taxes', 'Secured Loans', 
+        'Unsecured Loans', 'Branch / Divisions'
+    ]
+    income_groups = [
+        'Sales Accounts', 'Direct Income', 'Indirect Income', 'Service Income'
+    ]
+    expense_groups = [
+        'Direct Expenses', 'Indirect Expenses', 'Administrative Expenses', 
+        'Selling Expenses', 'Miscellaneous Expenses'
+    ]
+    
+    primary_group_lower = str(primary_group).lower()
+    
+    if any(ag.lower() in primary_group_lower or primary_group_lower in ag.lower() for ag in asset_groups):
+        return 'Asset'
+    elif any(lg.lower() in primary_group_lower or primary_group_lower in lg.lower() for lg in liability_groups):
+        return 'Liability'
+    elif any(ig.lower() in primary_group_lower or primary_group_lower in ig.lower() for ig in income_groups):
+        return 'Income'
+    elif any(eg.lower() in primary_group_lower or primary_group_lower in eg.lower() for eg in expense_groups):
+        return 'Expense'
+    else:
+        return 'Other'
 
 # ==========================================
 # 2. CORE REPORT LOGIC
@@ -80,7 +121,7 @@ def create_output_folders():
 
 def write_grouped_sheets(df, filename, folder, workbook_name):
     final_columns = [
-        '$Name', '$_PrimaryGroup', '$Parent', 'Opening_Dr', 'Opening_Cr',
+        '$Name', '$_PrimaryGroup', '$Parent', 'Category', 'Opening_Dr', 'Opening_Cr',
         '$DebitTotals', '$CreditTotals', 'Closing_Dr', 'Closing_Cr'
     ]
     # Ensure columns exist before filtering
@@ -88,12 +129,12 @@ def write_grouped_sheets(df, filename, folder, workbook_name):
     df = df[available_cols]
 
     summary_data = []
-    unique_groups = sorted(df['$_PrimaryGroup'].dropna().unique())
+    unique_groups = sorted(df['Category'].dropna().unique())
     
     for idx, group in enumerate(unique_groups, 1):
         if not group:
             group = "Unnamed_Group"
-        df_group = df[df['$_PrimaryGroup'] == group]
+        df_group = df[df['Category'] == group]
         
         # Calculate counts safely
         dr_count = len(df_group[df_group['Closing_Dr'] > 0])
@@ -187,7 +228,7 @@ def generate_trial_balance_reports(conn, trial_balance_folder):
     # 1. Generate Combined Trial Balance Excel
     trial_balance_filename = f"trial_balance_{timestamp}.xlsx"
     final_columns = [
-        '$Name', '$_PrimaryGroup', '$Parent', 'Opening_Dr', 'Opening_Cr',
+        '$Name', '$_PrimaryGroup', '$Parent', 'Category', 'Opening_Dr', 'Opening_Cr',
         '$DebitTotals', '$CreditTotals', 'Closing_Dr', 'Closing_Cr'
     ]
     
