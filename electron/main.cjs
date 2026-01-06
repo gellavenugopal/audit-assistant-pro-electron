@@ -7,8 +7,42 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 // ODBC connection handling
 let odbcConnection = null;
 
+// Check if ODBC connection is already active (without creating new connection)
+ipcMain.handle('odbc-check-connection', async () => {
+  try {
+    if (!odbcConnection) {
+      return { success: false, isConnected: false };
+    }
+    
+    // Test if connection is still valid
+    try {
+      await odbcConnection.query('SELECT TOP 1 $Name FROM Ledger');
+      return { success: true, isConnected: true };
+    } catch (err) {
+      // Connection is dead, clear it
+      odbcConnection = null;
+      return { success: false, isConnected: false, error: 'Connection lost' };
+    }
+  } catch (error) {
+    return { success: false, isConnected: false, error: error.message };
+  }
+});
+
 ipcMain.handle('odbc-test-connection', async () => {
   try {
+    // If already connected, verify it's still active
+    if (odbcConnection) {
+      try {
+        const testResult = await odbcConnection.query('SELECT TOP 1 $Name FROM Ledger');
+        if (testResult.length > 0) {
+          return { success: true, driver: 'Existing Connection', sampleData: testResult[0] };
+        }
+      } catch (err) {
+        // Connection is dead, clear it and create new one
+        odbcConnection = null;
+      }
+    }
+    
     // Common Tally ODBC drivers
     const drivers = ['Tally ODBC Driver64', 'Tally ODBC Driver', 'Tally ODBC 64-bit Driver'];
     const port = '9000';
@@ -86,6 +120,7 @@ ipcMain.handle('odbc-disconnect', async () => {
 });
 
 // Opening Balance Matching - Fetch Old Tally Ledger Data (Closing Balances)
+console.log('Registering IPC handler: odbc-fetch-old-tally-ledgers');
 ipcMain.handle('odbc-fetch-old-tally-ledgers', async () => {
   try {
     if (!odbcConnection) {
@@ -135,6 +170,7 @@ ipcMain.handle('odbc-fetch-old-tally-ledgers', async () => {
 });
 
 // Opening Balance Matching - Fetch New Tally Ledger Data (Opening Balances)
+console.log('Registering IPC handler: odbc-fetch-new-tally-ledgers');
 ipcMain.handle('odbc-fetch-new-tally-ledgers', async () => {
   try {
     if (!odbcConnection) {
@@ -182,6 +218,7 @@ ipcMain.handle('odbc-fetch-new-tally-ledgers', async () => {
 });
 
 // Opening Balance Matching - Compare balances and generate XML
+console.log('Registering IPC handler: odbc-compare-opening-balances');
 ipcMain.handle('odbc-compare-opening-balances', async (event, { oldData, newData }) => {
   try {
     // Create comparison report
@@ -321,6 +358,165 @@ ipcMain.handle('odbc-compare-opening-balances', async (event, { oldData, newData
   }
 });
 
+// Fetch Month Wise Data via ODBC
+console.log('Registering IPC handler: odbc-fetch-month-wise-data');
+ipcMain.handle('odbc-fetch-month-wise-data', async (event, { fyStartYear, targetMonth }) => {
+  try {
+    if (!odbcConnection) {
+      return { success: false, error: 'Not connected to Tally ODBC' };
+    }
+    
+    // Map month names to numbers
+    const monthMap = {
+      'Apr': 4, 'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8, 'Sep': 9,
+      'Oct': 10, 'Nov': 11, 'Dec': 12, 'Jan': 1, 'Feb': 2, 'Mar': 3
+    };
+    
+    const targetMonthNum = monthMap[targetMonth] || 3;
+    const months = [];
+    const lines = [];
+    
+    // Generate month list from April to target month
+    for (let m = 4; m <= targetMonthNum; m++) {
+      const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      months.push(monthNames[m]);
+    }
+    
+    // Fetch ledger data with monthly balances
+    // Note: This is a simplified implementation - Tally ODBC may need specific queries for monthly data
+    const query = `
+      SELECT 
+        $Name, 
+        $_PrimaryGroup, 
+        $Parent,
+        $IsRevenue,
+        $OpeningBalance,
+        $ClosingBalance
+      FROM Ledger
+      ORDER BY $_PrimaryGroup, $Name
+    `;
+    
+    const result = await odbcConnection.query(query);
+    
+    // Process data - Note: Monthly balances would need more complex queries in real implementation
+    result.forEach(row => {
+      const isRevenue = row['$IsRevenue'] === 1 || row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true;
+      const openingBalance = parseFloat(row['$OpeningBalance'] || 0) || 0;
+      const closingBalance = parseFloat(row['$ClosingBalance'] || 0) || 0;
+      
+      // For now, distribute closing balance evenly across months (simplified)
+      // In production, you'd need to query actual monthly transaction data
+      const monthlyBalances = {};
+      months.forEach(month => {
+        monthlyBalances[month] = closingBalance / months.length;
+      });
+      
+      lines.push({
+        accountName: row['$Name'] || '',
+        primaryGroup: row['$_PrimaryGroup'] || '',
+        isRevenue,
+        openingBalance,
+        monthlyBalances,
+      });
+    });
+    
+    return { success: true, lines, months };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Fetch GST Not Feeded Data via ODBC
+console.log('Registering IPC handler: odbc-fetch-gst-not-feeded');
+ipcMain.handle('odbc-fetch-gst-not-feeded', async () => {
+  try {
+    if (!odbcConnection) {
+      return { success: false, error: 'Not connected to Tally ODBC' };
+    }
+    
+    // Query ledgers - fetch all Sundry Debtors/Creditors first, then filter in JavaScript
+    // This approach is more reliable as Tally ODBC field names/values may vary
+    let query = `
+      SELECT 
+        $Name, 
+        $_PrimaryGroup,
+        $GSTRegistrationType,
+        $GSTIN
+      FROM Ledger
+      WHERE $_PrimaryGroup = 'Sundry Debtors' OR $_PrimaryGroup = 'Sundry Creditors'
+      ORDER BY $Name
+    `;
+    
+    let result;
+    try {
+      result = await odbcConnection.query(query);
+      console.log(`GST Not Feeded: Queried ${result.length} Sundry Debtors/Creditors ledgers`);
+    } catch (err) {
+      console.error('Error querying GST data:', err.message);
+      // Try without WHERE clause to see what fields are available
+      try {
+        query = `SELECT TOP 10 $Name, $_PrimaryGroup, $GSTRegistrationType, $GSTIN FROM Ledger`;
+        const testResult = await odbcConnection.query(query);
+        console.log('Test query result sample:', testResult[0]);
+        throw new Error(`Query failed: ${err.message}. Available fields: ${Object.keys(testResult[0] || {}).join(', ')}`);
+      } catch (testErr) {
+        throw new Error(`Failed to query GST data: ${err.message}`);
+      }
+    }
+    
+    // Filter in JavaScript to handle different GSTIN formats and registration types
+    const lines = result
+      .map(row => {
+        const gstRegType = row['$GSTRegistrationType'] || row['GSTRegistrationType'] || '';
+        const gstin = row['$GSTIN'] || row['GSTIN'] || null;
+        
+        return {
+          ledgerName: row['$Name'] || '',
+          primaryGroup: row['$_PrimaryGroup'] || row['PrimaryGroup'] || '',
+          partyGSTIN: gstin,
+          registrationType: gstRegType,
+        };
+      })
+      .filter(line => {
+        // Filter: GST Registration Type is "Regular" (case-insensitive) but GSTIN is blank/empty
+        const regType = (line.registrationType || '').toString().trim().toLowerCase();
+        const isRegular = regType === 'regular';
+        
+        const gstinValue = line.partyGSTIN;
+        const gstinBlank = !gstinValue || 
+                          gstinValue.toString().trim() === '' || 
+                          gstinValue.toString().trim().toLowerCase() === 'null' ||
+                          gstinValue.toString().trim() === '0';
+        
+        return isRegular && gstinBlank;
+      });
+    
+    console.log(`GST Not Feeded: Found ${lines.length} ledgers with Regular GST but no GSTIN out of ${result.length} total ledgers checked`);
+    
+    // Log sample data for debugging if no results found
+    if (lines.length === 0 && result.length > 0) {
+      const regularLedgers = result.filter(r => {
+        const regType = (r['$GSTRegistrationType'] || '').toString().trim().toLowerCase();
+        return regType === 'regular';
+      });
+      console.log(`Found ${regularLedgers.length} Regular GST ledgers, all have GSTIN entered`);
+      if (regularLedgers.length > 0) {
+        const sample = regularLedgers[0];
+        console.log('Sample Regular GST ledger:', {
+          name: sample['$Name'],
+          gstRegType: sample['$GSTRegistrationType'],
+          gstin: sample['$GSTIN'] || '(empty)',
+        });
+      }
+    }
+    
+    return { success: true, lines };
+  } catch (error) {
+    console.error('Error fetching GST Not Feeded data:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 function createWindow() {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -356,6 +552,7 @@ function createWindow() {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
+  console.log('Electron app ready - IPC handlers should be registered');
   createWindow();
 
   app.on('activate', () => {

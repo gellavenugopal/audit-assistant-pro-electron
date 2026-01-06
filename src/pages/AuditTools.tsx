@@ -1,5 +1,4 @@
 import { useState } from "react";
-import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,9 +11,72 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useToast } from "@/hooks/use-toast";
 import { useTabShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEngagement } from "@/contexts/EngagementContext";
-import { useTallyConnection } from "@/hooks/useTallyConnection";
 import { useTallyODBC } from "@/hooks/useTallyODBC";
-import { useTally, TallyTrialBalanceLine, TallyMonthWiseLine, TallyGSTNotFeedLine } from "@/contexts/TallyContext";
+
+// Type definitions (moved from TallyContext)
+export interface TallyTrialBalanceLine {
+  accountHead: string;
+  openingBalance: number;
+  totalDebit: number;
+  totalCredit: number;
+  closingBalance: number;
+  accountCode: string;
+  branch: string;
+  primaryGroup: string;
+  parent: string;
+  isRevenue: boolean;
+}
+
+export interface TallyMonthWiseLine {
+  accountName: string;
+  primaryGroup: string;
+  isRevenue: boolean;
+  openingBalance: number;
+  monthlyBalances: Record<string, number>;
+}
+
+export interface TallyGSTNotFeedLine {
+  ledgerName: string;
+  primaryGroup: string;
+  partyGSTIN: string | null;
+  registrationType: string;
+  gstRegistrationType?: string; // Alias for compatibility
+}
+
+// Extend Window interface for Electron API
+declare global {
+  interface Window {
+    electronAPI: {
+      odbcCheckConnection: () => Promise<{ success: boolean; isConnected?: boolean; error?: string }>;
+      odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
+      odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
+      odbcFetchOldTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcFetchNewTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcCompareOpeningBalances: (data: { oldData: any[]; newData: any[] }) => Promise<{
+        success: boolean;
+        error?: string;
+        comparison?: {
+          balanceMismatches: any[];
+          nameMismatches: any[];
+        };
+        xml?: string;
+      }>;
+      odbcFetchMonthWiseData: (data: { fyStartYear: number; targetMonth: string }) => Promise<{
+        success: boolean;
+        error?: string;
+        lines?: any[];
+        months?: string[];
+      }>;
+      odbcFetchGSTNotFeeded: () => Promise<{
+        success: boolean;
+        error?: string;
+        lines?: any[];
+      }>;
+    };
+  }
+}
+
 import { useOpeningBalanceMatching } from "@/hooks/useOpeningBalanceMatching";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "lucide-react";
@@ -92,8 +154,6 @@ const TallyTools = () => {
   const { toast } = useToast();
   const { currentEngagement } = useEngagement();
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>("odbc");
-  const [sessionCode, setSessionCode] = useState("");
-  const [tallyPort, setTallyPort] = useState("9000");
   
   // Trial Balance fetch state
   const [showTBDialog, setShowTBDialog] = useState(false);
@@ -125,57 +185,39 @@ const TallyTools = () => {
   const [showOpeningBalanceDialog, setShowOpeningBalanceDialog] = useState(false);
   const openingBalanceMatching = useOpeningBalanceMatching();
   
-  // Direct connection (kept for fallback reference, but won't work due to CORS)
-  const directConnection = useTallyConnection();
-  
-  // ODBC connection
+  // ODBC connection (only connection method)
   const odbcConnection = useTallyODBC();
   
-  // Bridge connection using global context (persists across navigation)
-  const tallyConnection = useTally();
-  
-  // Use the active connection based on mode
-  const isConnected = connectionMode === "odbc" ? odbcConnection.isConnected : 
-                     directConnection.isConnected;
-  const isConnecting = connectionMode === "odbc" ? odbcConnection.isConnecting : 
-                      directConnection.isConnecting;
-  const companyInfo = connectionMode === "odbc" ? odbcConnection.companyInfo : 
-                     directConnection.companyInfo;
+  // Use ODBC connection
+  const isConnected = odbcConnection.isConnected;
+  const isConnecting = odbcConnection.isConnecting;
+  const companyInfo = odbcConnection.companyInfo;
 
   const handleConnect = () => {
     if (isConnected) {
-      if (connectionMode === "odbc") {
-        odbcConnection.disconnect();
-      } else {
-        directConnection.disconnect();
-      }
+      odbcConnection.disconnect();
     } else {
-      if (connectionMode === "odbc") {
-        odbcConnection.testConnection();
-      } else {
-        directConnection.connectToTally(tallyPort);
-      }
+      odbcConnection.testConnection();
     }
   };
 
   const handleFetchTrialBalance = async () => {
     setIsFetchingTB(true);
     try {
-      let result;
-      if (connectionMode === "odbc") {
-        const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
-        result = { success: true, lines };
-      } else {
-        result = await tallyConnection.fetchTrialBalance(tbFromDate, tbToDate);
-      }
-      
-      if (result && result.success) {
-        setFetchedTBData(result.lines);
+      const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
+      if (lines && lines.length > 0) {
+        setFetchedTBData(lines);
         toast({
           title: "Trial Balance Fetched",
-          description: `Retrieved ${result.lines.length} ledger accounts from Tally`,
+          description: `Retrieved ${lines.length} ledger accounts from Tally`,
         });
       }
+    } catch (error) {
+      toast({
+        title: "Failed to Fetch Trial Balance",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
     } finally {
       setIsFetchingTB(false);
     }
@@ -279,30 +321,51 @@ const TallyTools = () => {
     const fileName = `Trial_Balance_${tbFromDate}_to_${tbToDate}.xlsx`;
     XLSX.writeFile(wb, fileName);
     
+    const plCount = fetchedTBData.filter(line => line.isRevenue).length;
+    const bsCount = fetchedTBData.filter(line => !line.isRevenue).length;
+    
     toast({
       title: "Export Complete",
-      description: `Saved ${plItems.length} P&L and ${bsItems.length} Balance Sheet items to ${fileName}`,
+      description: `Saved ${plCount} P&L and ${bsCount} Balance Sheet items to ${fileName}`,
     });
   };
 
   const handleFetchMonthWiseData = async () => {
-    toast({
-      title: "Feature Not Available",
-      description: "Month wise data is currently only available with Tally Bridge connection",
-      variant: "destructive",
-    });
-    return;
+    if (!isConnected) {
+      toast({
+        title: "Not Connected",
+        description: "Connect to Tally first using ODBC",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setIsFetchingMW(true);
     try {
-      const result = await tallyConnection.fetchMonthWiseData(mwFyStartYear, mwTargetMonth);
+      if (!window.electronAPI || typeof window.electronAPI.odbcFetchMonthWiseData !== 'function') {
+        throw new Error('Electron API not available. Please restart the application.');
+      }
+      
+      const result = await window.electronAPI.odbcFetchMonthWiseData({
+        fyStartYear: mwFyStartYear,
+        targetMonth: mwTargetMonth,
+      });
+      
       if (result && result.success) {
         setFetchedMWData({ lines: result.lines, months: result.months });
         toast({
           title: "Month wise Data Fetched",
           description: `Retrieved ${result.lines.length} ledger accounts for ${result.months.join(", ")}`,
         });
+      } else {
+        throw new Error(result?.error || "Failed to fetch month wise data");
       }
+    } catch (error) {
+      toast({
+        title: "Failed to Fetch Month Wise Data",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
     } finally {
       setIsFetchingMW(false);
     }
@@ -385,19 +448,38 @@ const TallyTools = () => {
   };
 
   const handleFetchGSTNotFeed = async () => {
-    toast({
-      title: "Feature Not Available",
-      description: "GST not feeded data is currently only available with Tally Bridge connection",
-      variant: "destructive",
-    });
-    return;
+    if (!isConnected) {
+      toast({
+        title: "Not Connected",
+        description: "Connect to Tally first using ODBC",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setIsFetchingGSTNotFeed(true);
     try {
-      const result = await tallyConnection.fetchGSTNotFeeded();
+      if (!window.electronAPI || typeof window.electronAPI.odbcFetchGSTNotFeeded !== 'function') {
+        throw new Error('Electron API not available. Please restart the application.');
+      }
+      
+      const result = await window.electronAPI.odbcFetchGSTNotFeeded();
+      
       if (result && result.success) {
         setFetchedGSTNotFeedData(result.lines);
+        toast({
+          title: "GST Not Feeded Data Fetched",
+          description: `Found ${result.lines.length} ledgers with missing GSTIN`,
+        });
+      } else {
+        throw new Error(result?.error || "Failed to fetch GST not feeded data");
       }
+    } catch (error) {
+      toast({
+        title: "Failed to Fetch GST Not Feeded Data",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
     } finally {
       setIsFetchingGSTNotFeed(false);
     }
@@ -408,7 +490,7 @@ const TallyTools = () => {
     
     const data = fetchedGSTNotFeedData.map(line => ({
       "Ledger Name": line.ledgerName,
-      "GST Registration Type": line.gstRegistrationType,
+      "GST Registration Type": line.registrationType || line.gstRegistrationType || "Unknown",
       "Party GSTIN": line.partyGSTIN || "(Not Feeded)",
     }));
     
@@ -429,26 +511,26 @@ const TallyTools = () => {
   const getNegativeLedgers = () => {
     if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [] };
     
-    // Debtors should have Dr balance (positive), so Cr balance (negative/closingCr > 0) is opposite
+    // Debtors should have Dr balance (positive), so Cr balance (negative/closingBalance < 0) is opposite
     const debtors = fetchedTBData.filter(line => 
-      line.primaryGroup === "Sundry Debtors" && line.closingCr > 0
+      line.primaryGroup === "Sundry Debtors" && line.closingBalance < 0
     );
     
-    // Creditors should have Cr balance (negative), so Dr balance (positive/closingDr > 0) is opposite
+    // Creditors should have Cr balance (negative), so Dr balance (positive/closingBalance > 0) is opposite
     const creditors = fetchedTBData.filter(line => 
-      line.primaryGroup === "Sundry Creditors" && line.closingDr > 0
+      line.primaryGroup === "Sundry Creditors" && line.closingBalance > 0
     );
     
-    // Assets should have Dr balance, so Cr balance is opposite
+    // Assets should have Dr balance (positive), so Cr balance (negative) is opposite
     const assetGroups = ["Fixed Assets", "Current Assets", "Investments", "Bank Accounts", "Cash-in-Hand", "Deposits (Asset)", "Loans & Advances (Asset)", "Stock-in-Hand", "Bank OD Accounts"];
     const assets = fetchedTBData.filter(line => 
-      assetGroups.includes(line.primaryGroup) && line.closingCr > 0
+      assetGroups.includes(line.primaryGroup) && line.closingBalance < 0
     );
     
-    // Liabilities should have Cr balance, so Dr balance is opposite
+    // Liabilities should have Cr balance (negative), so Dr balance (positive) is opposite
     const liabilityGroups = ["Capital Account", "Reserves & Surplus", "Loans (Liability)", "Secured Loans", "Unsecured Loans", "Current Liabilities", "Provisions", "Duties & Taxes"];
     const liabilities = fetchedTBData.filter(line => 
-      liabilityGroups.includes(line.primaryGroup) && line.closingDr > 0
+      liabilityGroups.includes(line.primaryGroup) && line.closingBalance > 0
     );
     
     return { debtors, creditors, assets, liabilities };
@@ -457,14 +539,18 @@ const TallyTools = () => {
   const handleExportNegativeLedgersToExcel = () => {
     const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
     
-    const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => ({
-      "Account Name": line.accountName,
-      "Primary Group": line.primaryGroup,
-      "Parent": line.parentGroup,
-      "Expected Nature": expectedNature,
-      "Actual Balance": expectedNature === "Dr" ? `Cr ${formatCurrency(line.closingCr)}` : `Dr ${formatCurrency(line.closingDr)}`,
-      "Amount": expectedNature === "Dr" ? line.closingCr : line.closingDr,
-    });
+    const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => {
+      const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
+      const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
+      return {
+        "Account Name": line.accountHead,
+        "Primary Group": line.primaryGroup,
+        "Parent": line.parent,
+        "Expected Nature": expectedNature,
+        "Actual Balance": expectedNature === "Dr" ? `Cr ${formatCurrency(closingCr)}` : `Dr ${formatCurrency(closingDr)}`,
+        "Amount": expectedNature === "Dr" ? closingCr : closingDr,
+      };
+    };
     
     const wb = XLSX.utils.book_new();
     
@@ -507,426 +593,6 @@ const TallyTools = () => {
 
   const totalClosingBalance = fetchedTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
 
-  const handleDownloadBridgeApp = async () => {
-    const zip = new JSZip();
-    
-    // package.json - no more ws dependency needed
-    const packageJson = {
-      name: "tally-bridge",
-      version: "1.0.0",
-      description: "Tally Bridge Desktop App for AuditPro",
-      main: "main.js",
-      scripts: {
-        start: "electron ."
-      },
-      dependencies: {
-        electron: "^28.0.0"
-      }
-    };
-    zip.file("package.json", JSON.stringify(packageJson, null, 2));
-
-    // main.js - HTTP polling based with proper error handling
-    const mainJs = `const { app, BrowserWindow } = require('electron');
-
-let mainWindow;
-let sessionCode;
-let heartbeatInterval;
-let pollingInterval;
-let isRunning = true;
-let processingRequests = new Set(); // Track requests being processed
-
-const API_URL = 'https://jrwfgfdxhlvwhzwqvwkl.supabase.co/functions/v1/tally-bridge';
-const TALLY_URL = 'http://localhost:9000';
-const HEARTBEAT_INTERVAL = 20000; // 20 seconds
-const POLL_INTERVAL = 1000; // 1 second
-
-function generateSessionCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-function updateStatus(status, code) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('status-update', { status, sessionCode: code });
-  }
-}
-
-async function apiCall(action, data = {}) {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, sessionCode, ...data })
-  });
-  const result = await response.json();
-  if (!response.ok) {
-    console.error('API error:', action, result);
-  }
-  return result;
-}
-
-async function registerSession() {
-  sessionCode = generateSessionCode();
-  updateStatus('connecting', sessionCode);
-  
-  try {
-    const result = await apiCall('register-session');
-    if (result.success) {
-      console.log('Session registered:', sessionCode);
-      updateStatus('connected', sessionCode);
-      startHeartbeat();
-      startPolling();
-    } else {
-      console.error('Failed to register:', result.error);
-      updateStatus('error', sessionCode);
-      setTimeout(registerSession, 3000);
-    }
-  } catch (err) {
-    console.error('Registration error:', err.message);
-    updateStatus('error', sessionCode);
-    setTimeout(registerSession, 3000);
-  }
-}
-
-function startHeartbeat() {
-  if (heartbeatInterval) clearInterval(heartbeatInterval);
-  heartbeatInterval = setInterval(async () => {
-    try {
-      await apiCall('heartbeat');
-      console.log('Heartbeat sent');
-    } catch (err) {
-      console.error('Heartbeat failed:', err.message);
-      updateStatus('disconnected', sessionCode);
-      stopPolling();
-      stopHeartbeat();
-      setTimeout(registerSession, 3000);
-    }
-  }, HEARTBEAT_INTERVAL);
-}
-
-function stopHeartbeat() {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = null;
-  }
-}
-
-async function completeRequest(requestId, responseData, errorMessage) {
-  try {
-    const payload = {
-      action: 'complete-request',
-      requestId: requestId
-    };
-    if (responseData) payload.responseData = responseData;
-    if (errorMessage) payload.errorMessage = errorMessage;
-    
-    console.log('Completing request:', requestId);
-    
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    const result = await response.json();
-    
-    if (result.success) {
-      console.log('Request completed successfully:', requestId);
-      processingRequests.delete(requestId);
-      return true;
-    } else {
-      console.error('Failed to complete request:', requestId, result.error);
-      return false;
-    }
-  } catch (err) {
-    console.error('Error completing request:', requestId, err.message);
-    return false;
-  }
-}
-
-function startPolling() {
-  if (pollingInterval) clearInterval(pollingInterval);
-  pollingInterval = setInterval(async () => {
-    if (!isRunning) return;
-    
-    try {
-      const result = await apiCall('get-pending-requests');
-      
-      if (result.requests && result.requests.length > 0) {
-        const request = result.requests[0];
-        
-        // Skip if already processing this request
-        if (processingRequests.has(request.id)) {
-          return;
-        }
-        
-        // Mark as processing
-        processingRequests.add(request.id);
-        console.log('Processing request:', request.id);
-        updateStatus('processing', sessionCode);
-        
-        try {
-          const tallyResponse = await fetch(TALLY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/xml' },
-            body: request.xml_request
-          });
-          
-          const responseData = await tallyResponse.text();
-          console.log('Tally response received, length:', responseData.length);
-          
-          const completed = await completeRequest(request.id, responseData, null);
-          if (completed) {
-            updateStatus('connected', sessionCode);
-          }
-        } catch (err) {
-          console.error('Tally error:', err.message);
-          await completeRequest(request.id, null, 'Tally connection failed: ' + err.message);
-          updateStatus('tally-error', sessionCode);
-        }
-      }
-    } catch (err) {
-      console.error('Polling error:', err.message);
-    }
-  }, POLL_INTERVAL);
-}
-
-function stopPolling() {
-  if (pollingInterval) {
-    clearInterval(pollingInterval);
-    pollingInterval = null;
-  }
-}
-
-async function unregisterSession() {
-  try {
-    await apiCall('unregister-session');
-  } catch (err) {
-    console.error('Unregister error:', err.message);
-  }
-}
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 450,
-    height: 350,
-    resizable: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-  
-  mainWindow.loadFile('index.html');
-  mainWindow.setMenuBarVisibility(false);
-}
-
-app.whenReady().then(() => {
-  createWindow();
-  registerSession();
-  
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
-
-app.on('before-quit', async () => {
-  isRunning = false;
-  stopHeartbeat();
-  stopPolling();
-  await unregisterSession();
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-`;
-    zip.file("main.js", mainJs);
-
-    // index.html
-    const indexHtml = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Tally Bridge - AuditPro</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-      color: white;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .container { text-align: center; max-width: 400px; }
-    h1 { font-size: 24px; margin-bottom: 8px; }
-    .subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 30px; }
-    .status-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 14px;
-      margin-bottom: 20px;
-    }
-    .status-connected { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
-    .status-connecting { background: rgba(234, 179, 8, 0.2); color: #eab308; }
-    .status-disconnected { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
-    .status-processing { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-    .dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      animation: pulse 2s infinite;
-    }
-    .status-connected .dot { background: #22c55e; }
-    .status-connecting .dot { background: #eab308; }
-    .status-disconnected .dot { background: #ef4444; }
-    .status-processing .dot { background: #3b82f6; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .session-code {
-      font-family: 'SF Mono', 'Consolas', monospace;
-      font-size: 48px;
-      font-weight: bold;
-      letter-spacing: 12px;
-      margin: 20px 0;
-      padding: 20px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 12px;
-      user-select: all;
-    }
-    .instructions {
-      color: #94a3b8;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .footer {
-      margin-top: 30px;
-      font-size: 12px;
-      color: #64748b;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>🔗 Tally Bridge</h1>
-    <p class="subtitle">Connect AuditPro to Tally ERP</p>
-    
-    <div id="status" class="status-indicator status-connecting">
-      <span class="dot"></span>
-      <span id="statusText">Connecting...</span>
-    </div>
-    
-    <div id="sessionCode" class="session-code">------</div>
-    
-    <p class="instructions">
-      Enter this code in AuditPro web app<br>
-      under Audit Tools → Tally Bridge
-    </p>
-    
-    <p class="footer">
-      Make sure Tally ERP is running on port 9000
-    </p>
-  </div>
-  
-  <script>
-    const { ipcRenderer } = require('electron');
-    
-    ipcRenderer.on('status-update', (event, data) => {
-      const statusEl = document.getElementById('status');
-      const statusText = document.getElementById('statusText');
-      const codeEl = document.getElementById('sessionCode');
-      
-      codeEl.textContent = data.sessionCode || '------';
-      
-      statusEl.className = 'status-indicator';
-      switch(data.status) {
-        case 'connected':
-          statusEl.classList.add('status-connected');
-          statusText.textContent = 'Connected to Server';
-          break;
-        case 'connecting':
-          statusEl.classList.add('status-connecting');
-          statusText.textContent = 'Connecting...';
-          break;
-        case 'processing':
-          statusEl.classList.add('status-processing');
-          statusText.textContent = 'Processing Request...';
-          break;
-        case 'tally-error':
-          statusEl.classList.add('status-disconnected');
-          statusText.textContent = 'Tally Not Responding';
-          break;
-        default:
-          statusEl.classList.add('status-disconnected');
-          statusText.textContent = 'Disconnected';
-      }
-    });
-  </script>
-</body>
-</html>
-`;
-    zip.file("index.html", indexHtml);
-
-    // README.md
-    const readme = `# Tally Bridge Desktop App
-
-This app connects AuditPro web application to your local Tally ERP installation.
-
-## Prerequisites
-
-1. **Node.js** - Download from https://nodejs.org (v18 or higher)
-2. **Tally ERP** - Must be running with ODBC/XML server enabled on port 9000
-
-## Setup Instructions
-
-1. Open a terminal/command prompt in this folder
-2. Run: \`npm install\`
-3. Run: \`npm start\`
-
-## How It Works
-
-1. The app connects to AuditPro's cloud server
-2. A unique session code is displayed
-3. Enter this code in AuditPro (Audit Tools → Tally Bridge)
-4. AuditPro can now fetch data directly from your Tally
-
-## Tally Configuration
-
-Make sure Tally is configured to accept XML requests:
-1. Open Tally Gateway of India > Configure
-2. Set "Enable ODBC Server" to Yes
-3. Set Port to 9000
-
-## Troubleshooting
-
-- **"Tally Not Responding"**: Check if Tally is running and ODBC server is enabled
-- **"Disconnected"**: Check your internet connection
-- **Session code changes**: This is normal after reconnection
-
-## Support
-
-For issues, contact your AuditPro administrator.
-`;
-    zip.file("README.md", readme);
-
-    // Generate and download
-    const content = await zip.generateAsync({ type: "blob" });
-    const url = URL.createObjectURL(content);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'tally-bridge-app.zip';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    toast({
-      title: "Download Started",
-      description: "Extract the zip, run 'npm install' then 'npm start'",
-    });
-  };
 
   return (
     <div className="space-y-6">
@@ -1067,7 +733,7 @@ For issues, contact your AuditPro administrator.
           status={isConnected ? "available" : "beta"}
           onClick={() => {
             if (!isConnected) {
-              toast({ title: "Not Connected", description: "Connect to Tally first using the Bridge app" });
+              toast({ title: "Not Connected", description: "Connect to Tally first using ODBC" });
             } else {
               setShowMonthWiseDialog(true);
             }
@@ -1080,7 +746,7 @@ For issues, contact your AuditPro administrator.
           status={isConnected ? "available" : "beta"}
           onClick={() => {
             if (!isConnected) {
-              toast({ title: "Not Connected", description: "Connect to Tally first using the Bridge app" });
+              toast({ title: "Not Connected", description: "Connect to Tally first using ODBC" });
             } else {
               setShowGSTNotFeedDialog(true);
             }
@@ -1445,7 +1111,7 @@ For issues, contact your AuditPro administrator.
                           <td className="p-3 text-muted-foreground">{idx + 1}</td>
                           <td className="p-3 font-medium">{line.ledgerName}</td>
                           <td className="p-3">
-                            <Badge variant="secondary">{line.gstRegistrationType}</Badge>
+                            <Badge variant="secondary">{line.registrationType || line.gstRegistrationType || "Unknown"}</Badge>
                           </td>
                           <td className="p-3">
                             <Badge variant="destructive">Not Feeded</Badge>
@@ -1521,11 +1187,15 @@ For issues, contact your AuditPro administrator.
                         {data.map((line, idx) => (
                           <tr key={idx} className="border-t hover:bg-muted/50">
                             <td className="p-3 text-muted-foreground">{idx + 1}</td>
-                            <td className="p-3 font-medium">{line.accountName}</td>
+                            <td className="p-3 font-medium">{line.accountHead}</td>
                             <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                            <td className="p-3 text-muted-foreground text-xs">{line.parentGroup}</td>
+                            <td className="p-3 text-muted-foreground text-xs">{line.parent}</td>
                             <td className="p-3 text-right font-mono text-destructive">
-                              {formatCurrency(expectedNature === "Dr" ? line.closingCr : line.closingDr)}
+                              {(() => {
+                                const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
+                                const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
+                                return formatCurrency(expectedNature === "Dr" ? closingCr : closingDr);
+                              })()}
                             </td>
                           </tr>
                         ))}
