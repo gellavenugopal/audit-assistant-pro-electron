@@ -186,7 +186,7 @@ class GstzenApiClient {
   async updateGstinCredentials(
     data: UpdateGstinCredentialsRequest
   ): Promise<ApiResponse<Gstin>> {
-    return this.put<Gstin>(
+    return this.post<Gstin>(
       `/api/gstin/${data.gstin_uuid}/credentials/`,
       {
         username: data.username,
@@ -205,8 +205,63 @@ class GstzenApiClient {
   /**
    * Test GSTIN connection (authenticate with portal)
    */
+  /**
+   * Test GSTIN connection (authenticate with portal)
+   */
   async testGstinConnection(gstinUuid: string): Promise<ApiResponse<{ status: string }>> {
+    // Check if running in Electron
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.testGstinConnection) {
+      const result = await window.electronAPI.gstzen.testGstinConnection(gstinUuid, this.authToken || '');
+      // Format Electron result to match our ApiResponse
+      if (result.ok) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, error: result.data?.error || 'Failed to test connection' };
+      }
+    }
+    
+    // Fallback to direct request (if CORS allowed)
     return this.post<{ status: string }>(`/api/gstin/${gstinUuid}/test-connection/`, {});
+  }
+
+  // ===== GSTN Portal Authentication =====
+
+  /**
+   * Generate OTP for GSTN Portal login
+   */
+  async generateOtp(gstin: string, username: string): Promise<ApiResponse<any>> {
+    const requestData = { gstin, username };
+    
+    // Check if running in Electron
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.generateOtp) {
+      const result = await window.electronAPI.gstzen.generateOtp(requestData, this.authToken || '');
+      if (result.ok && result.data && Object.keys(result.data).length > 0) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, error: result.data?.error || result.data?.message || 'Failed to generate OTP (Empty Response)' };
+      }
+    }
+    
+    return this.post('/api/gstn-generate-otp/', requestData);
+  }
+
+  /**
+   * Establish GSTN Portal Session with OTP
+   */
+  async establishSession(gstin: string, otp: string): Promise<ApiResponse<any>> {
+    const requestData = { gstin, otp };
+    
+    // Check if running in Electron
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.establishSession) {
+      const result = await window.electronAPI.gstzen.establishSession(requestData, this.authToken || '');
+      if (result.ok) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, error: result.data?.error || result.data?.message || 'Failed to establish session' };
+      }
+    }
+    
+    return this.post('/api/gstn-establish-session/', requestData);
   }
 
   // ===== GSTR1 Downloads =====
@@ -215,11 +270,34 @@ class GstzenApiClient {
    * Download GSTR1 report
    */
   async downloadGstr1(data: Gstr1DownloadRequest): Promise<ApiResponse<Gstr1Response>> {
+    // Check if running in Electron
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.downloadGstr1) {
+      // Ensure backend-compatible field names
+      const requestData = {
+          ...data,
+          ret_period: data.filing_period,
+      };
+
+      const result = await window.electronAPI.gstzen.downloadGstr1(requestData, this.authToken || '');
+      if (result.ok) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, error: result.data?.error || result.data?.message || 'Failed to download GSTR1' };
+      }
+    }
+
     return this.post<Gstr1Response>('/api/gstr1/download/', {
       api_name: data.api_name,
       gstin: data.gstin,
-      fp: data.filing_period,
+      ret_period: data.filing_period,
     });
+  }
+
+  /**
+   * Get Consolidated Report JSON
+   */
+  async getConsolidatedReport(gstinUuid: string, year: number, reportType: string): Promise<ApiResponse<any>> {
+    return this.get<any>(`/api/gstin/${gstinUuid}/consolidated-report/${year}/${reportType}/`);
   }
 
   /**

@@ -25,7 +25,14 @@ async function gstzenApiCall(endpoint, options = {}) {
             headers,
         });
 
-        const data = await response.json();
+        const text = await response.text();
+        let data;
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (e) {
+            console.error('Failed to parse JSON response:', text.substring(0, 100));
+            data = { error: 'Invalid JSON response', raw: text.substring(0, 1000) };
+        }
 
         return {
             ok: response.ok,
@@ -85,7 +92,7 @@ function setupGstzenHandlers() {
 
     ipcMain.handle('gstzen:updateGstinCredentials', async (event, { gstinUuid, credentials, token }) => {
         return await gstzenApiCall(`/api/gstin/${gstinUuid}/credentials/`, {
-            method: 'PUT',
+            method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` },
             body: JSON.stringify(credentials),
         });
@@ -95,6 +102,23 @@ function setupGstzenHandlers() {
         return await gstzenApiCall(`/api/gstin/${gstinUuid}/test-connection/`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` },
+        });
+    });
+
+    // GSTN OTP Login
+    ipcMain.handle('gstzen:generateOtp', async (event, { requestData, token }) => {
+        return await gstzenApiCall('/api/gstn-generate-otp/', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(requestData),
+        });
+    });
+
+    ipcMain.handle('gstzen:establishSession', async (event, { requestData, token }) => {
+        return await gstzenApiCall('/api/gstn-establish-session/', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(requestData),
         });
     });
 

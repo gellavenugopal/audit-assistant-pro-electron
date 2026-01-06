@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateGstinCredentials: (gstinUuid, credentials, token) => ipcRenderer.invoke('gstzen:updateGstinCredentials', { gstinUuid, credentials, token }),
     testGstinConnection: (gstinUuid, token) => ipcRenderer.invoke('gstzen:testGstinConnection', { gstinUuid, token }),
     downloadGstr1: (downloadRequest, token) => ipcRenderer.invoke('gstzen:downloadGstr1', { downloadRequest, token }),
+    generateOtp: (requestData, token) => ipcRenderer.invoke('gstzen:generateOtp', { requestData, token }),
+    establishSession: (requestData, token) => ipcRenderer.invoke('gstzen:establishSession', { requestData, token }),
   },
 });
 

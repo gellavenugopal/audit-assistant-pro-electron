@@ -144,6 +144,16 @@ export interface UpdateGstinCredentialsRequest {
   password: string;
 }
 
+export interface GenerateOtpRequest {
+  gstin: string;
+  username: string;
+}
+
+export interface EstablishSessionRequest {
+  gstin: string;
+  otp: string;
+}
+
 // Error Types
 export interface GstzenApiError {
   code: string;

@@ -11,6 +11,8 @@ declare global {
         updateGstinCredentials: (gstinUuid: string, credentials: any, token: string) => Promise<any>;
         testGstinConnection: (gstinUuid: string, token: string) => Promise<any>;
         downloadGstr1: (downloadRequest: any, token: string) => Promise<any>;
+        generateOtp: (requestData: any, token: string) => Promise<any>;
+        establishSession: (requestData: any, token: string) => Promise<any>;
       };
     };
   }

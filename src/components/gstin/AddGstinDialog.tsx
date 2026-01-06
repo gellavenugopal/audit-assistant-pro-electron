@@ -70,7 +70,7 @@ export function AddGstinDialog({ open, onOpenChange, customerUuid }: AddGstinDia
     const onSubmit = async (data: GstinFormValues) => {
         setIsSubmitting(true);
         try {
-            await addGstinMutation.mutateAsync(data);
+            await addGstinMutation.mutateAsync(data as any);
             form.reset();
             onOpenChange(false);
         } catch (error) {
