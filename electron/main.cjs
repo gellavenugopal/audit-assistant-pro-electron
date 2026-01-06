@@ -73,13 +73,111 @@ ipcMain.handle('odbc-fetch-trial-balance', async () => {
   }
 });
 
-ipcMain.handle('odbc-disconnect', async () => {
+ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) => {
   try {
-    if (odbcConnection) {
-      await odbcConnection.close();
-      odbcConnection = null;
+    if (!odbcConnection) {
+      return { success: false, error: 'Not connected to Tally ODBC' };
     }
-    return { success: true };
+
+    console.log('fyStartYear:', fyStartYear, 'targetMonth:', targetMonth);
+
+    const monthOrder = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+    const targetIndex = monthOrder.indexOf(targetMonth);
+    if (targetIndex === -1) {
+      return { success: false, error: `Invalid target month: ${targetMonth}` };
+    }
+
+    const selectedMonths = monthOrder.slice(0, targetIndex + 1);
+    const monthSqlParts = [];
+
+    // Build SQL parts for each month
+    for (const mName of selectedMonths) {
+      const year = (mName === "Jan" || mName === "Feb" || mName === "Mar") ? fyStartYear + 1 : fyStartYear;
+      
+      let day;
+      if (["Apr", "Jun", "Sep", "Nov"].includes(mName)) day = "30";
+      else if (mName === "Feb") day = (year % 4 === 0) ? "29" : "28";
+      else day = "31";
+      
+      const currDate = `${day}-${mName}-${year}`;
+      monthSqlParts.push(`($$ToValue:"${currDate}":$ClosingBalance)`);
+    }
+
+    const query = `SELECT $Name, $_PrimaryGroup, $IsRevenue, $OpeningBalance, ${monthSqlParts.join(', ')} FROM Ledger`;
+
+    const result = await odbcConnection.query(query);
+    console.log('Month wise query result length:', result.length);
+    if (result.length > 0) {
+      console.log('First row keys:', Object.keys(result[0]));
+      console.log('First row:', result[0]);
+    }
+
+    if (!result || result.length === 0) {
+      return { success: false, error: 'No data found' };
+    }
+
+    // Process data
+    const lines = [];
+    const plGroupKeywords = [
+      'Sales Accounts', 'Purchase Accounts', 'Direct Expenses', 'Indirect Expenses',
+      'Direct Incomes', 'Indirect Incomes', 'Expense', 'Income', 'Interest'
+    ];
+
+    for (const row of result) {
+      const ledgerName = row['$Name'] || '';
+      const primaryGroup = row['$_PrimaryGroup'] || '';
+      const isRevenue = row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true;
+      const openingBalance = parseFloat(row['$OpeningBalance']) || 0;
+
+      // Check if PL
+      const isRevCheck = isRevenue;
+      const groupCheck = plGroupKeywords.some(keyword => 
+        primaryGroup.toLowerCase().includes(keyword.toLowerCase())
+      );
+      const isPL = isRevCheck || groupCheck;
+
+      // Get monthly balances (closing balances)
+      const monthlyBalances = {};
+      selectedMonths.forEach((month, i) => {
+        monthlyBalances[month] = parseFloat(row[monthSqlParts[i]]) || 0;
+      });
+
+      // Check if has non-zero balances
+      let hasNonZero = false;
+      if (isPL) {
+        // For PL, check movements
+        const movements = {};
+        selectedMonths.forEach((month, i) => {
+          if (i === 0) {
+            movements[month] = monthlyBalances[month] - openingBalance;
+          } else {
+            const prevMonth = selectedMonths[i - 1];
+            movements[month] = monthlyBalances[month] - monthlyBalances[prevMonth];
+          }
+        });
+        hasNonZero = Object.values(movements).some(val => val !== 0);
+      } else {
+        // For BS, check absolute balances
+        hasNonZero = Object.values(monthlyBalances).some(val => val !== 0);
+      }
+
+      if (hasNonZero) {
+        lines.push({
+          accountName: ledgerName,
+          primaryGroup: primaryGroup,
+          isRevenue: isRevenue,
+          openingBalance: openingBalance,
+          monthlyBalances: monthlyBalances,
+        });
+      }
+    }
+
+    console.log('Processed lines count:', lines.length);
+    const plLines = lines.filter(line => line.isRevenue);
+    const bsLines = lines.filter(line => !line.isRevenue);
+    console.log('PL lines:', plLines.length, 'BS lines:', bsLines.length);
+    
+    return { success: true, data: { plLines, bsLines, months: selectedMonths, fyStartYear, targetMonth } };
   } catch (error) {
     return { success: false, error: error.message };
   }

@@ -102,10 +102,10 @@ const TallyTools = () => {
   
   // Month wise data fetch state
   const [showMonthWiseDialog, setShowMonthWiseDialog] = useState(false);
-  const [mwFyStartYear, setMwFyStartYear] = useState(new Date().getFullYear());
+  const [mwFyStartYear, setMwFyStartYear] = useState(new Date().getFullYear() - 1);
   const [mwTargetMonth, setMwTargetMonth] = useState("Mar");
   const [isFetchingMW, setIsFetchingMW] = useState(false);
-  const [fetchedMWData, setFetchedMWData] = useState<{ lines: TallyMonthWiseLine[]; months: string[] } | null>(null);
+  const [fetchedMWData, setFetchedMWData] = useState<{ plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[] } | null>(null);
   
   // GST Not Feeded state
   const [showGSTNotFeedDialog, setShowGSTNotFeedDialog] = useState(false);
@@ -182,45 +182,65 @@ const TallyTools = () => {
   const handleExportToExcel = () => {
     if (!fetchedTBData || fetchedTBData.length === 0) return;
 
+    // Function to get category
+    const getCategory = (primaryGroup: string, isRevenue: boolean) => {
+      const assetGroups = ['Fixed Assets', 'Current Assets', 'Investments', 'Loans & Advances', 'Cash-in-hand', 'Bank Accounts', 'Deposits (Asset)', 'Stock-in-hand', 'Miscellaneous Expenses (Asset)', 'Advance Tax', 'Sundry Debtors'];
+      const liabilityGroups = ['Capital Account', 'Loans (Liability)', 'Current Liabilities', 'Provisions', 'Reserves & Surplus', 'Sundry Creditors', 'Duties & Taxes', 'Secured Loans', 'Unsecured Loans'];
+      const incomeGroups = ['Sales Accounts', 'Direct Income', 'Indirect Income', 'Service Income'];
+      const expenseGroups = ['Direct Expenses', 'Indirect Expenses', 'Administrative Expenses', 'Selling Expenses', 'Miscellaneous Expenses'];
+
+      const lowerGroup = primaryGroup.toLowerCase();
+
+      if (assetGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Asset';
+      if (liabilityGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Liability';
+      if (incomeGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Income';
+      if (expenseGroups.some(g => lowerGroup.includes(g.toLowerCase()))) return 'Expense';
+
+      // Default based on isRevenue
+      return isRevenue ? 'Income' : 'Asset';
+    };
+
     // Function to build hierarchy levels
     const buildHierarchy = (data: TallyTrialBalanceLine[]) => {
       return data.map(line => {
         const hierarchy = [line.accountHead];
+        const category = getCategory(line.primaryGroup, line.isRevenue);
         
-        // Build hierarchy based on primary group and revenue type
-        if (line.isRevenue) {
-          // Revenue accounts
-          hierarchy.push(line.parent || 'Revenue Accounts');
+        // Build hierarchy based on category
+        if (category === 'Income') {
+          hierarchy.push(line.parent || 'Income Accounts');
           hierarchy.push('Revenue from Operations');
           hierarchy.push('Income');
-          hierarchy.push(''); // Level 5
-        } else {
-          // Balance sheet accounts
+          hierarchy.push('');
+        } else if (category === 'Expense') {
+          hierarchy.push(line.parent || 'Expense Accounts');
+          hierarchy.push('Expenses');
+          hierarchy.push('Expense');
+          hierarchy.push('');
+        } else if (category === 'Asset') {
           hierarchy.push(line.parent || line.primaryGroup);
-          
-          // Determine main category based on primary group
           if (['Bank Accounts', 'Cash-in-hand', 'Deposits', 'Loans & Advances', 'Sundry Debtors'].includes(line.primaryGroup)) {
             hierarchy.push('Current Assets');
-            hierarchy.push('Assets');
-            hierarchy.push('');
-          } else if (['Sundry Creditors', 'Duties & Taxes', 'Provisions'].includes(line.primaryGroup)) {
-            hierarchy.push('Current Liabilities');
-            hierarchy.push('Liabilities');
-            hierarchy.push('');
-          } else if (['Share Capital', 'Reserves & Surplus'].includes(line.primaryGroup)) {
-            hierarchy.push('Shareholders\' Funds');
-            hierarchy.push('Liabilities');
-            hierarchy.push('');
-          } else if (['Fixed Assets', 'Investments'].includes(line.primaryGroup)) {
-            hierarchy.push('Non-Current Assets');
-            hierarchy.push('Assets');
-            hierarchy.push('');
           } else {
-            // Default categorization
-            hierarchy.push(line.primaryGroup);
-            hierarchy.push('Assets'); // Default to assets
-            hierarchy.push('');
+            hierarchy.push('Non-Current Assets');
           }
+          hierarchy.push('Asset');
+          hierarchy.push('');
+        } else if (category === 'Liability') {
+          hierarchy.push(line.parent || line.primaryGroup);
+          if (['Sundry Creditors', 'Duties & Taxes', 'Provisions'].includes(line.primaryGroup)) {
+            hierarchy.push('Current Liabilities');
+          } else {
+            hierarchy.push('Non-Current Liabilities');
+          }
+          hierarchy.push('Liability');
+          hierarchy.push('');
+        } else {
+          // Default
+          hierarchy.push(line.parent || line.primaryGroup);
+          hierarchy.push(category);
+          hierarchy.push('');
+          hierarchy.push('');
         }
         
         return {
@@ -228,8 +248,8 @@ const TallyTools = () => {
           "Parent 1": hierarchy[1],
           "Parent 2": hierarchy[2],
           "Parent 3": hierarchy[3],
-          "Parent 4": hierarchy[4],
-          "Parent 5": hierarchy[5] || '',
+          "Parent 4": hierarchy[4] || '',
+          "Category": category,
         };
       });
     };
@@ -269,13 +289,16 @@ const TallyTools = () => {
       { wch: 25 }, // Parent 2
       { wch: 20 }, // Parent 3
       { wch: 20 }, // Parent 4
-      { wch: 20 }, // Parent 5
+      { wch: 15 }, // Category
     ];
     hierarchyWs['!cols'] = hierarchyColWidths;
     XLSX.utils.book_append_sheet(wb, hierarchyWs, "Hierarchy");
 
     const fileName = `Trial_Balance_${tbFromDate}_to_${tbToDate}.xlsx`;
     XLSX.writeFile(wb, fileName);
+    
+    const plItems = fetchedTBData.filter(line => line.isRevenue);
+    const bsItems = fetchedTBData.filter(line => !line.isRevenue);
     
     toast({
       title: "Export Complete",
@@ -284,18 +307,20 @@ const TallyTools = () => {
   };
 
   const handleFetchMonthWiseData = async () => {
-    if (connectionMode !== "bridge") {
-      toast({
-        title: "Feature Not Available",
-        description: "Month wise data is currently only available with Tally Bridge connection",
-        variant: "destructive",
-      });
-      return;
-    }
-    
     setIsFetchingMW(true);
     try {
-      const result = await tallyConnection.fetchMonthWiseData(mwFyStartYear, mwTargetMonth);
+      let result;
+      if (connectionMode === "odbc") {
+        const data = await odbcConnection.fetchMonthWise(mwFyStartYear, mwTargetMonth);
+        if (data) {
+          result = { success: true, lines: data.lines, months: data.months };
+        } else {
+          result = { success: false };
+        }
+      } else {
+        result = await tallyConnection.fetchMonthWiseData(mwFyStartYear, mwTargetMonth);
+      }
+      
       if (result && result.success) {
         setFetchedMWData({ lines: result.lines, months: result.months });
         toast({
@@ -316,6 +341,16 @@ const TallyTools = () => {
     // Separate P&L and Balance Sheet items
     const plItems = lines.filter(line => line.isRevenue);
     const bsItems = lines.filter(line => !line.isRevenue);
+    
+    // Sort items
+    plItems.sort((a, b) => {
+      if (a.primaryGroup !== b.primaryGroup) return a.primaryGroup.localeCompare(b.primaryGroup);
+      return a.accountName.localeCompare(b.accountName);
+    });
+    bsItems.sort((a, b) => {
+      if (a.primaryGroup !== b.primaryGroup) return a.primaryGroup.localeCompare(b.primaryGroup);
+      return a.accountName.localeCompare(b.accountName);
+    });
     
     const formatRow = (line: TallyMonthWiseLine, isPL: boolean) => {
       const row: Record<string, string | number> = {
