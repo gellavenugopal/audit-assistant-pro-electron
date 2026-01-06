@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   odbcTestConnection: () => ipcRenderer.invoke('odbc-test-connection'),
   odbcFetchTrialBalance: () => ipcRenderer.invoke('odbc-fetch-trial-balance'),
   odbcDisconnect: () => ipcRenderer.invoke('odbc-disconnect'),
+  // Opening Balance Matching methods
+  odbcFetchOldTallyLedgers: () => ipcRenderer.invoke('odbc-fetch-old-tally-ledgers'),
+  odbcFetchNewTallyLedgers: () => ipcRenderer.invoke('odbc-fetch-new-tally-ledgers'),
+  odbcCompareOpeningBalances: (data) => ipcRenderer.invoke('odbc-compare-opening-balances', data),
 });
 
 // Log when preload script is loaded

@@ -8,6 +8,18 @@ declare global {
       odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
       odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
       odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
+      // Opening Balance Matching methods
+      odbcFetchOldTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcFetchNewTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcCompareOpeningBalances: (data: { oldData: any[]; newData: any[] }) => Promise<{
+        success: boolean;
+        error?: string;
+        comparison?: {
+          balanceMismatches: any[];
+          nameMismatches: any[];
+        };
+        xml?: string;
+      }>;
     };
   }
 }

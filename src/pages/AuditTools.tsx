@@ -15,6 +15,7 @@ import { useEngagement } from "@/contexts/EngagementContext";
 import { useTallyConnection } from "@/hooks/useTallyConnection";
 import { useTallyODBC } from "@/hooks/useTallyODBC";
 import { useTally, TallyTrialBalanceLine, TallyMonthWiseLine, TallyGSTNotFeedLine } from "@/contexts/TallyContext";
+import { useOpeningBalanceMatching } from "@/hooks/useOpeningBalanceMatching";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "lucide-react";
 import {
@@ -44,7 +45,8 @@ import {
   CheckCircle2,
   Loader2,
   Unplug,
-  Link2,
+  Scale,
+  FileDown,
 } from "lucide-react";
 
 interface ToolCardProps {
@@ -84,12 +86,12 @@ const ToolCard = ({ title, description, icon, status = "available", onClick }: T
   );
 };
 
-type ConnectionMode = "bridge" | "odbc" | "excel";
+type ConnectionMode = "odbc" | "excel";
 
 const TallyTools = () => {
   const { toast } = useToast();
   const { currentEngagement } = useEngagement();
-  const [connectionMode, setConnectionMode] = useState<ConnectionMode>("bridge");
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>("odbc");
   const [sessionCode, setSessionCode] = useState("");
   const [tallyPort, setTallyPort] = useState("9000");
   
@@ -116,6 +118,13 @@ const TallyTools = () => {
   const [showNegativeLedgersDialog, setShowNegativeLedgersDialog] = useState(false);
   const [negativeLedgersTab, setNegativeLedgersTab] = useState("debtors");
   
+  // ODBC Info Dialog state
+  const [showODBCInfoDialog, setShowODBCInfoDialog] = useState(false);
+  
+  // Opening Balance Matching state
+  const [showOpeningBalanceDialog, setShowOpeningBalanceDialog] = useState(false);
+  const openingBalanceMatching = useOpeningBalanceMatching();
+  
   // Direct connection (kept for fallback reference, but won't work due to CORS)
   const directConnection = useTallyConnection();
   
@@ -126,29 +135,22 @@ const TallyTools = () => {
   const tallyConnection = useTally();
   
   // Use the active connection based on mode
-  const isConnected = connectionMode === "bridge" ? tallyConnection.isConnected : 
-                     connectionMode === "odbc" ? odbcConnection.isConnected : 
+  const isConnected = connectionMode === "odbc" ? odbcConnection.isConnected : 
                      directConnection.isConnected;
-  const isConnecting = connectionMode === "bridge" ? tallyConnection.isConnecting : 
-                      connectionMode === "odbc" ? odbcConnection.isConnecting : 
+  const isConnecting = connectionMode === "odbc" ? odbcConnection.isConnecting : 
                       directConnection.isConnecting;
-  const companyInfo = connectionMode === "bridge" ? tallyConnection.companyInfo : 
-                     connectionMode === "odbc" ? odbcConnection.companyInfo : 
+  const companyInfo = connectionMode === "odbc" ? odbcConnection.companyInfo : 
                      directConnection.companyInfo;
 
   const handleConnect = () => {
     if (isConnected) {
-      if (connectionMode === "bridge") {
-        tallyConnection.disconnect();
-      } else if (connectionMode === "odbc") {
+      if (connectionMode === "odbc") {
         odbcConnection.disconnect();
       } else {
         directConnection.disconnect();
       }
     } else {
-      if (connectionMode === "bridge") {
-        tallyConnection.connectWithSession(sessionCode);
-      } else if (connectionMode === "odbc") {
+      if (connectionMode === "odbc") {
         odbcConnection.testConnection();
       } else {
         directConnection.connectToTally(tallyPort);
@@ -284,14 +286,12 @@ const TallyTools = () => {
   };
 
   const handleFetchMonthWiseData = async () => {
-    if (connectionMode !== "bridge") {
-      toast({
-        title: "Feature Not Available",
-        description: "Month wise data is currently only available with Tally Bridge connection",
-        variant: "destructive",
-      });
-      return;
-    }
+    toast({
+      title: "Feature Not Available",
+      description: "Month wise data is currently only available with Tally Bridge connection",
+      variant: "destructive",
+    });
+    return;
     
     setIsFetchingMW(true);
     try {
@@ -385,14 +385,12 @@ const TallyTools = () => {
   };
 
   const handleFetchGSTNotFeed = async () => {
-    if (connectionMode !== "bridge") {
-      toast({
-        title: "Feature Not Available",
-        description: "GST not feeded data is currently only available with Tally Bridge connection",
-        variant: "destructive",
-      });
-      return;
-    }
+    toast({
+      title: "Feature Not Available",
+      description: "GST not feeded data is currently only available with Tally Bridge connection",
+      variant: "destructive",
+    });
+    return;
     
     setIsFetchingGSTNotFeed(true);
     try {
@@ -935,18 +933,11 @@ For issues, contact your AuditPro administrator.
       {/* Connection Mode Toggle */}
       <div className="flex gap-2">
         <Button
-          variant={connectionMode === "bridge" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setConnectionMode("bridge")}
-          disabled={isConnected}
-        >
-          <Link2 className="h-4 w-4 mr-2" />
-          Tally Bridge (Recommended)
-        </Button>
-        <Button
           variant={connectionMode === "odbc" ? "default" : "outline"}
           size="sm"
-          onClick={() => setConnectionMode("odbc")}
+          onClick={() => {
+            setShowODBCInfoDialog(true);
+          }}
           disabled={isConnected}
         >
           <Database className="h-4 w-4 mr-2" />
@@ -963,82 +954,6 @@ For issues, contact your AuditPro administrator.
         </Button>
       </div>
 
-      {/* Bridge Mode UI */}
-      {connectionMode === "bridge" && (
-        <div className="bg-muted/50 rounded-lg p-4 border space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-blue-500 mt-0.5" />
-              <div className="text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">Using Tally Bridge Desktop App</p>
-                <p>Download and run the Tally Bridge app on your machine where Tally is running. Enter the session code shown in the app below.</p>
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={handleDownloadBridgeApp}>
-              <Download className="h-4 w-4 mr-2" />
-              Download Bridge App
-            </Button>
-          </div>
-          
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="sessionCode">Session Code:</Label>
-              <Input 
-                id="sessionCode" 
-                value={sessionCode} 
-                onChange={(e) => setSessionCode(e.target.value.toUpperCase())}
-                placeholder="ABC123"
-                className="w-28 uppercase font-mono text-center tracking-widest"
-                maxLength={8}
-                disabled={isConnected || isConnecting}
-              />
-            </div>
-            
-            {isConnected ? (
-              <Button onClick={handleConnect} size="sm" variant="outline" className="border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950">
-                <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
-                Tally Connected
-              </Button>
-            ) : (
-              <Button onClick={handleConnect} size="sm" disabled={isConnecting || !sessionCode}>
-                {isConnecting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Connecting...
-                  </>
-                ) : (
-                  <>
-                    <Link2 className="h-4 w-4 mr-2" />
-                    Connect via Bridge
-                  </>
-                )}
-              </Button>
-            )}
-
-            {/* Show company info when connected */}
-            {isConnected && companyInfo && (
-              <div className="flex items-center gap-4 ml-2 pl-4 border-l">
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium text-sm">{companyInfo.companyName}</span>
-                </div>
-                <Badge variant="secondary" className="text-xs">
-                  {companyInfo.financialYear}
-                </Badge>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={handleConnect}
-                  className="h-7 px-2 text-muted-foreground hover:text-destructive"
-                >
-                  <Unplug className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ODBC Mode UI */}
       {connectionMode === "odbc" && (
         <div className="bg-muted/50 rounded-lg p-4 border space-y-4">
@@ -1046,7 +961,7 @@ For issues, contact your AuditPro administrator.
             <Database className="h-5 w-5 text-green-500 mt-0.5" />
             <div className="text-sm text-muted-foreground">
               <p className="font-medium text-foreground">Direct ODBC Connection to Tally</p>
-              <p>Connect directly to Tally using ODBC. Ensure Tally is running with ODBC enabled and Python is installed on your system.</p>
+              <p>Connect directly to Tally using ODBC. Ensure Tally is running with ODBC enabled.</p>
             </div>
           </div>
           
@@ -1119,7 +1034,7 @@ For issues, contact your AuditPro administrator.
           status={isConnected ? "available" : "beta"}
           onClick={() => {
             if (!isConnected) {
-              const modeName = connectionMode === "bridge" ? "Bridge app" : connectionMode === "odbc" ? "ODBC" : "selected method";
+              const modeName = connectionMode === "odbc" ? "ODBC" : "selected method";
               toast({ title: "Not Connected", description: `Connect to Tally first using the ${modeName}` });
             } else {
               setShowTBDialog(true);
@@ -1181,6 +1096,20 @@ For issues, contact your AuditPro administrator.
               toast({ title: "Fetch Trial Balance First", description: "Use 'Get Trial Balance from Tally' to fetch data first" });
             } else {
               setShowNegativeLedgersDialog(true);
+            }
+          }}
+        />
+        <ToolCard
+          title="Opening Balance Matching"
+          description="Compare opening balances between Old and New Tally instances. Generate XML to import old balances into new Tally."
+          icon={<Scale className="h-5 w-5 text-primary" />}
+          status={isConnected ? "available" : "beta"}
+          onClick={() => {
+            if (!isConnected) {
+              const modeName = connectionMode === "odbc" ? "ODBC" : "selected method";
+              toast({ title: "Not Connected", description: `Connect to Tally first using the ${modeName}` });
+            } else {
+              setShowOpeningBalanceDialog(true);
             }
           }}
         />
@@ -1682,6 +1611,276 @@ For issues, contact your AuditPro administrator.
                 </>
               );
             })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ODBC Info Dialog */}
+      <Dialog open={showODBCInfoDialog} onOpenChange={setShowODBCInfoDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              ODBC Direct Connection Requirements
+            </DialogTitle>
+            <DialogDescription>
+              Please ensure the following requirements are met before using ODBC Direct connection.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <div className="flex items-start gap-3">
+                <Shield className="h-5 w-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-sm">Run Tally as Administrator</p>
+                  <p className="text-sm text-muted-foreground">
+                    Tally must be running with administrator privileges for ODBC connections to work properly.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-start gap-3">
+                <Database className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-sm">Configure Tally ODBC</p>
+                  <p className="text-sm text-muted-foreground">
+                    Ensure Tally ODBC is properly configured in your system settings before attempting to connect.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowODBCInfoDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => {
+              setShowODBCInfoDialog(false);
+              setConnectionMode("odbc");
+            }}>
+              Continue
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Opening Balance Matching Dialog */}
+      <Dialog open={showOpeningBalanceDialog} onOpenChange={setShowOpeningBalanceDialog}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Scale className="h-5 w-5 text-primary" />
+              Opening Balance Matching
+            </DialogTitle>
+            <DialogDescription>
+              Compare opening balances between Old and New Tally instances. Generate XML to import old balances into new Tally.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            {/* Step 1: Fetch Old Tally Data */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-sm">Step 1: Fetch Old Tally Data</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Load the Old Tally instance in TallyPrime, then click to fetch closing balances.
+                  </p>
+                </div>
+                <Button
+                  onClick={openingBalanceMatching.fetchOldTallyLedgers}
+                  disabled={openingBalanceMatching.isLoading || !!openingBalanceMatching.oldTallyData}
+                  size="sm"
+                >
+                  {openingBalanceMatching.isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Fetching...
+                    </>
+                  ) : openingBalanceMatching.oldTallyData ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                      Fetched ({openingBalanceMatching.oldTallyData.length} ledgers)
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Fetch Old Tally Data
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Step 2: Fetch New Tally Data */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-sm">Step 2: Fetch New Tally Data</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Load the New Tally instance in TallyPrime, then click to fetch opening balances.
+                  </p>
+                </div>
+                <Button
+                  onClick={openingBalanceMatching.fetchNewTallyLedgers}
+                  disabled={openingBalanceMatching.isLoading || !!openingBalanceMatching.newTallyData || !openingBalanceMatching.oldTallyData}
+                  size="sm"
+                >
+                  {openingBalanceMatching.isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Fetching...
+                    </>
+                  ) : openingBalanceMatching.newTallyData ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                      Fetched ({openingBalanceMatching.newTallyData.length} ledgers)
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Fetch New Tally Data
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Step 3: Compare Balances */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-sm">Step 3: Compare Balances</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Compare the balances and generate comparison report with XML for import.
+                  </p>
+                </div>
+                <Button
+                  onClick={openingBalanceMatching.compareBalances}
+                  disabled={openingBalanceMatching.isLoading || !openingBalanceMatching.oldTallyData || !openingBalanceMatching.newTallyData}
+                  size="sm"
+                >
+                  {openingBalanceMatching.isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Comparing...
+                    </>
+                  ) : (
+                    <>
+                      <Scale className="h-4 w-4 mr-2" />
+                      Compare Balances
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Comparison Results */}
+            {openingBalanceMatching.comparisonResult && (
+              <div className="space-y-4 border-t pt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Balance Mismatches</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{openingBalanceMatching.comparisonResult.balanceMismatches.length}</div>
+                      <p className="text-xs text-muted-foreground">Ledgers with different balances</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Name Mismatches</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{openingBalanceMatching.comparisonResult.nameMismatches.length}</div>
+                      <p className="text-xs text-muted-foreground">Ledgers not found in one instance</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Balance Mismatches Table */}
+                {openingBalanceMatching.comparisonResult.balanceMismatches.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-sm">Balance Mismatches</h4>
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="max-h-60 overflow-y-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted">
+                            <tr>
+                              <th className="p-2 text-left">Ledger Name</th>
+                              <th className="p-2 text-right">Old Dr</th>
+                              <th className="p-2 text-right">Old Cr</th>
+                              <th className="p-2 text-right">New Dr</th>
+                              <th className="p-2 text-right">New Cr</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {openingBalanceMatching.comparisonResult.balanceMismatches.slice(0, 10).map((mismatch, idx) => (
+                              <tr key={idx} className="border-t">
+                                <td className="p-2">{mismatch.$Name}</td>
+                                <td className="p-2 text-right">{mismatch.Old_Dr_Balance.toFixed(2)}</td>
+                                <td className="p-2 text-right">{mismatch.Old_Cr_Balance.toFixed(2)}</td>
+                                <td className="p-2 text-right">{mismatch.New_Dr_Balance.toFixed(2)}</td>
+                                <td className="p-2 text-right">{mismatch.New_Cr_Balance.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {openingBalanceMatching.comparisonResult.balanceMismatches.length > 10 && (
+                        <div className="p-2 text-xs text-muted-foreground text-center border-t">
+                          Showing first 10 of {openingBalanceMatching.comparisonResult.balanceMismatches.length} mismatches
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Download XML Button */}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    onClick={openingBalanceMatching.downloadXML}
+                    className="gap-2"
+                  >
+                    <FileDown className="h-4 w-4" />
+                    Download XML for Import
+                  </Button>
+                </div>
+
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-xs">
+                    To import the XML to Tally: Go to Gateway of Tally &gt; Import &gt; Masters &gt; Select the downloaded XML file &gt; Choose "Modify with new data" &gt; Press Enter. Backup your Tally data before importing!
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
+
+            {/* Reset Button */}
+            {(openingBalanceMatching.oldTallyData || openingBalanceMatching.newTallyData || openingBalanceMatching.comparisonResult) && (
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    openingBalanceMatching.reset();
+                  }}
+                  size="sm"
+                >
+                  Reset
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => {
+              setShowOpeningBalanceDialog(false);
+              openingBalanceMatching.reset();
+            }}>
+              Close
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
