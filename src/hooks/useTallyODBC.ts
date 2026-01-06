@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { TallyMonthWiseLine } from "@/contexts/TallyContext";
 
 // Extend the Window interface to include electronAPI
 declare global {
@@ -7,6 +8,7 @@ declare global {
     electronAPI: {
       odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
       odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcFetchMonthWise: (fyStartYear: number, targetMonth: string) => Promise<{ success: boolean; error?: string; data?: { plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[]; fyStartYear: number; targetMonth: string } }>;
       odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
     };
   }
@@ -107,6 +109,26 @@ export const useTallyODBC = () => {
     }
   }, [toast]);
 
+  const fetchMonthWise = useCallback(async (fyStartYear: number, targetMonth: string): Promise<{ plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[] } | null> => {
+    try {
+      const result = await window.electronAPI.odbcFetchMonthWise(fyStartYear, targetMonth);
+
+      if (result.success && result.data) {
+        return result.data;
+      } else {
+        throw new Error(result.error || "Failed to fetch month wise data");
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      toast({
+        title: "Failed to Fetch Month Wise Data",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      return null;
+    }
+  }, [toast]);
+
   const disconnect = useCallback(async () => {
     try {
       await window.electronAPI.odbcDisconnect();
@@ -126,6 +148,7 @@ export const useTallyODBC = () => {
     ...state,
     testConnection,
     fetchTrialBalance,
+    fetchMonthWise,
     disconnect,
   };
 };
