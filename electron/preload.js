@@ -5,22 +5,20 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // Add any IPC methods you need here
   platform: process.platform,
-  // Example: send a message to main process
-  send: (channel, data) => {
-    const validChannels = ['toMain'];
-    if (validChannels.includes(channel)) {
-      ipcRenderer.send(channel, data);
-    }
-  },
-  // Example: receive a message from main process
-  receive: (channel, func) => {
-    const validChannels = ['fromMain'];
-    if (validChannels.includes(channel)) {
-      ipcRenderer.on(channel, (event, ...args) => func(...args));
-    }
+
+  // GSTZen API Methods (via IPC to main process - no CORS!)
+  gstzen: {
+    login: (credentials) => ipcRenderer.invoke('gstzen:login', credentials),
+    getCustomerByEmail: (email, token) => ipcRenderer.invoke('gstzen:getCustomerByEmail', { email, token }),
+    createCustomer: (customerData, token) => ipcRenderer.invoke('gstzen:createCustomer', { customerData, token }),
+    getGstins: (customerUuid, token) => ipcRenderer.invoke('gstzen:getGstins', { customerUuid, token }),
+    addGstin: (customerUuid, gstinData, token) => ipcRenderer.invoke('gstzen:addGstin', { customerUuid, gstinData, token }),
+    updateGstinCredentials: (gstinUuid, credentials, token) => ipcRenderer.invoke('gstzen:updateGstinCredentials', { gstinUuid, credentials, token }),
+    testGstinConnection: (gstinUuid, token) => ipcRenderer.invoke('gstzen:testGstinConnection', { gstinUuid, token }),
+    downloadGstr1: (downloadRequest, token) => ipcRenderer.invoke('gstzen:downloadGstr1', { downloadRequest, token }),
   },
 });
 
 // Log when preload script is loaded
-console.log('Preload script loaded');
+console.log('Preload script loaded with GSTZen IPC handlers');
 

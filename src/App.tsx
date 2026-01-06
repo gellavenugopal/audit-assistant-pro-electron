@@ -30,6 +30,8 @@ import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
 import AuditReport from "./pages/AuditReport";
 import Auth from "./pages/Auth";
+import GstzenIntegration from "./pages/GstzenIntegration";
+import GstzenLogin from "./pages/GstzenLogin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -43,203 +45,221 @@ const App = () => (
         <AuthProvider>
           <EngagementProvider>
             <TallyProvider>
-            <Routes>
-              {/* Public route */}
-              <Route path="/auth" element={<Auth />} />
-              
-              {/* Engagement selection (requires auth but not engagement) */}
-              <Route
-                path="/select-engagement"
-                element={
-                  <ProtectedRoute>
-                    <SelectEngagement />
-                  </ProtectedRoute>
-                }
-              />
-              
-              {/* Protected routes that require engagement selection */}
-              <Route
-                path="/"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <Dashboard />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/engagements"
-                element={
-                  <ProtectedRoute>
-                    <MainLayout>
-                      <Engagements />
-                    </MainLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/trial-balance"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <TrialBalance />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/materiality"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <Materiality />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/risks"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <RiskRegister />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/programs"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <AuditPrograms />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/procedures/:procedureId/workpaper"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <ProcedureWorkpaper />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/evidence"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <EvidenceVault />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/review-notes"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <ReviewNotes />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/misstatements"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <Misstatements />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/audit-trail"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <AuditTrail />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/completion"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <Completion />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/audit-tools"
-                element={
-                  <ProtectedRoute>
-                    <MainLayout>
-                      <AuditTools />
-                    </MainLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/audit-report"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <AuditReport />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route
-                path="/settings"
-                element={
-                  <ProtectedRoute>
-                    <MainLayout>
-                      <Settings />
-                    </MainLayout>
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/admin"
-                element={
-                  <ProtectedAdminRoute>
-                    <MainLayout>
-                      <AdminDashboard />
-                    </MainLayout>
-                  </ProtectedAdminRoute>
-                }
-              />
-              <Route
-                path="/admin/settings"
-                element={
-                  <ProtectedAdminRoute>
-                    <MainLayout>
-                      <AdminSettings />
-                    </MainLayout>
-                  </ProtectedAdminRoute>
-                }
-              />
-              <Route
-                path="/my-dashboard"
-                element={
-                  <ProtectedEngagementRoute>
-                    <MainLayout>
-                      <StaffDashboard />
-                    </MainLayout>
-                  </ProtectedEngagementRoute>
-                }
-              />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+              <Routes>
+                {/* Public route */}
+                <Route path="/auth" element={<Auth />} />
+
+                {/* Engagement selection (requires auth but not engagement) */}
+                <Route
+                  path="/select-engagement"
+                  element={
+                    <ProtectedRoute>
+                      <SelectEngagement />
+                    </ProtectedRoute>
+                  }
+                />
+
+                {/* Protected routes that require engagement selection */}
+                <Route
+                  path="/"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Dashboard />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/engagements"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <Engagements />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/trial-balance"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <TrialBalance />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/materiality"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Materiality />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/risks"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <RiskRegister />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/programs"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <AuditPrograms />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/procedures/:procedureId/workpaper"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <ProcedureWorkpaper />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/evidence"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <EvidenceVault />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/review-notes"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <ReviewNotes />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/misstatements"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Misstatements />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/audit-trail"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <AuditTrail />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/completion"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Completion />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/audit-tools"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <AuditTools />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/audit-report"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <AuditReport />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/settings"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <Settings />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/gstr1-integration"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <GstzenIntegration />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/gstzen-login"
+                  element={
+                    <ProtectedRoute>
+                      <GstzenLogin />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedAdminRoute>
+                      <MainLayout>
+                        <AdminDashboard />
+                      </MainLayout>
+                    </ProtectedAdminRoute>
+                  }
+                />
+                <Route
+                  path="/admin/settings"
+                  element={
+                    <ProtectedAdminRoute>
+                      <MainLayout>
+                        <AdminSettings />
+                      </MainLayout>
+                    </ProtectedAdminRoute>
+                  }
+                />
+                <Route
+                  path="/my-dashboard"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <StaffDashboard />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
             </TallyProvider>
           </EngagementProvider>
         </AuthProvider>
