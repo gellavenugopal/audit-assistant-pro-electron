@@ -32,6 +32,8 @@ import AuditReport from "./pages/AuditReport";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
+import ComplianceApplicability from "./pages/ComplianceApplicability";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -76,6 +78,18 @@ const App = () => (
                       <Engagements />
                     </MainLayout>
                   </ProtectedRoute>
+                }
+              />
+
+              {/* Compliance Applicability Section */}
+              <Route
+                path="/compliance-applicability"
+                element={
+                  <ProtectedEngagementRoute>
+                    <MainLayout>
+                      <ComplianceApplicability />
+                    </MainLayout>
+                  </ProtectedEngagementRoute>
                 }
               />
               <Route
