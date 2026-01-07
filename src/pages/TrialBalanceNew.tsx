@@ -98,6 +98,32 @@ const BUSINESS_TYPES = [
 // Disabled entity types (not supported in this phase)
 const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
 
+// Helper function to automatically classify H1 and H2 based on Is Revenue and Closing Balance
+function applyAutoH1H2Classification(rows: LedgerRow[]): LedgerRow[] {
+  return rows.map(row => {
+    const isRevenue = row['Is Revenue'] === 'Yes';
+    const closingBalance = row['Closing Balance'] || 0;
+    const isNegative = closingBalance < 0;
+    
+    // H1: Determine if Profit and Loss or Balance Sheet
+    const h1 = isRevenue ? 'Profit and Loss' : 'Balance Sheet';
+    
+    // H2: Determine sub-category based on H1 and closing balance sign
+    let h2 = '';
+    if (h1 === 'Balance Sheet') {
+      h2 = isNegative ? 'Assets' : 'Liabilities';
+    } else { // Profit and Loss
+      h2 = isNegative ? 'Expenses' : 'Income';
+    }
+    
+    return {
+      ...row,
+      'H1': h1,
+      'H2': h2
+    };
+  });
+}
+
 export default function TrialBalanceNew() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
@@ -360,7 +386,10 @@ export default function TrialBalanceNew() {
       });
       
       // Auto-classify the filtered data
-      const classified = classifyDataframeBatch(dataToClassify, savedMappings, businessType, constitution);
+      let classified = classifyDataframeBatch(dataToClassify, savedMappings, businessType, constitution);
+      
+      // Apply automatic H1 and H2 classification based on Is Revenue and Closing Balance
+      classified = applyAutoH1H2Classification(classified);
       
       // Import directly based on selected period type
       if (importPeriodType === 'current') {
@@ -516,7 +545,10 @@ export default function TrialBalanceNew() {
     };
     
     // Classify the new line
-    const classified = classifyDataframeBatch([newLine], savedMappings, businessType, constitution);
+    let classified = classifyDataframeBatch([newLine], savedMappings, businessType, constitution);
+    
+    // Apply automatic H1 and H2 classification
+    classified = applyAutoH1H2Classification(classified);
     
     if (newLineForm.periodType === 'current') {
       setCurrentData(prev => [...prev, classified[0]]);
@@ -553,7 +585,11 @@ export default function TrialBalanceNew() {
       return;
     }
     
-    const classified = classifyDataframeBatch(currentData, savedMappings, businessType, constitution);
+    let classified = classifyDataframeBatch(currentData, savedMappings, businessType, constitution);
+    
+    // Apply automatic H1 and H2 classification
+    classified = applyAutoH1H2Classification(classified);
+    
     setCurrentData(classified);
     
     const mappedCount = classified.filter(row => row['Status'] === 'Mapped').length;
@@ -923,7 +959,11 @@ export default function TrialBalanceNew() {
             return row['Opening Balance'] !== 0 || row['Closing Balance'] !== 0;
           });
         
-        const classified = classifyDataframeBatch(processedData, savedMappings, businessType, constitution);
+        let classified = classifyDataframeBatch(processedData, savedMappings, businessType, constitution);
+        
+        // Apply automatic H1 and H2 classification
+        classified = applyAutoH1H2Classification(classified);
+        
         setCurrentData(classified);
         
         // Save to database
