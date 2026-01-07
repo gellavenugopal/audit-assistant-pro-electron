@@ -147,24 +147,6 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
       });
     }
   }, [data, companyName, financialYear, constitution, plStartingNote, toast]);
-          XLSX.utils.book_append_sheet(workbook, noteSheet, `Note ${noteNum} - ${h2}`.substring(0, 31));
-        }
-      });
-      
-      XLSX.writeFile(workbook, `Profit_Loss_with_Notes_${companyName}_${financialYear}.xlsx`);
-      
-      toast({
-        title: 'Downloaded',
-        description: 'Profit & Loss with Notes exported successfully'
-      });
-    } catch (error) {
-      toast({
-        title: 'Export Failed',
-        description: error instanceof Error ? error.message : 'Failed to export Profit & Loss',
-        variant: 'destructive'
-      });
-    }
-  }, [data, companyName, financialYear, plStartingNote, toast]);
 
   if (data.length === 0) {
     return (
