@@ -69,7 +69,7 @@ export function Ribbon({
   onSave,
   onClear,
 }: RibbonProps) {
-  const [activeTab, setActiveTab] = useState<'home' | 'data' | 'view'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'data' | 'view'>('data');
 
   // Keyboard shortcuts
   useEffect(() => {

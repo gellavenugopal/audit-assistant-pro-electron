@@ -94,7 +94,7 @@ export default function TrialBalanceNew() {
   const [savedMappings, setSavedMappings] = useState<Record<string, ClassificationResult>>({});
   
   // UI State
-  const [activeTab, setActiveTab] = useState('trial-balance');
+  const [activeTab, setActiveTab] = useState('data');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [h2Filter, setH2Filter] = useState<string>('all');
@@ -173,12 +173,6 @@ export default function TrialBalanceNew() {
     
     setIsFetching(true);
     try {
-      // Fetch company info first
-      const companyInfo = await odbcConnection.fetchCompanyInfo();
-      if (companyInfo && companyInfo.companyName) {
-        setEntityName(companyInfo.companyName);
-      }
-      
       const lines = await odbcConnection.fetchTrialBalance(fromDate, toDate);
       
       if (!lines || lines.length === 0) {
