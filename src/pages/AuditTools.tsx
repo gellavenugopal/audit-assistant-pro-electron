@@ -46,6 +46,7 @@ export interface TallyGSTNotFeedLine {
 import { useOpeningBalanceMatching } from "@/hooks/useOpeningBalanceMatching";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "lucide-react";
+import DeferredTax from "@/components/audit/DeferredTax";
 import {
   Database,
   FileSpreadsheet,
@@ -1902,6 +1903,20 @@ const MCATools = () => {
 const IncomeTaxTools = () => {
   const { toast } = useToast();
   const [pan, setPan] = useState("");
+  const [showDTLTool, setShowDTLTool] = useState(false);
+
+  if (showDTLTool) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowDTLTool(false)}>
+            ← Back to Income Tax Tools
+          </Button>
+        </div>
+        <DeferredTax />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -1926,6 +1941,12 @@ const IncomeTaxTools = () => {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <ToolCard
+          title="Deferred Tax Calculator (AS-22)"
+          description="Calculate deferred tax assets and liabilities as per AS-22. Professional audit working paper format."
+          icon={<Calculator className="h-5 w-5 text-primary" />}
+          onClick={() => setShowDTLTool(true)}
+        />
         <ToolCard
           title="Get 26AS"
           description="Download Form 26AS containing TDS/TCS credits, advance tax, self-assessment tax details for verification."
