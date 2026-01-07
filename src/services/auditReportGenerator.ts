@@ -1,12 +1,14 @@
 import {
-  AUDITOR_RESPONSIBILITIES_STARTER,
+  buildAuditorResponsibilitiesParagraph,
   BASIS_FOR_OPINION_STARTER,
   buildKAMIntro,
   buildOpinionHeading,
   buildOpinionParagraph,
   buildSA720Paragraph,
-  MANAGEMENT_RESPONSIBILITIES_STARTER,
+  buildManagementResponsibilitiesParagraph,
 } from '@/data/auditReportStandardWordings';
+import { buildLegalRegulatorySection } from '@/data/legalRegulatoryWordings';
+import { QUALIFIED_BASIS_EXAMPLE, ADVERSE_BASIS_EXAMPLE, DISCLAIMER_BASIS_EXAMPLE } from '@/data/qualifiedExamples';
 
 import type { AuditReportSetup } from '@/hooks/useAuditReportSetup';
 import type { AuditReportMainContent } from '@/hooks/useAuditReportContent';
@@ -19,7 +21,7 @@ export type ReportBlock =
   | { kind: 'subtitle'; text: string }
   | { kind: 'heading'; text: string }
   | { kind: 'subheading'; text: string }
-  | { kind: 'paragraph'; text: string }
+  | { kind: 'paragraph'; text: string; highlight?: 'yellow' }
   | { kind: 'signature'; lines: string[] };
 
 export type GenerateParams = {
@@ -42,6 +44,12 @@ export class AuditReportGenerator {
   generateBlocks(): ReportBlock[] {
     const { setup, content, kams, clientName, financialYearLabel, firmSettings, signingPartner } = this.params;
 
+    const emphasisExample1 =
+      'We draw attention to Note ______ of the standalone financial statements___________________________________ which describes_______________________________________(user defined)';
+    const emphasisExample2 =
+      'We draw attention to Note ______ of the standalone financial statements___________________________________ which describes________________ (user defined)';
+    const emphasisStandardTail = 'Our opinion is not modified in respect of this matter';
+
     const includeCashFlow = Boolean(setup.cash_flow_required);
     const addressee = `To the Members of ${clientName}`;
 
@@ -60,30 +68,67 @@ export class AuditReportGenerator {
           entityName: clientName,
           periodEndLabel: financialYearLabel,
           includeCashFlow,
+          hasBranchAuditors: Boolean(setup.has_branch_auditors),
+          branchLocations: setup.branch_locations,
+          ifcApplicable: Boolean(setup.ifc_applicable),
+          ifcAnnexureLetter: setup.ifc_annexure_letter,
         }),
       },
     ];
 
     // Basis for Opinion
     blocks.push({ kind: 'subheading', text: this.basisHeading(content.opinion_type) });
-    blocks.push({
-      kind: 'paragraph',
-      text: content.basis_for_opinion?.trim() || BASIS_FOR_OPINION_STARTER[content.opinion_type],
-    });
+    const rawBasis = content.basis_for_opinion?.trim();
+    // Qualified opinion: render basis (example or user text) first, then always show the standard auditor-responsibilities paragraph unhighlighted
+    if (content.opinion_type === 'qualified') {
+      if (content.basis_for_opinion_is_example || !rawBasis) {
+        blocks.push({ kind: 'paragraph', text: rawBasis || QUALIFIED_BASIS_EXAMPLE, highlight: 'yellow' });
+      } else {
+        blocks.push({ kind: 'paragraph', text: rawBasis });
+      }
+      // Always append the standard second paragraph (auditor responsibilities / independence wording) unhighlighted
+      blocks.push({ kind: 'paragraph', text: BASIS_FOR_OPINION_STARTER['qualified'] });
+    } else if (content.opinion_type === 'adverse') {
+      // Adverse opinion: first line is user-defined reason (yellow by default), then constant starter
+      if (content.basis_for_opinion_is_example || !rawBasis) {
+        blocks.push({ kind: 'paragraph', text: rawBasis || ADVERSE_BASIS_EXAMPLE, highlight: 'yellow' });
+      } else {
+        blocks.push({ kind: 'paragraph', text: rawBasis });
+      }
+      blocks.push({ kind: 'paragraph', text: BASIS_FOR_OPINION_STARTER['adverse'] });
+    } else if (content.opinion_type === 'disclaimer') {
+      // Disclaimer: entirely user-defined single paragraph; no constant second paragraph
+      if (content.basis_for_opinion_is_example || !rawBasis) {
+        blocks.push({ kind: 'paragraph', text: rawBasis || DISCLAIMER_BASIS_EXAMPLE, highlight: 'yellow' });
+      } else {
+        blocks.push({ kind: 'paragraph', text: rawBasis });
+      }
+    } else {
+      // Non-qualified opinions: use user basis if present otherwise the appropriate starter
+      blocks.push({ kind: 'paragraph', text: rawBasis || BASIS_FOR_OPINION_STARTER[content.opinion_type] });
+    }
 
     if (content.opinion_type !== 'unqualified' && content.qualification_details?.trim()) {
       blocks.push({ kind: 'paragraph', text: content.qualification_details.trim() });
     }
 
     // Emphasis of Matter
-    if (content.has_emphasis_of_matter && (content.emphasis_of_matter_items || []).length > 0) {
+    if (content.has_emphasis_of_matter) {
       blocks.push({ kind: 'subheading', text: 'Emphasis of Matter' });
-      for (const item of content.emphasis_of_matter_items || []) {
-        const title = item.title?.trim();
-        if (title) blocks.push({ kind: 'paragraph', text: title });
-        blocks.push({ kind: 'paragraph', text: item.paragraph || '' });
-        if (item.note_ref) blocks.push({ kind: 'paragraph', text: `Note reference: ${item.note_ref}` });
+
+      const eomItems = content.emphasis_of_matter_items || [];
+      if (eomItems.length > 0) {
+        for (const item of eomItems) {
+          blocks.push({ kind: 'paragraph', text: item.paragraph || '', highlight: item.is_example ? 'yellow' : undefined });
+        }
+      } else {
+        // Prefill illustrative examples in yellow to prompt user edits
+        blocks.push({ kind: 'paragraph', text: emphasisExample1, highlight: 'yellow' });
+        blocks.push({ kind: 'paragraph', text: emphasisExample2, highlight: 'yellow' });
       }
+
+      // Always append the standard non-highlighted closing sentence
+      blocks.push({ kind: 'paragraph', text: emphasisStandardTail });
     }
 
     // Going concern
@@ -114,32 +159,68 @@ export class AuditReportGenerator {
 
     // Other Information (SA 720)
     blocks.push({ kind: 'subheading', text: 'Other Information' });
-    blocks.push({
-      kind: 'paragraph',
-      text: buildSA720Paragraph(content.board_report_status || 'received_no_misstatement', content.board_report_misstatement_details),
-    });
+    {
+      const status = content.board_report_status || 'received_no_misstatement';
+      const details = content.board_report_misstatement_details;
+      const text = buildSA720Paragraph(status, details);
+      const highlight = status === 'received_material_misstatement' && !details ? 'yellow' : undefined;
+      blocks.push({ kind: 'paragraph', text, highlight });
+    }
 
     // Responsibilities
-    blocks.push({ kind: 'subheading', text: 'Responsibilities of Management and Those Charged with Governance for the Financial Statements' });
-    blocks.push({ kind: 'paragraph', text: MANAGEMENT_RESPONSIBILITIES_STARTER });
+    blocks.push({ kind: 'subheading', text: 'Responsibilities of Management and Those Charged with Governance for the Standalone Financial Statements' });
+    blocks.push({ kind: 'paragraph', text: buildManagementResponsibilitiesParagraph(includeCashFlow) });
 
-    blocks.push({ kind: 'subheading', text: 'Auditor’s Responsibilities for the Audit of the Financial Statements' });
-    blocks.push({ kind: 'paragraph', text: AUDITOR_RESPONSIBILITIES_STARTER });
+    blocks.push({ kind: 'subheading', text: "Auditor's Responsibilities for the Audit of the Standalone Financial Statements" });
+    blocks.push({ kind: 'paragraph', text: buildAuditorResponsibilitiesParagraph(Boolean(setup.ifc_applicable)) });
 
     // Other Matter
-    if (content.has_other_matter && (content.other_matter_items || []).length > 0) {
+    const hasBranchAuditorsMatter = setup.has_branch_auditors;
+    const hasPredecessorAuditorMatter = setup.has_predecessor_auditor;
+    
+    // Check if user has provided actual content in other matter items
+    const userOtherMatterItems = (content.other_matter_items || []).filter(item => item.paragraph?.trim());
+    const hasUserOtherMatterContent = userOtherMatterItems.length > 0;
+    
+    if (content.has_other_matter || hasBranchAuditorsMatter || hasPredecessorAuditorMatter) {
       blocks.push({ kind: 'subheading', text: 'Other Matter' });
-      for (const item of content.other_matter_items || []) {
-        const title = item.title?.trim();
-        if (title) blocks.push({ kind: 'paragraph', text: title });
-        blocks.push({ kind: 'paragraph', text: item.paragraph || '' });
+      
+      // Mandatory branch auditors paragraph (highlighted yellow) + closing sentence (not highlighted)
+      if (hasBranchAuditorsMatter) {
+        const branchAuditorsParagraph = `We did not audit the financial statements/ information of ………………. (number) branches included in the standalone financial statements of the company whose financial statements/financial information reflect total assets of Rs. ……...as at March 31, XXXX and total revenue of Rs. ……for the year ended on that date, as considered in the standalone financial statements. The financial statements/information of these branches have been audited by the branch auditors whose reports have been furnished to us, and our opinion in so far as it relates to the amounts and disclosures included in respect of these branches, is based solely on the report of such branch auditors.`;
+        blocks.push({ kind: 'paragraph', text: branchAuditorsParagraph, highlight: 'yellow' });
+        blocks.push({ kind: 'paragraph', text: 'Our opinion is not modified in respect of this matter.' });
+      }
+      
+      // Mandatory predecessor auditor paragraph (highlighted yellow) + closing sentence (not highlighted)
+      if (hasPredecessorAuditorMatter) {
+        const predecessorAuditorParagraph = `The comparative financial information of the Company included in these standalone financial statements, are based on the previously issued standalone financial statements for the year ended March 31,XXXX, which were audited by the predecessor auditors who, vide their report dated ______________, expressed an unmodified opinion.`;
+        blocks.push({ kind: 'paragraph', text: predecessorAuditorParagraph, highlight: 'yellow' });
+        blocks.push({ kind: 'paragraph', text: 'Our opinion is not modified in respect of this matter.' });
+      }
+      
+      // User-defined other matter items (title is internal only, not rendered in preview)
+      if (hasUserOtherMatterContent) {
+        for (const item of userOtherMatterItems) {
+          blocks.push({ kind: 'paragraph', text: item.paragraph.trim() });
+        }
+        // Add closing line after user-defined other matter
+        blocks.push({ kind: 'paragraph', text: 'Our opinion is not modified in respect of this matter.' });
+      } else if (content.has_other_matter && !hasBranchAuditorsMatter && !hasPredecessorAuditorMatter) {
+        // User selected other matter but provided no content and no mandatory matters
+        blocks.push({ kind: 'paragraph', text: "USER DEFINED - kinldy fill up - in case applicable-else remove this 'other matter' paragraph", highlight: 'yellow' });
+        blocks.push({ kind: 'paragraph', text: 'Our opinion is not modified in respect of this matter.' });
       }
     }
 
-    // Legal & Regulatory requirements (starter)
+    // Legal & Regulatory requirements
     blocks.push({ kind: 'heading', text: 'Report on Other Legal and Regulatory Requirements' });
-    blocks.push({ kind: 'paragraph', text: this.build1433Summary(content) });
-    blocks.push({ kind: 'paragraph', text: this.buildRule11Summary(content) });
+    
+    // Build comprehensive section with all conditional paragraphs
+    const legalRegulatoryParagraphs = buildLegalRegulatorySection(setup, content, financialYearLabel, content.opinion_type || 'unqualified');
+    for (const para of legalRegulatoryParagraphs) {
+      blocks.push({ kind: 'paragraph', text: para.text, highlight: para.highlight });
+    }
 
     // Signature - prioritize firmSettings and signingPartner from partners table
     const firmName = firmSettings?.firm_name || content.firm_name;
@@ -209,11 +290,11 @@ export class AuditReportGenerator {
       content.rule_11_b_long_term_contracts ? `Rule 11(b) Long-term contracts including derivatives: ${content.rule_11_b_long_term_contracts}` : null,
       content.rule_11_c_iepf_status ? `Rule 11(c) IEPF transfers: ${content.rule_11_c_iepf_status}` : null,
       content.rule_11_c_delay_details || null,
-      content.rule_11_e_dividend_status ? `Rule 11(e) Dividend: ${content.rule_11_e_dividend_status}` : null,
-      content.rule_11_f_audit_trail_status ? `Rule 11(f) Audit trail (Rule 3(1)): ${content.rule_11_f_audit_trail_status}` : null,
-      content.rule_11_f_audit_trail_details || null,
-      content.rule_11_g_funds_advanced_status ? `Rule 11(g) Funds advanced/received: ${content.rule_11_g_funds_advanced_status}` : null,
+      content.rule_11_g_funds_advanced_status ? `Rule 11(e) Funds routing via intermediaries: ${content.rule_11_g_funds_advanced_status}` : null,
       content.rule_11_g_funds_advanced_details || null,
+      content.rule_11_e_dividend_status ? `Rule 11(f) Dividend (Section 123 compliance): ${content.rule_11_e_dividend_status}` : null,
+      content.rule_11_f_audit_trail_status ? `Rule 11(g) Audit trail (Rule 3(1)): ${content.rule_11_f_audit_trail_status}` : null,
+      content.rule_11_f_audit_trail_details || null,
     ]);
 
     return lines.join('\n');

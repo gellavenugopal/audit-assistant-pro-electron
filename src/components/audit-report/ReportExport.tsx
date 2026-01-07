@@ -42,6 +42,7 @@ import {
 import caIndiaLogo from '@/assets/ca-india-logo.jpg';
 import { WordIcon } from '@/components/icons/WordIcon';
 import { PdfIcon } from '@/components/icons/PdfIcon';
+import { BASIS_FOR_OPINION_STARTER } from '@/data/auditReportStandardWordings';
 
 interface ReportExportProps {
   engagementId: string;
@@ -74,6 +75,8 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
     auditorUDIN: (setup as any).udin || '',
     reportDate: (setup as any).report_date || new Date().toISOString().split('T')[0],
   };
+
+  const includeCashFlow = Boolean((setup as any).cash_flow_required);
 
   // Calculate completion stats
   const applicableClauses = clauses.filter(clause => {
@@ -150,9 +153,17 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
       y += 3;
 
       addHeading('Opinion');
-      addParagraph(`We have audited the accompanying standalone financial statements of ${reportData.entityName} (the "Company"), which comprise the Balance Sheet as at March 31, 2025, the Statement of Profit and Loss (including Other Comprehensive Income), the Statement of Changes in Equity and the Statement of Cash Flows for the year ended on that date and notes to the financial statements, including a summary of material accounting policies and other explanatory information (hereinafter referred to as the "Standalone Financial Statements").`);
-      
-      addParagraph(`In our opinion and to the best of our information and according to the explanations given to us, the aforesaid Standalone Financial Statements give the information required by the Companies Act, 2013 (the "Act") in the manner so required and give a true and fair view in conformity with the Indian Accounting Standards prescribed under section 133 of the Act, ("Ind AS") and other accounting principles generally accepted in India, of the state of affairs of the Company as at March 31, 2025 and its profit, total comprehensive income, changes in equity and its cash flows for the year ended on that date.`);
+      const opinionIntro = includeCashFlow
+        ? `We have audited the accompanying standalone financial statements of ${reportData.entityName} ("the Company"), which comprise the Balance Sheet as at March 31, 2025, the Statement of Profit and Loss and the Statement of Cash Flows for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements").`
+        : `We have audited the accompanying standalone financial statements of ${reportData.entityName} ("the Company"), which comprise the Balance Sheet as at March 31, 2025, the Statement of Profit and Loss for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements").`;
+
+      addParagraph(opinionIntro);
+
+      const opinionConclusion = includeCashFlow
+        ? `In our opinion and to the best of our information and according to the explanations given to us, the aforesaid standalone financial statements give the information required by the Companies Act, 2013 ("the Act") in the manner so required and give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at March 31, 2025, and its profit/loss [delete whichever is not applicable] and its cash flows for the year ended on that date.`
+        : `In our opinion and to the best of our information and according to the explanations given to us, the aforesaid standalone financial statements give the information required by the Companies Act, 2013 ("the Act") in the manner so required and give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at March 31, 2025, and its profit/loss [delete whichever is not applicable] for the year ended on that date.`;
+
+      addParagraph(opinionConclusion);
 
       y += 3;
       addHeading('Basis for Opinion');

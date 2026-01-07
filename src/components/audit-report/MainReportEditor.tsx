@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -23,6 +24,7 @@ import {
   type OtherMatterItem,
   useAuditReportContent,
 } from '@/hooks/useAuditReportContent';
+import { QUALIFIED_BASIS_EXAMPLE, ADVERSE_BASIS_EXAMPLE, DISCLAIMER_BASIS_EXAMPLE } from '@/data/qualifiedExamples';
 import { AuditReportGenerator } from '@/services/auditReportGenerator';
 import { STATUS_OPTIONS, type StatusValue } from '@/data/auditReportStandardWordings';
 
@@ -78,10 +80,77 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const signingPartner = setup?.signing_partner_id ? getPartnerById(setup.signing_partner_id) : null;
 
   const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
+  const [editorBasis, setEditorBasis] = useState<string>('');
+  const [savedExampleForDraftId, setSavedExampleForDraftId] = useState<string | null>(null);
 
   useEffect(() => {
     if (content?.id) setDraft(content);
   }, [content?.id]);
+
+  useEffect(() => {
+    // Initialize editorBasis: show user's basis if present, otherwise show illustrative example for qualified/adverse opinion
+    if (!draft) return;
+    if (draft.opinion_type === 'qualified') {
+      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : QUALIFIED_BASIS_EXAMPLE);
+    } else if (draft.opinion_type === 'adverse') {
+      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : ADVERSE_BASIS_EXAMPLE);
+    } else if (draft.opinion_type === 'disclaimer') {
+      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : DISCLAIMER_BASIS_EXAMPLE);
+    } else {
+      setEditorBasis(draft.basis_for_opinion || '');
+    }
+  }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion]);
+
+  useEffect(() => {
+    // Auto-populate and persist illustrative basis into existing drafts when missing (qualified/adverse)
+    if (!draft) return;
+    const shouldPopulate = (type: AuditReportMainContent['opinion_type']) =>
+      draft.opinion_type === type && !(draft.basis_for_opinion?.trim()) && draft.id !== savedExampleForDraftId;
+
+    if (shouldPopulate('qualified')) {
+      const example = QUALIFIED_BASIS_EXAMPLE;
+      const patched: Partial<AuditReportMainContent> = {
+        basis_for_opinion: example,
+        basis_for_opinion_is_example: true,
+      };
+      (async () => {
+        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
+        if (saved) {
+          setDraft(saved as AuditReportMainContent);
+          setSavedExampleForDraftId(draft.id);
+          toast.success('Illustrative qualified basis populated (editable)');
+        }
+      })();
+    } else if (shouldPopulate('adverse')) {
+      const example = ADVERSE_BASIS_EXAMPLE;
+      const patched: Partial<AuditReportMainContent> = {
+        basis_for_opinion: example,
+        basis_for_opinion_is_example: true,
+      };
+      (async () => {
+        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
+        if (saved) {
+          setDraft(saved as AuditReportMainContent);
+          setSavedExampleForDraftId(draft.id);
+          toast.success('Illustrative adverse basis placeholder added (editable)');
+        }
+      })();
+    } else if (shouldPopulate('disclaimer')) {
+      const example = DISCLAIMER_BASIS_EXAMPLE;
+      const patched: Partial<AuditReportMainContent> = {
+        basis_for_opinion: example,
+        basis_for_opinion_is_example: true,
+      };
+      (async () => {
+        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
+        if (saved) {
+          setDraft(saved as AuditReportMainContent);
+          setSavedExampleForDraftId(draft.id);
+          toast.success('Illustrative disclaimer basis placeholder added (editable)');
+        }
+      })();
+    }
+  }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion, savedExampleForDraftId, saveContent]);
 
   const generator = useMemo(() => {
     if (!setup || !draft) return null;
@@ -118,7 +187,13 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   };
 
   const addEomItem = () => {
-    const next: EmphasisOfMatterItem = { title: 'Emphasis of Matter', paragraph: '', note_ref: '' };
+    const next: EmphasisOfMatterItem = {
+      title: '',
+      paragraph:
+        'We draw attention to Note ______ of the standalone financial statements___________________________________ which describes_______________________________________(user defined)',
+      note_ref: '',
+      is_example: true,
+    };
     updateDraft({
       has_emphasis_of_matter: true,
       emphasis_of_matter_items: [...(draft?.emphasis_of_matter_items || []), next],
@@ -194,8 +269,14 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                   );
                 }
                 if (b.kind === 'paragraph') {
+                  const highlight = (b as any).highlight === 'yellow';
                   return (
-                    <p key={idx} className="text-sm leading-relaxed whitespace-pre-wrap text-justify">
+                    <p
+                      key={idx}
+                      className={`text-sm leading-relaxed whitespace-pre-wrap text-justify ${
+                        highlight ? 'bg-yellow-100 p-2 rounded' : ''
+                      }`}
+                    >
                       {b.text}
                     </p>
                   );
@@ -366,6 +447,24 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
           {/* 2) Opinion */}
           <TabsContent value="opinion" className="space-y-6">
+            <Card className="bg-blue-50 border-blue-200">
+              <CardContent className="pt-6">
+                <p className="text-sm text-blue-900">
+                  <strong>Auditor Opinion Paragraph:</strong> The opinion paragraph is automatically generated based on:
+                  <br />
+                  • <strong>Criterion 1:</strong> Clean opinion + No cash flow + No branch auditors
+                  <br />
+                  • <strong>Criterion 2:</strong> Clean opinion + Cash flow included + No branch auditors
+                  <br />
+                  • <strong>Criterion 3:</strong> Clean opinion + No cash flow + With branch auditors
+                  <br />
+                  • <strong>Criterion 4:</strong> Clean opinion + Cash flow included + With branch auditors
+                  <br />
+                  Configure these options in the <strong>Configuration</strong> tab to update the opinion paragraph automatically.
+                </p>
+              </CardContent>
+            </Card>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Opinion type</Label>
@@ -398,8 +497,13 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               <Label>Basis for opinion (editable)</Label>
               <Textarea
                 rows={5}
-                value={draft.basis_for_opinion || ''}
-                onChange={(e) => updateDraft({ basis_for_opinion: e.target.value })}
+                value={editorBasis}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEditorBasis(v);
+                  // Persist into draft when user edits (so preview will show user text)
+                  updateDraft({ basis_for_opinion: v, basis_for_opinion_is_example: false });
+                }}
                 placeholder="Leave blank to use the standard starter wording in Preview."
               />
             </div>
@@ -476,7 +580,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                         value={item.title}
                         onChange={(e) => {
                           const next = [...(draft.emphasis_of_matter_items || [])];
-                          next[idx] = { ...next[idx], title: e.target.value };
+                          next[idx] = { ...next[idx], title: e.target.value, is_example: false };
                           updateDraft({ emphasis_of_matter_items: next, has_emphasis_of_matter: true });
                         }}
                       />
@@ -487,7 +591,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                         value={item.note_ref || ''}
                         onChange={(e) => {
                           const next = [...(draft.emphasis_of_matter_items || [])];
-                          next[idx] = { ...next[idx], note_ref: e.target.value };
+                          next[idx] = { ...next[idx], note_ref: e.target.value, is_example: false };
                           updateDraft({ emphasis_of_matter_items: next, has_emphasis_of_matter: true });
                         }}
                       />
@@ -500,7 +604,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                       value={item.paragraph}
                       onChange={(e) => {
                         const next = [...(draft.emphasis_of_matter_items || [])];
-                        next[idx] = { ...next[idx], paragraph: e.target.value };
+                        next[idx] = { ...next[idx], paragraph: e.target.value, is_example: false };
                         updateDraft({ emphasis_of_matter_items: next, has_emphasis_of_matter: true });
                       }}
                     />
@@ -615,7 +719,32 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           <TabsContent value="s143" className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <Label>143(3)(a) Proper books of account</Label>
+                <Label>143(3)(a) Information and explanations obtained</Label>
+                <Select
+                  value={draft.clause_143_3_a_information_status || 'standard'}
+                  onValueChange={(v) => updateDraft({ clause_143_3_a_information_status: v as StatusValue })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Standard (auto-adapts to opinion type)</SelectItem>
+                    <SelectItem value="qualified">Qualified / Other remarks (user-defined)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {draft.clause_143_3_a_information_status === 'qualified' && (
+                  <Textarea
+                    rows={2}
+                    value={draft.clause_143_3_a_information_details || ''}
+                    onChange={(e) => updateDraft({ clause_143_3_a_information_details: e.target.value })}
+                    placeholder="Provide custom paragraph for qualified/modified response"
+                    className={!draft.clause_143_3_a_information_details?.trim() ? 'bg-yellow-50' : ''}
+                  />
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>143(3)(b) Proper books of account</Label>
                 <StatusSelect
                   value={draft.clause_143_3_a_status}
                   onValueChange={(v) => updateDraft({ clause_143_3_a_status: v })}
@@ -629,27 +758,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               </div>
 
               <div className="space-y-2">
-                <Label>143(3)(b) Audit trail</Label>
-                <StatusSelect
-                  value={draft.clause_143_3_b_audit_trail_status}
-                  onValueChange={(v) => updateDraft({ clause_143_3_b_audit_trail_status: v })}
-                />
-                <Textarea
-                  rows={3}
-                  value={draft.clause_143_3_b_audit_trail_details || ''}
-                  onChange={(e) => updateDraft({ clause_143_3_b_audit_trail_details: e.target.value })}
-                  placeholder="Details / remarks (optional)"
-                />
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    checked={Boolean(draft.clause_143_3_b_server_outside_india)}
-                    onCheckedChange={(v) => updateDraft({ clause_143_3_b_server_outside_india: !!v })}
-                  />
-                  <Label className="font-normal">Servers / data outside India</Label>
-                </div>
-              </div>
-
-              <div className="space-y-2">
                 <Label>143(3)(c) Branch returns</Label>
                 <Textarea
                   rows={3}
@@ -658,17 +766,34 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                 />
               </div>
 
+              {draft.has_going_concern_uncertainty && (
+                <div className="space-y-2">
+                  <Label>143(3)(e) Going concern - SA 570 reporting</Label>
+                  <p className="text-sm text-muted-foreground">
+                    This field appears because you have marked "Material Uncertainty - Going Concern" in the Opinion section.
+                  </p>
+                  <Textarea
+                    rows={3}
+                    value={draft.clause_143_3_e_going_concern_impact || ''}
+                    onChange={(e) => updateDraft({ clause_143_3_e_going_concern_impact: e.target.value })}
+                    placeholder="Provide details if going concern uncertainty requires reporting under Section 143(3)"
+                    className={!draft.clause_143_3_e_going_concern_impact?.trim() ? 'bg-yellow-50' : ''}
+                  />
+                </div>
+              )}
+
               <div className="space-y-2">
-                <Label>143(3)(e) Going concern impact</Label>
+                <Label>143(3)(f) Internal Financial Controls (IFC)</Label>
                 <Textarea
                   rows={3}
-                  value={draft.clause_143_3_e_going_concern_impact || ''}
-                  onChange={(e) => updateDraft({ clause_143_3_e_going_concern_impact: e.target.value })}
+                  value={draft.clause_143_3_i_ifc_qualification || ''}
+                  onChange={(e) => updateDraft({ clause_143_3_i_ifc_qualification: e.target.value })}
+                  placeholder="Summary / qualification (optional)"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label>143(3)(f) Directors disqualified</Label>
+                <Label>143(3)(g) Directors disqualified (Section 164(2))</Label>
                 <div className="flex items-center gap-2">
                   <Checkbox
                     checked={Boolean(draft.clause_143_3_f_directors_disqualified)}
@@ -685,15 +810,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               </div>
 
               <div className="space-y-2">
-                <Label>143(3)(g) Qualification impact</Label>
-                <Textarea
-                  rows={3}
-                  value={draft.clause_143_3_g_qualification_impact || ''}
-                  onChange={(e) => updateDraft({ clause_143_3_g_qualification_impact: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
                 <Label>143(3)(h) Managerial remuneration</Label>
                 <StatusSelect
                   value={draft.clause_143_3_h_remuneration_status}
@@ -706,16 +822,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                   placeholder="Details / remarks (optional)"
                 />
               </div>
-
-              <div className="space-y-2">
-                <Label>143(3)(i) Internal Financial Controls (IFC)</Label>
-                <Textarea
-                  rows={3}
-                  value={draft.clause_143_3_i_ifc_qualification || ''}
-                  onChange={(e) => updateDraft({ clause_143_3_i_ifc_qualification: e.target.value })}
-                  placeholder="Summary / qualification (optional)"
-                />
-              </div>
             </div>
           </TabsContent>
 
@@ -724,34 +830,54 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <Label>Rule 11(a) Pending litigations</Label>
-                <Textarea
-                  rows={3}
+                <Select
                   value={draft.rule_11_a_pending_litigations || ''}
-                  onChange={(e) => updateDraft({ rule_11_a_pending_litigations: e.target.value })}
-                />
-                <div className="space-y-2">
-                  <Label className="text-sm">Note reference</Label>
-                  <Input
-                    value={draft.rule_11_a_note_ref || ''}
-                    onChange={(e) => updateDraft({ rule_11_a_note_ref: e.target.value })}
-                  />
-                </div>
+                  onValueChange={(v) => updateDraft({ rule_11_a_pending_litigations: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="has_litigations_disclosed">Pending litigation present and impact disclosed in financial statements</SelectItem>
+                    <SelectItem value="has_litigations_not_disclosed">Pending litigation present but NOT disclosed in the financial statements</SelectItem>
+                    <SelectItem value="no_litigations">No pending litigation exists which would impact its financial position</SelectItem>
+                  </SelectContent>
+                </Select>
+                {draft.rule_11_a_pending_litigations === 'has_litigations_disclosed' && (
+                  <div className="space-y-2">
+                    <Label className="text-sm">Note reference</Label>
+                    <Input
+                      value={draft.rule_11_a_note_ref || ''}
+                      onChange={(e) => updateDraft({ rule_11_a_note_ref: e.target.value })}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
                 <Label>Rule 11(b) Long-term contracts / derivatives</Label>
-                <Textarea
-                  rows={3}
+                <Select
                   value={draft.rule_11_b_long_term_contracts || ''}
-                  onChange={(e) => updateDraft({ rule_11_b_long_term_contracts: e.target.value })}
-                />
-                <div className="space-y-2">
-                  <Label className="text-sm">Note reference</Label>
-                  <Input
-                    value={draft.rule_11_b_note_ref || ''}
-                    onChange={(e) => updateDraft({ rule_11_b_note_ref: e.target.value })}
-                  />
-                </div>
+                  onValueChange={(v) => updateDraft({ rule_11_b_long_term_contracts: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="has_made_provision">Has made provision of material foreseeable losses on long-term contracts including derivative contracts and disclosed in financial statements</SelectItem>
+                    <SelectItem value="has_not_made_provision">Has NOT made provision of material foreseeable losses on long-term contracts including derivative contracts</SelectItem>
+                    <SelectItem value="no_contracts">The Company did not have any long-term contracts including derivative contracts as at financial year end</SelectItem>
+                  </SelectContent>
+                </Select>
+                {draft.rule_11_b_long_term_contracts === 'has_made_provision' && (
+                  <div className="space-y-2">
+                    <Label className="text-sm">Note reference</Label>
+                    <Input
+                      value={draft.rule_11_b_note_ref || ''}
+                      onChange={(e) => updateDraft({ rule_11_b_note_ref: e.target.value })}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -779,89 +905,134 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               </div>
 
               <div className="space-y-2">
-                <Label>Rule 11(d) Funds advanced/received via intermediaries</Label>
-                <StatusSelect
-                  value={draft.rule_11_d_audit_procedures_status}
-                  onValueChange={(v) => updateDraft({ rule_11_d_audit_procedures_status: v })}
-                />
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(draft.rule_11_d_receiving_fund_representations)}
-                      onCheckedChange={(v) => updateDraft({ rule_11_d_receiving_fund_representations: !!v })}
-                    />
-                    <Label className="font-normal">Representations for funds received</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(draft.rule_11_d_loan_fund_representations)}
-                      onCheckedChange={(v) => updateDraft({ rule_11_d_loan_fund_representations: !!v })}
-                    />
-                    <Label className="font-normal">Representations for funds advanced</Label>
-                  </div>
+                <Label>Rule 11(e) Funds routing via intermediaries</Label>
+                <div className="text-sm text-muted-foreground mb-2">
+                  Covers both: (a) funds advanced via intermediaries and (b) funds received via intermediaries
                 </div>
-                <Textarea
-                  rows={3}
-                  value={draft.rule_11_d_modification_details || ''}
-                  onChange={(e) => updateDraft({ rule_11_d_modification_details: e.target.value })}
-                  placeholder="Modifications / remarks (optional)"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Rule 11(e) Dividend</Label>
-                <StatusSelect
-                  value={draft.rule_11_e_dividend_status}
-                  onValueChange={(v) => updateDraft({ rule_11_e_dividend_status: v })}
-                />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-sm">Interim dividend amount</Label>
-                    <Input
-                      value={draft.rule_11_e_interim_dividend_amount == null ? '' : String(draft.rule_11_e_interim_dividend_amount)}
-                      onChange={(e) => updateDraft({ rule_11_e_interim_dividend_amount: coerceNumber(e.target.value) })}
-                    />
+                <Select
+                  value={draft.rule_11_g_funds_advanced_status || 'yes'}
+                  onValueChange={(v) => updateDraft({ rule_11_g_funds_advanced_status: v as StatusValue })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="yes">Yes / Standard paragraph (no funds routed)</SelectItem>
+                    <SelectItem value="no">No / Non-compliance (provide details)</SelectItem>
+                    <SelectItem value="qualified">Qualified / With remarks (provide details)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(draft.rule_11_g_funds_advanced_status === 'no' || draft.rule_11_g_funds_advanced_status === 'qualified') && (
+                  <div className="text-sm text-muted-foreground bg-muted p-2 rounded">
+                    <strong>Reference:</strong> For different type of reporting for modification in above clauses relating to Rule 11(e), refer to Illustrative reporting formats on modifications in Implementation Guide on Reporting under Rule 11(e) & 11(f) issued by ICAI
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-sm">Final dividend amount</Label>
-                    <Input
-                      value={draft.rule_11_e_final_dividend_amount == null ? '' : String(draft.rule_11_e_final_dividend_amount)}
-                      onChange={(e) => updateDraft({ rule_11_e_final_dividend_amount: coerceNumber(e.target.value) })}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm">Note reference</Label>
-                  <Input
-                    value={draft.rule_11_e_dividend_note_ref || ''}
-                    onChange={(e) => updateDraft({ rule_11_e_dividend_note_ref: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Rule 11(f) Audit trail (Rule 3(1))</Label>
-                <StatusSelect
-                  value={draft.rule_11_f_audit_trail_status}
-                  onValueChange={(v) => updateDraft({ rule_11_f_audit_trail_status: v })}
-                />
-                <Textarea
-                  rows={3}
-                  value={draft.rule_11_f_audit_trail_details || ''}
-                  onChange={(e) => updateDraft({ rule_11_f_audit_trail_details: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Rule 11(g) Funds advanced / received</Label>
-                <StatusSelect
-                  value={draft.rule_11_g_funds_advanced_status}
-                  onValueChange={(v) => updateDraft({ rule_11_g_funds_advanced_status: v })}
-                />
+                )}
                 <Textarea
                   rows={3}
                   value={draft.rule_11_g_funds_advanced_details || ''}
                   onChange={(e) => updateDraft({ rule_11_g_funds_advanced_details: e.target.value })}
+                  placeholder="Details for modified reporting (only if selecting No or Qualified)"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Rule 11(f) Dividend (Section 123 compliance)</Label>
+                <Select
+                  value={draft.rule_11_e_dividend_status || 'na'}
+                  onValueChange={(v) => updateDraft({ rule_11_e_dividend_status: v as StatusValue })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="na">Not applicable - No dividend</SelectItem>
+                    <SelectItem value="yes">Yes / Complied - Standard reporting</SelectItem>
+                    <SelectItem value="no">No / Non-compliance</SelectItem>
+                    <SelectItem value="qualified">Qualified / With modifications</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(draft.rule_11_e_dividend_status === 'yes' || draft.rule_11_e_dividend_status === 'no' || draft.rule_11_e_dividend_status === 'qualified') && (
+                  <>
+                    <div className="space-y-2">
+                      <Label className="text-sm">Note reference in financial statements</Label>
+                      <Input
+                        value={draft.rule_11_e_dividend_note_ref || ''}
+                        onChange={(e) => updateDraft({ rule_11_e_dividend_note_ref: e.target.value })}
+                        placeholder="Note number"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Select applicable dividend types:</Label>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={Boolean(draft.rule_11_e_interim_dividend_paid)}
+                          onCheckedChange={(v) => updateDraft({ rule_11_e_interim_dividend_paid: !!v })}
+                        />
+                        <Label className="font-normal">(a) Interim dividend declared and paid</Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={Boolean(draft.rule_11_e_interim_dividend_declared_not_paid)}
+                          onCheckedChange={(v) => updateDraft({ rule_11_e_interim_dividend_declared_not_paid: !!v })}
+                        />
+                        <Label className="font-normal">(a) Interim dividend declared but not yet paid</Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={Boolean(draft.rule_11_e_final_dividend_previous_year)}
+                          onCheckedChange={(v) => updateDraft({ rule_11_e_final_dividend_previous_year: !!v })}
+                        />
+                        <Label className="font-normal">(b) Final dividend paid for previous year</Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={Boolean(draft.rule_11_e_final_dividend_proposed)}
+                          onCheckedChange={(v) => updateDraft({ rule_11_e_final_dividend_proposed: !!v })}
+                        />
+                        <Label className="font-normal">(c) Final dividend proposed for current year</Label>
+                      </div>
+                    </div>
+                  </>
+                )}
+                {(draft.rule_11_e_dividend_status === 'no' || draft.rule_11_e_dividend_status === 'qualified') && (
+                  <>
+                    <Textarea
+                      rows={4}
+                      value={draft.rule_11_e_dividend_details || ''}
+                      onChange={(e) => updateDraft({ rule_11_e_dividend_details: e.target.value })}
+                      placeholder="Provide detailed reporting for modifications/non-compliance in Rule 11(f)"
+                    />
+                    <div className="text-sm text-muted-foreground bg-muted p-2 rounded">
+                      <strong>Reference:</strong> For different type of reporting for modification in above clauses relating to Rule 11(f), refer to Illustrative reporting formats on modifications in Implementation Guide on Reporting under Rule 11(e) & 11(f) issued by ICAI
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Rule 11(g) Audit trail (Rule 3(1))</Label>
+                <Select
+                  value={draft.rule_11_f_audit_trail_status || ''}
+                  onValueChange={(v) => updateDraft({ rule_11_f_audit_trail_status: v as StatusValue })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="yes">Yes / Complied</SelectItem>
+                    <SelectItem value="no">No / Not complied</SelectItem>
+                    <SelectItem value="qualified">Qualified / With remarks</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(draft.rule_11_f_audit_trail_status === 'no' || draft.rule_11_f_audit_trail_status === 'qualified') && (
+                  <div className="text-sm text-muted-foreground bg-muted p-2 rounded">
+                    <strong>Reference:</strong> Refer various illustrations given in Implementation Guide on Reporting under Rule 11(g) of the Companies (Audit and Auditors) Rules, 2014
+                  </div>
+                )}
+                <Textarea
+                  rows={3}
+                  value={draft.rule_11_f_audit_trail_details || ''}
+                  onChange={(e) => updateDraft({ rule_11_f_audit_trail_details: e.target.value })}
                 />
               </div>
             </div>

@@ -9,6 +9,7 @@ import { CARONavigator } from '@/components/audit-report/CARONavigator';
 import { MainReportEditor } from '@/components/audit-report/MainReportEditor';
 import { ReportExport } from '@/components/audit-report/ReportExport';
 import { useAuditReportSetup } from '@/hooks/useAuditReportSetup';
+import { formatFinancialYearAsReportDate } from '@/utils/dateFormatting';
 
 export default function AuditReport() {
   const { currentEngagement } = useEngagement();
@@ -124,7 +125,7 @@ export default function AuditReport() {
             <MainReportEditor 
               engagementId={currentEngagement.id}
               clientName={currentEngagement.client_name}
-              financialYear={currentEngagement.financial_year}
+              financialYear={formatFinancialYearAsReportDate(currentEngagement.financial_year)}
             />
           ) : (
             <Card>
