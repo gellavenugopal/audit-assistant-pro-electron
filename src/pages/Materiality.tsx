@@ -127,7 +127,7 @@ export default function Materiality() {
   const [newQuestion, setNewQuestion] = useState('');
   const [totalRiskScore, setTotalRiskScore] = useState(0);
   const [riskPercentage, setRiskPercentage] = useState(0);
-  const [systemRisk, setSystemRisk] = useState('Low Risk');
+  const [systemRisk, setSystemRisk] = useState('');
   const [finalRisk, setFinalRisk] = useState('');
   const [isRiskFinalized, setIsRiskFinalized] = useState(false);
   const [remarks, setRemarks] = useState('');
@@ -151,8 +151,10 @@ export default function Materiality() {
 
     if (count === 0) {
       setRiskPercentage(0);
-      setSystemRisk('Low Risk');
-      setFinalRisk('Low Risk');
+      setSystemRisk('');
+      if (!isRiskFinalized) {
+        setFinalRisk('');
+      }
       return;
     }
 
@@ -282,11 +284,15 @@ export default function Materiality() {
   };
 
   const finalizeRisk = () => {
+    if (!finalRisk) {
+      alert('Please select a risk level (Low Risk, Medium Risk, or High Risk) before finalizing.');
+      return;
+    }
     setIsRiskFinalized(true);
   };
 
   const switchToMateriality = () => {
-    if (!finalRisk) {
+    if (!isRiskFinalized || !finalRisk) {
       const result = window.confirm('Risk assessment is not finalized. Do you want to skip and proceed to materiality?');
       if (!result) {
         return;
@@ -300,7 +306,7 @@ export default function Materiality() {
   };
 
   const exportToExcel = () => {
-    if (!finalRisk) {
+    if (!isRiskFinalized || !finalRisk) {
       const result = window.confirm('Risk assessment is not finalized. Do you want to skip and proceed with export?');
       if (!result) {
         return;
