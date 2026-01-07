@@ -99,14 +99,31 @@ export default function TrialBalanceNew() {
   
   // Data State
   const [currentData, setCurrentData] = useState<LedgerRow[]>([]);
+  const [previousData, setPreviousData] = useState<LedgerRow[]>([]);
   const [currentStockData, setCurrentStockData] = useState<any[]>([]);
   const [savedMappings, setSavedMappings] = useState<Record<string, ClassificationResult>>({});
+  const [importPeriodType, setImportPeriodType] = useState<'current' | 'previous'>('current');
+  const [isPeriodDialogOpen, setIsPeriodDialogOpen] = useState(false);
+  const [isAddLineDialogOpen, setIsAddLineDialogOpen] = useState(false);
+  const [pendingImportData, setPendingImportData] = useState<LedgerRow[] | null>(null);
+  const [newLineForm, setNewLineForm] = useState({
+    ledgerName: '',
+    primaryGroup: '',
+    openingBalance: 0,
+    debit: 0,
+    credit: 0,
+    closingBalance: 0,
+    periodType: 'current' as 'current' | 'previous'
+  });
+  const [selectedRuleSet, setSelectedRuleSet] = useState<string>('schedule-iii');
   
   // UI State
   const [activeTab, setActiveTab] = useState('data');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [h1Filter, setH1Filter] = useState<string>('all');
   const [h2Filter, setH2Filter] = useState<string>('all');
+  const [h3Filter, setH3Filter] = useState<string>('all');
   const [fromDate, setFromDate] = useState<string>('2024-04-01');
   const [toDate, setToDate] = useState<string>('2025-03-31');
   const [odbcPort, setOdbcPort] = useState<string>('9000');
@@ -150,13 +167,23 @@ export default function TrialBalanceNew() {
       filtered = filtered.filter(row => (row['Status'] || 'Unmapped') === statusFilter);
     }
     
+    // H1 filter
+    if (h1Filter !== 'all') {
+      filtered = filtered.filter(row => (row['H1'] || '') === h1Filter);
+    }
+    
     // H2 filter
     if (h2Filter !== 'all') {
       filtered = filtered.filter(row => (row['H2'] || '') === h2Filter);
     }
     
+    // H3 filter
+    if (h3Filter !== 'all') {
+      filtered = filtered.filter(row => (row['H3'] || '') === h3Filter);
+    }
+    
     return filtered;
-  }, [currentData, searchTerm, statusFilter, h2Filter]);
+  }, [currentData, searchTerm, statusFilter, h1Filter, h2Filter, h3Filter]);
   
   // Totals calculation
   const totals = useMemo(() => {
@@ -250,73 +277,132 @@ export default function TrialBalanceNew() {
       
       // Auto-classify
       const classified = classifyDataframeBatch(processedData, savedMappings, businessType);
-      setCurrentData(classified);
       
-      // Save to database
-      if (currentEngagement?.id) {
-        const dbLines: TrialBalanceLineInput[] = classified.map(row => ({
-          account_code: row['Composite Key'] || '',
-          account_name: row['Ledger Name'] || '',
-          ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
-          ledger_primary_group: row['Primary Group'] || null,
-          opening_balance: row['Opening Balance'] || 0,
-          debit: row['Debit'] || 0,
-          credit: row['Credit'] || 0,
-          closing_balance: row['Closing Balance'] || 0,
-          balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
-          period_type: 'current',
-          period_ending: toDate || null,
-          face_group: row.H1 || null,
-          note_group: row.H2 || null,
-          sub_note: row.H3 || null,
-          level4_group: row.H4 || null,
-          level5_detail: row.H5 || null,
-        }));
-        
-        await trialBalanceDB.importLines(dbLines, false);
-      }
+      // Store temporarily and show period selection dialog
+      setPendingImportData(classified);
+      setIsPeriodDialogOpen(true);
+      setIsFetching(false);
+      setIsEntityDialogOpen(false);
       
-      // Fetch stock items if required
-      if (includeStockItems && (businessType === 'Trading' || businessType === 'Manufacturing')) {
-        try {
-          const stockItems = await odbcConnection.fetchStockItems();
-          
-          // Transform stock items to match the expected format
-          const transformedStockItems = stockItems.map((item: any) => ({
-            'Item Name': item['Item Name'] || '',
-            'Stock Group': item['Stock Group'] || '',
-            'Opening Value': parseFloat(item['Opening Value'] || 0),
-            'Closing Value': parseFloat(item['Closing Value'] || 0),
-            'Stock Category': item['Stock Category'] || '',
-            'Key': item['Key'] || ''
-          }));
-          
-          setCurrentStockData(transformedStockItems);
-        } catch (error) {
-          console.error('Failed to fetch stock items:', error);
-          toast({
-            title: 'Stock Items Error',
-            description: 'Failed to fetch stock items from Tally',
-            variant: 'destructive'
-          });
-        }
-      }
-      
-      toast({
-        title: 'Success',
-        description: `Imported and classified ${classified.length} ledgers from Tally`
-      });
     } catch (error) {
       toast({
         title: 'Error',
         description: error instanceof Error ? error.message : 'Failed to fetch from Tally',
         variant: 'destructive'
       });
-    } finally {
       setIsFetching(false);
       setIsEntityDialogOpen(false);
     }
-  }, [entityType, fromDate, toDate, odbcConnection, savedMappings, toast]);
+  }, [entityType, fromDate, toDate, odbcConnection, savedMappings, businessType, toast]);
+  
+  // Handle period selection confirmation
+  const handlePeriodConfirm = useCallback(async () => {
+    if (!pendingImportData) return;
+    
+    if (importPeriodType === 'current') {
+      setCurrentData(pendingImportData);
+    } else {
+      setPreviousData(pendingImportData);
+    }
+    
+    // Save to database
+    if (currentEngagement?.id) {
+      const dbLines: TrialBalanceLineInput[] = pendingImportData.map(row => ({
+        account_code: row['Composite Key'] || '',
+        account_name: row['Ledger Name'] || '',
+        ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+        ledger_primary_group: row['Primary Group'] || null,
+        opening_balance: row['Opening Balance'] || 0,
+        debit: row['Debit'] || 0,
+        credit: row['Credit'] || 0,
+        closing_balance: row['Closing Balance'] || 0,
+        balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+        period_type: importPeriodType,
+        period_ending: toDate || null,
+        face_group: row.H1 || null,
+        note_group: row.H2 || null,
+        sub_note: row.H3 || null,
+        level4_group: row.H4 || null,
+        level5_detail: row.H5 || null,
+      }));
+      
+      await trialBalanceDB.importLines(dbLines, false);
+    }
+    
+    // Fetch stock items if required
+    if (includeStockItems && (businessType === 'Trading' || businessType === 'Manufacturing')) {
+      try {
+        const stockItems = await odbcConnection.fetchStockItems();
+        const transformedStockItems = stockItems.map((item: any) => ({
+          'Item Name': item['Item Name'] || '',
+          'Stock Group': item['Stock Group'] || '',
+          'Opening Value': parseFloat(item['Opening Value'] || 0),
+          'Closing Value': parseFloat(item['Closing Value'] || 0),
+          'Stock Category': item['Stock Category'] || '',
+          'Key': item['Key'] || ''
+        }));
+        setCurrentStockData(transformedStockItems);
+      } catch (error) {
+        console.error('Failed to fetch stock items:', error);
+      }
+    }
+    
+    toast({
+      title: 'Success',
+      description: `Imported ${pendingImportData.length} ledgers as ${importPeriodType === 'current' ? 'Current' : 'Previous'} Period`
+    });
+    
+    setPendingImportData(null);
+    setIsPeriodDialogOpen(false);
+  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, includeStockItems, businessType, odbcConnection, trialBalanceDB, toast]);
+  
+  // Handle adding a new line item
+  const handleAddLineItem = useCallback(() => {
+    const newLine: LedgerRow = {
+      'Ledger Name': newLineForm.ledgerName,
+      'Primary Group': newLineForm.primaryGroup,
+      'Parent Group': '',
+      'Composite Key': generateLedgerKey(newLineForm.ledgerName, newLineForm.primaryGroup),
+      'Opening Balance': newLineForm.openingBalance,
+      'Debit': newLineForm.debit,
+      'Credit': newLineForm.credit,
+      'Closing Balance': newLineForm.closingBalance,
+      'Is Revenue': 'No',
+      'Sheet Name': newLineForm.periodType === 'current' ? 'TB CY' : 'TB PY',
+      'H1': '',
+      'H2': '',
+      'H3': '',
+      'H4': '',
+      'H5': '',
+      'Status': 'Unmapped'
+    };
+    
+    // Classify the new line
+    const classified = classifyDataframeBatch([newLine], savedMappings, businessType);
+    
+    if (newLineForm.periodType === 'current') {
+      setCurrentData(prev => [...prev, classified[0]]);
+    } else {
+      setPreviousData(prev => [...prev, classified[0]]);
+    }
+    
+    toast({
+      title: 'Line Added',
+      description: `Added "${newLineForm.ledgerName}" to ${newLineForm.periodType === 'current' ? 'Current' : 'Previous'} Period`
+    });
+    
+    // Reset form
+    setNewLineForm({
+      ledgerName: '',
+      primaryGroup: '',
+      openingBalance: 0,
+      debit: 0,
+      credit: 0,
+      closingBalance: 0,
+      periodType: 'current'
+    });
+    setIsAddLineDialogOpen(false);
+  }, [newLineForm, savedMappings, businessType, toast]);
   
   // Auto-classify existing data
   const handleAutoClassify = useCallback(() => {
@@ -1085,12 +1171,12 @@ export default function TrialBalanceNew() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Filter Bar (Compact) */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-white border-b">
+        <div className="flex items-center gap-2 px-4 py-2 bg-white border-b flex-wrap">
           <Input
             placeholder="Search (Ctrl+F)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-8 w-64 text-sm"
+            className="h-8 w-52 text-sm"
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 setSearchTerm('');
@@ -1098,7 +1184,7 @@ export default function TrialBalanceNew() {
             }}
           />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-[130px] text-sm">
+            <SelectTrigger className="h-8 w-[110px] text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1108,8 +1194,18 @@ export default function TrialBalanceNew() {
               <SelectItem value="Error">Error</SelectItem>
             </SelectContent>
           </Select>
+          <Select value={h1Filter} onValueChange={setH1Filter}>
+            <SelectTrigger className="h-8 w-[110px] text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All H1</SelectItem>
+              <SelectItem value="Balance Sheet">Balance Sheet</SelectItem>
+              <SelectItem value="P&L Account">P&L Account</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={h2Filter} onValueChange={setH2Filter}>
-            <SelectTrigger className="h-8 w-[130px] text-sm">
+            <SelectTrigger className="h-8 w-[110px] text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1121,7 +1217,38 @@ export default function TrialBalanceNew() {
               <SelectItem value="Expenses">Expenses</SelectItem>
             </SelectContent>
           </Select>
+          <Select value={h3Filter} onValueChange={setH3Filter}>
+            <SelectTrigger className="h-8 w-[140px] text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="max-h-[300px]">
+              <SelectItem value="all">All H3</SelectItem>
+              <SelectItem value="Trade Receivables">Trade Receivables</SelectItem>
+              <SelectItem value="Cash and Bank Balance">Cash & Bank</SelectItem>
+              <SelectItem value="Inventories">Inventories</SelectItem>
+              <SelectItem value="Trade Payables">Trade Payables</SelectItem>
+              <SelectItem value="Borrowings">Borrowings</SelectItem>
+              <SelectItem value="Revenue from Operations">Revenue</SelectItem>
+              <SelectItem value="Other Income">Other Income</SelectItem>
+              <SelectItem value="Other Expenses">Other Expenses</SelectItem>
+              <SelectItem value="Employee Benefits Expenses">Employee Benefits</SelectItem>
+            </SelectContent>
+          </Select>
+          {selectedRowIndices.size > 0 && (
+            <div className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-1 rounded">
+              {selectedRowIndices.size} selected (Ctrl+Click / Shift+Click)
+            </div>
+          )}
           <div className="flex-1" />
+          <Button 
+            size="sm" 
+            variant="outline" 
+            onClick={() => setIsAddLineDialogOpen(true)}
+            className="h-7 text-xs"
+          >
+            <Plus className="w-3 h-3 mr-1" />
+            Add Line
+          </Button>
           <div className="flex gap-4 text-xs text-muted-foreground">
             <span>Opening: <strong className="text-foreground">{formatNumber(totals.opening)}</strong></span>
             <span>Debit: <strong className="text-foreground">{formatNumber(totals.debit)}</strong></span>
@@ -1198,14 +1325,16 @@ export default function TrialBalanceNew() {
                   <TableHead className="w-12">
                     <input
                       type="checkbox"
-                      checked={selectedRowIndices.size === filteredData.length && filteredData.length > 0}
+                      checked={selectedRowIndices.size === currentData.length && currentData.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedRowIndices(new Set(filteredData.map((_, i) => i)));
+                          // Select all original indices
+                          setSelectedRowIndices(new Set(currentData.map((_, i) => i)));
                         } else {
                           setSelectedRowIndices(new Set());
                         }
                       }}
+                      title="Select All / Deselect All"
                     />
                   </TableHead>
                   <TableHead>Ledger Name</TableHead>
@@ -1558,7 +1687,17 @@ export default function TrialBalanceNew() {
                       Manage automatic classification rules for trial balance items
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center">
+                    <Select value={selectedRuleSet} onValueChange={setSelectedRuleSet}>
+                      <SelectTrigger className="w-[220px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="schedule-iii">Schedule III (Corporate)</SelectItem>
+                        <SelectItem value="non-corporate">Non-Corporate Entity (ICAI)</SelectItem>
+                        <SelectItem value="custom">Custom Rules</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button size="sm" variant="outline" onClick={() => setIsRuleTemplateDialogOpen(true)}>
                       <Save className="w-4 h-4 mr-2" />
                       Save as Template
@@ -1941,6 +2080,157 @@ export default function TrialBalanceNew() {
               </Button>
               <Button variant="destructive" onClick={() => handleConfirmReset(false)}>
                 Clear Without Saving
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Period Selection Dialog */}
+      <Dialog open={isPeriodDialogOpen} onOpenChange={setIsPeriodDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Select Import Period</DialogTitle>
+            <DialogDescription>
+              Specify whether this imported data is for the Current Period or Previous Period
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div
+                onClick={() => setImportPeriodType('current')}
+                className={cn(
+                  "p-4 border rounded-lg cursor-pointer text-center transition-all",
+                  importPeriodType === 'current'
+                    ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500"
+                    : "hover:border-gray-400"
+                )}
+              >
+                <p className="font-semibold">Current Period</p>
+                <p className="text-sm text-muted-foreground mt-1">{fromDate} to {toDate}</p>
+              </div>
+              <div
+                onClick={() => setImportPeriodType('previous')}
+                className={cn(
+                  "p-4 border rounded-lg cursor-pointer text-center transition-all",
+                  importPeriodType === 'previous'
+                    ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500"
+                    : "hover:border-gray-400"
+                )}
+              >
+                <p className="font-semibold">Previous Period</p>
+                <p className="text-sm text-muted-foreground mt-1">For comparison</p>
+              </div>
+            </div>
+            
+            <div className="text-sm text-muted-foreground bg-muted p-3 rounded">
+              <p>Data to import: <strong>{pendingImportData?.length || 0} ledgers</strong></p>
+              <p className="mt-1">
+                {currentData.length > 0 && `Current period has ${currentData.length} ledgers. `}
+                {previousData.length > 0 && `Previous period has ${previousData.length} ledgers.`}
+              </p>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => {
+                setIsPeriodDialogOpen(false);
+                setPendingImportData(null);
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={handlePeriodConfirm}>
+                Import as {importPeriodType === 'current' ? 'Current' : 'Previous'} Period
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Add New Line Item Dialog */}
+      <Dialog open={isAddLineDialogOpen} onOpenChange={setIsAddLineDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add New Line Item</DialogTitle>
+            <DialogDescription>
+              Manually add a new ledger line item to the trial balance
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 space-y-2">
+                <label className="text-sm font-medium">Ledger Name *</label>
+                <Input
+                  value={newLineForm.ledgerName}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, ledgerName: e.target.value }))}
+                  placeholder="e.g., Cash in Hand"
+                />
+              </div>
+              <div className="col-span-2 space-y-2">
+                <label className="text-sm font-medium">Primary Group *</label>
+                <Input
+                  value={newLineForm.primaryGroup}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, primaryGroup: e.target.value }))}
+                  placeholder="e.g., Cash-in-hand, Bank Accounts"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Opening Balance</label>
+                <Input
+                  type="number"
+                  value={newLineForm.openingBalance}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, openingBalance: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Closing Balance</label>
+                <Input
+                  type="number"
+                  value={newLineForm.closingBalance}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, closingBalance: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Debit</label>
+                <Input
+                  type="number"
+                  value={newLineForm.debit}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, debit: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Credit</label>
+                <Input
+                  type="number"
+                  value={newLineForm.credit}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, credit: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="col-span-2 space-y-2">
+                <label className="text-sm font-medium">Period</label>
+                <Select 
+                  value={newLineForm.periodType} 
+                  onValueChange={(value: 'current' | 'previous') => setNewLineForm(prev => ({ ...prev, periodType: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current">Current Period</SelectItem>
+                    <SelectItem value="previous">Previous Period</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setIsAddLineDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleAddLineItem}
+                disabled={!newLineForm.ledgerName || !newLineForm.primaryGroup}
+              >
+                Add Line Item
               </Button>
             </div>
           </div>
