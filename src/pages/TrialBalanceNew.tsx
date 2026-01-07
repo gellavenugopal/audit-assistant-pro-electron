@@ -113,6 +113,17 @@ export default function TrialBalanceNew() {
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [isClassificationManagerOpen, setIsClassificationManagerOpen] = useState(false);
+  const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
+  const [editingRuleKey, setEditingRuleKey] = useState<string | null>(null);
+  const [ruleForm, setRuleForm] = useState({
+    conditionType: 'Primary Group',
+    conditionValue: '',
+    h1: '',
+    h2: '',
+    h3: '',
+    h4: '',
+    h5: ''
+  });
   
   // Filtered data
   const filteredData = useMemo(() => {
@@ -592,6 +603,150 @@ export default function TrialBalanceNew() {
     }
   }, [toast]);
   
+  // Rule Engine Handlers
+  const handleAddRule = useCallback(() => {
+    setEditingRuleKey(null);
+    setRuleForm({
+      conditionType: 'Primary Group',
+      conditionValue: '',
+      h1: '',
+      h2: '',
+      h3: '',
+      h4: '',
+      h5: ''
+    });
+    setIsRuleDialogOpen(true);
+  }, []);
+  
+  const handleEditRule = useCallback((key: string, mapping: ClassificationResult) => {
+    setEditingRuleKey(key);
+    setRuleForm({
+      conditionType: 'Primary Group',
+      conditionValue: key.split('|')[1] || key,
+      h1: mapping.h1 || '',
+      h2: mapping.h2 || '',
+      h3: mapping.h3 || '',
+      h4: mapping.h4 || '',
+      h5: mapping.h5 || ''
+    });
+    setIsRuleDialogOpen(true);
+  }, []);
+  
+  const handleSaveRule = useCallback(() => {
+    if (!ruleForm.conditionValue) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a condition value',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    const key = `*|${ruleForm.conditionValue}`;
+    const newMapping: ClassificationResult = {
+      h1: ruleForm.h1,
+      h2: ruleForm.h2,
+      h3: ruleForm.h3,
+      h4: ruleForm.h4,
+      h5: ruleForm.h5,
+      status: 'Mapped'
+    };
+    
+    handleSaveMapping(key, newMapping);
+    setIsRuleDialogOpen(false);
+    
+    toast({
+      title: editingRuleKey ? 'Rule Updated' : 'Rule Added',
+      description: `Classification rule ${editingRuleKey ? 'updated' : 'created'} successfully`
+    });
+  }, [ruleForm, editingRuleKey, handleSaveMapping, toast]);
+  
+  const handleImportRules = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        
+        const newMappings: Record<string, ClassificationResult> = {};
+        jsonData.forEach((row: any) => {
+          const key = `*|${row['Condition Value'] || row['condition_value'] || ''}`;
+          if (key !== '*|') {
+            newMappings[key] = {
+              h1: row['H1'] || '',
+              h2: row['H2'] || '',
+              h3: row['H3'] || '',
+              h4: row['H4'] || '',
+              h5: row['H5'] || '',
+              status: 'Mapped'
+            };
+          }
+        });
+        
+        setSavedMappings(prev => ({ ...prev, ...newMappings }));
+        
+        toast({
+          title: 'Import Successful',
+          description: `Imported ${Object.keys(newMappings).length} rules from Excel`
+        });
+      } catch (error) {
+        toast({
+          title: 'Import Failed',
+          description: error instanceof Error ? error.message : 'Failed to import rules',
+          variant: 'destructive'
+        });
+      }
+    };
+    input.click();
+  }, [toast]);
+  
+  const handleExportRules = useCallback(() => {
+    if (Object.keys(savedMappings).length === 0) {
+      toast({
+        title: 'No Rules',
+        description: 'No rules to export',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    try {
+      const rulesData = Object.entries(savedMappings).map(([key, mapping]) => ({
+        'Condition Type': 'Primary Group',
+        'Condition Value': key.split('|')[1] || key,
+        'H1': mapping.h1 || '',
+        'H2': mapping.h2 || '',
+        'H3': mapping.h3 || '',
+        'H4': mapping.h4 || '',
+        'H5': mapping.h5 || ''
+      }));
+      
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(rulesData);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Classification Rules');
+      XLSX.writeFile(workbook, `Classification_Rules_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      toast({
+        title: 'Export Successful',
+        description: `Exported ${rulesData.length} rules to Excel`
+      });
+    } catch (error) {
+      toast({
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export rules',
+        variant: 'destructive'
+      });
+    }
+  }, [savedMappings, toast]);
+  
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Excel-style Ribbon */}
@@ -923,10 +1078,20 @@ export default function TrialBalanceNew() {
                       Manage automatic classification rules for trial balance items
                     </p>
                   </div>
-                  <Button onClick={() => toast({ title: 'Add Rule', description: 'Rule creation dialog coming soon' })}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add New Rule
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={handleImportRules}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Import Rules
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleExportRules}>
+                      <Download className="w-4 h-4 mr-2" />
+                      Export Rules
+                    </Button>
+                    <Button onClick={handleAddRule}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New Rule
+                    </Button>
+                  </div>
                 </div>
                 
                 <div className="border rounded-lg">
@@ -944,7 +1109,7 @@ export default function TrialBalanceNew() {
                       {Object.entries(savedMappings).length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                            No rules defined yet. Create rules to automate classification.
+                            No rules defined yet. Click "Add New Rule" or import from Excel to get started.
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -962,6 +1127,8 @@ export default function TrialBalanceNew() {
                                 <div><strong>H1:</strong> {mapping.h1}</div>
                                 <div><strong>H2:</strong> {mapping.h2}</div>
                                 <div><strong>H3:</strong> {mapping.h3}</div>
+                                {mapping.h4 && <div><strong>H4:</strong> {mapping.h4}</div>}
+                                {mapping.h5 && <div><strong>H5:</strong> {mapping.h5}</div>}
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
@@ -969,7 +1136,7 @@ export default function TrialBalanceNew() {
                                 <Button 
                                   size="sm" 
                                   variant="ghost"
-                                  onClick={() => toast({ title: 'Edit Rule', description: 'Edit functionality coming soon' })}
+                                  onClick={() => handleEditRule(key, mapping)}
                                 >
                                   <Edit className="w-4 h-4" />
                                 </Button>
@@ -1163,6 +1330,96 @@ export default function TrialBalanceNew() {
         onSaveMapping={handleSaveMapping}
         onDeleteMapping={handleDeleteMapping}
       />
+
+      {/* Rule Add/Edit Dialog */}
+      <Dialog open={isRuleDialogOpen} onOpenChange={setIsRuleDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingRuleKey ? 'Edit Classification Rule' : 'Add New Classification Rule'}</DialogTitle>
+            <DialogDescription>
+              Define a rule to automatically classify trial balance items based on Tally Primary Group
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Condition Type</label>
+              <Select value={ruleForm.conditionType} onValueChange={(val) => setRuleForm(prev => ({ ...prev, conditionType: val }))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Primary Group">Tally Primary Group</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Condition Value *</label>
+              <Input
+                value={ruleForm.conditionValue}
+                onChange={(e) => setRuleForm(prev => ({ ...prev, conditionValue: e.target.value }))}
+                placeholder="e.g., Current Assets, Bank Accounts"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H1 Classification</label>
+                <Input
+                  value={ruleForm.h1}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h1: e.target.value }))}
+                  placeholder="e.g., Balance Sheet"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H2 Classification</label>
+                <Input
+                  value={ruleForm.h2}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h2: e.target.value }))}
+                  placeholder="e.g., Assets"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H3 Classification</label>
+                <Input
+                  value={ruleForm.h3}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h3: e.target.value }))}
+                  placeholder="e.g., Current Assets"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H4 Classification</label>
+                <Input
+                  value={ruleForm.h4}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h4: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H5 Classification</label>
+                <Input
+                  value={ruleForm.h5}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h5: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setIsRuleDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveRule}>
+                {editingRuleKey ? 'Update Rule' : 'Create Rule'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
