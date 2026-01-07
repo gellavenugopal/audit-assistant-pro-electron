@@ -77,15 +77,16 @@ export function ScheduleIIIBalanceSheet({
     }
   };
 
-  const hasPreviousPeriod = previousLines.length > 0;
+  const hasPreviousPeriod = previousLines && previousLines.length > 0;
   const formatLabel = getFormatLabel(constitution);
   const bsFormat = getBalanceSheetFormat(constitution);
 
   // Helper to get amount from lines by fs_area
   const getAmountByFsArea = (lines: TrialBalanceLine[], fsArea: string): number => {
+    if (!lines || !Array.isArray(lines)) return 0;
     return lines
-      .filter(l => l.fs_area === fsArea)
-      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+      .filter(l => l && l.fs_area === fsArea)
+      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   };
 
   // Build display items with amounts and note numbers
@@ -120,21 +121,21 @@ export function ScheduleIIIBalanceSheet({
   }, [bsFormat, currentLines, previousLines, startingNoteNumber]);
 
   // Calculate totals
-  const totalAssets = currentLines
-    .filter(l => l.aile === 'Asset')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const totalAssets = (currentLines || [])
+    .filter(l => l && l.aile === 'Asset')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   
-  const totalLiabilities = currentLines
-    .filter(l => l.aile === 'Liability')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const totalLiabilities = (currentLines || [])
+    .filter(l => l && l.aile === 'Liability')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
 
-  const prevTotalAssets = previousLines
-    .filter(l => l.aile === 'Asset')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const prevTotalAssets = (previousLines || [])
+    .filter(l => l && l.aile === 'Asset')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   
-  const prevTotalLiabilities = previousLines
-    .filter(l => l.aile === 'Liability')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const prevTotalLiabilities = (previousLines || [])
+    .filter(l => l && l.aile === 'Liability')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
 
   const renderRow = (item: DisplayLineItem, index: number) => {
     const isHeader = item.level === 0 || item.level === 1;

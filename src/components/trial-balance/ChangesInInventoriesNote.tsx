@@ -73,31 +73,32 @@ export function ChangesInInventoriesNote({
 
   // Calculate inventory values by category
   const calculateInventory = () => {
-    const categories = {
-      'Stock-in-Trade': ['Stock-in-Trade'],
-      'Work in Progress': ['Work-in-Progress'],
-      'Finished Goods': ['Finished Goods']
-    };
-
     const result = {
       'Stock-in-Trade': { opening: 0, closing: 0 },
       'Work in Progress': { opening: 0, closing: 0 },
       'Finished Goods': { opening: 0, closing: 0 }
     };
 
+    // Safety check for stockData
+    if (!stockData || !Array.isArray(stockData)) return result;
+
     stockData.forEach(item => {
-      const category = item['Stock Category'];
+      if (!item) return;
+      const category = (item['Stock Category'] || '').toLowerCase();
+      // Stock values are assets (Dr), so use Math.abs to ensure positive values
+      const openingValue = Math.abs(item['Opening Value'] || 0);
+      const closingValue = Math.abs(item['Closing Value'] || 0);
       
-      // Match to standard categories
-      if (categories['Stock-in-Trade'].includes(category)) {
-        result['Stock-in-Trade'].opening += item['Opening Value'];
-        result['Stock-in-Trade'].closing += item['Closing Value'];
-      } else if (categories['Work in Progress'].includes(category)) {
-        result['Work in Progress'].opening += item['Opening Value'];
-        result['Work in Progress'].closing += item['Closing Value'];
-      } else if (categories['Finished Goods'].includes(category)) {
-        result['Finished Goods'].opening += item['Opening Value'];
-        result['Finished Goods'].closing += item['Closing Value'];
+      // Match to standard categories with flexible matching
+      if (category.includes('stock-in-trade') || category.includes('stock in trade') || category === 'trading') {
+        result['Stock-in-Trade'].opening += openingValue;
+        result['Stock-in-Trade'].closing += closingValue;
+      } else if (category.includes('work-in-progress') || category.includes('work in progress') || category.includes('wip')) {
+        result['Work in Progress'].opening += openingValue;
+        result['Work in Progress'].closing += closingValue;
+      } else if (category.includes('finished') || category.includes('fg')) {
+        result['Finished Goods'].opening += openingValue;
+        result['Finished Goods'].closing += closingValue;
       }
     });
 
@@ -118,6 +119,16 @@ export function ChangesInInventoriesNote({
   
   const changesInInventories = totalOpening - totalClosing;
 
+  // Check which categories have values
+  const hasStockInTrade = inventory['Stock-in-Trade'].opening !== 0 || inventory['Stock-in-Trade'].closing !== 0;
+  const hasWorkInProgress = inventory['Work in Progress'].opening !== 0 || inventory['Work in Progress'].closing !== 0;
+  const hasFinishedGoods = inventory['Finished Goods'].opening !== 0 || inventory['Finished Goods'].closing !== 0;
+
+  // If no inventories at all, show nothing
+  if (!hasStockInTrade && !hasWorkInProgress && !hasFinishedGoods) {
+    return null;
+  }
+
   return (
     <div className="space-y-4">
       <div className="border-b pb-2">
@@ -136,55 +147,75 @@ export function ChangesInInventoriesNote({
         </TableHeader>
         <TableBody>
           {/* Opening Inventories */}
-          <TableRow>
-            <TableCell colSpan={2} className="font-bold">
-              Inventories at the beginning of the year:
-            </TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="pl-8">Stock-in-trade</TableCell>
-            <TableCell className="text-right">{formatCurrency(inventory['Stock-in-Trade'].opening)}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="pl-8">Work in progress</TableCell>
-            <TableCell className="text-right">{formatCurrency(inventory['Work in Progress'].opening)}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="pl-8">Finished goods</TableCell>
-            <TableCell className="text-right">{formatCurrency(inventory['Finished Goods'].opening)}</TableCell>
-          </TableRow>
-          <TableRow className="font-bold bg-gray-50">
-            <TableCell></TableCell>
-            <TableCell className="text-right">{formatCurrency(totalOpening)} (I)</TableCell>
-          </TableRow>
+          {totalOpening !== 0 && (
+            <>
+              <TableRow>
+                <TableCell colSpan={2} className="font-bold">
+                  Inventories at the beginning of the year:
+                </TableCell>
+              </TableRow>
+              {hasStockInTrade && inventory['Stock-in-Trade'].opening !== 0 && (
+                <TableRow>
+                  <TableCell className="pl-8">Stock-in-trade</TableCell>
+                  <TableCell className="text-right">{formatCurrency(inventory['Stock-in-Trade'].opening)}</TableCell>
+                </TableRow>
+              )}
+              {hasWorkInProgress && inventory['Work in Progress'].opening !== 0 && (
+                <TableRow>
+                  <TableCell className="pl-8">Work in progress</TableCell>
+                  <TableCell className="text-right">{formatCurrency(inventory['Work in Progress'].opening)}</TableCell>
+                </TableRow>
+              )}
+              {hasFinishedGoods && inventory['Finished Goods'].opening !== 0 && (
+                <TableRow>
+                  <TableCell className="pl-8">Finished goods</TableCell>
+                  <TableCell className="text-right">{formatCurrency(inventory['Finished Goods'].opening)}</TableCell>
+                </TableRow>
+              )}
+              <TableRow className="font-bold bg-gray-50">
+                <TableCell></TableCell>
+                <TableCell className="text-right">{formatCurrency(totalOpening)} (I)</TableCell>
+              </TableRow>
+            </>
+          )}
 
           {/* Closing Inventories */}
-          <TableRow>
-            <TableCell colSpan={2} className="font-bold pt-4">
-              Inventories at the end of the year:
-            </TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="pl-8">Stock-in-trade</TableCell>
-            <TableCell className="text-right">{formatCurrency(inventory['Stock-in-Trade'].closing)}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="pl-8">Work in progress</TableCell>
-            <TableCell className="text-right">{formatCurrency(inventory['Work in Progress'].closing)}</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell className="pl-8">Finished goods</TableCell>
-            <TableCell className="text-right">{formatCurrency(inventory['Finished Goods'].closing)}</TableCell>
-          </TableRow>
-          <TableRow className="font-bold bg-gray-50">
-            <TableCell></TableCell>
-            <TableCell className="text-right">{formatCurrency(totalClosing)} (II)</TableCell>
-          </TableRow>
+          {totalClosing !== 0 && (
+            <>
+              <TableRow>
+                <TableCell colSpan={2} className="font-bold pt-4">
+                  Inventories at the end of the year:
+                </TableCell>
+              </TableRow>
+              {hasStockInTrade && inventory['Stock-in-Trade'].closing !== 0 && (
+                <TableRow>
+                  <TableCell className="pl-8">Stock-in-trade</TableCell>
+                  <TableCell className="text-right">{formatCurrency(inventory['Stock-in-Trade'].closing)}</TableCell>
+                </TableRow>
+              )}
+              {hasWorkInProgress && inventory['Work in Progress'].closing !== 0 && (
+                <TableRow>
+                  <TableCell className="pl-8">Work in progress</TableCell>
+                  <TableCell className="text-right">{formatCurrency(inventory['Work in Progress'].closing)}</TableCell>
+                </TableRow>
+              )}
+              {hasFinishedGoods && inventory['Finished Goods'].closing !== 0 && (
+                <TableRow>
+                  <TableCell className="pl-8">Finished goods</TableCell>
+                  <TableCell className="text-right">{formatCurrency(inventory['Finished Goods'].closing)}</TableCell>
+                </TableRow>
+              )}
+              <TableRow className="font-bold bg-gray-50">
+                <TableCell></TableCell>
+                <TableCell className="text-right">{formatCurrency(totalClosing)} (II)</TableCell>
+              </TableRow>
+            </>
+          )}
 
           {/* Total Change */}
           <TableRow className="border-t-2 border-black">
             <TableCell className="font-bold text-lg pt-4">
-              Changes in inventories (I - II)
+              Changes in inventories {totalOpening !== 0 && totalClosing !== 0 && '(I - II)'}
             </TableCell>
             <TableCell className={cn(
               "text-right font-bold text-lg pt-4",
@@ -195,12 +226,6 @@ export function ChangesInInventoriesNote({
           </TableRow>
         </TableBody>
       </Table>
-
-      {stockData.length === 0 && (
-        <div className="text-center text-gray-500 italic py-4">
-          No stock data available. Please import stock items from Tally.
-        </div>
-      )}
     </div>
   );
 }

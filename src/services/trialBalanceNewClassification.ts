@@ -47,26 +47,158 @@ export function generateLedgerKey(ledgerName: string, tallyGroup: string): strin
 }
 
 // Keyword matching for Other Expenses
+/**
+ * Expense Classification Rules - Priority Order
+ * 
+ * These rules are applied in strict priority order (1 = highest priority).
+ * When a ledger name matches multiple rules, the highest priority wins.
+ * 
+ * Priority 1: Audit Fee → Other expenses > Audit Fee
+ * Priority 2: Bad Debt (not Provision) → Other expenses > Bad debts written off
+ * Priority 3: Depreciation/Amortisation → Depreciation and amortization expense
+ * Priority 4: Electric/Generator/Fuel → Other expenses > Power and Fuel
+ * Priority 5: Interest/Int → Finance costs > Interest expense on borrowings
+ * Priority 6: Legal/Professional/Fee (not Audit) → Other expenses > Legal and Professional Fees
+ * Priority 7: PF/Provident Fund → Employee benefits expense > Contribution to Provident Fund
+ */
+
+interface ExpenseClassificationRule {
+  priority: number;
+  name: string;
+  keywords: string[];
+  excludeKeywords?: string[];
+  h3: string;
+  h4: string;
+}
+
+const EXPENSE_CLASSIFICATION_RULES: ExpenseClassificationRule[] = [
+  // Priority 1: Audit Fee
+  {
+    priority: 1,
+    name: 'Audit Fee',
+    keywords: ['audit fee', 'audit fees', 'auditor fee', 'auditor fees', 'statutory audit'],
+    h3: 'Other expenses',
+    h4: 'Audit Fee'
+  },
+  // Priority 2: Bad Debt (not containing Provision)
+  {
+    priority: 2,
+    name: 'Bad Debts',
+    keywords: ['bad debt', 'bad debts', 'doubtful debt', 'written off'],
+    excludeKeywords: ['provision'],
+    h3: 'Other expenses',
+    h4: 'Bad debts written off'
+  },
+  // Priority 3: Depreciation or Amortisation
+  {
+    priority: 3,
+    name: 'Depreciation',
+    keywords: ['depreciation', 'amortisation', 'amortization', 'dep.', 'depn'],
+    h3: 'Depreciation and amortization expense',
+    h4: 'Depreciation on tangible assets'
+  },
+  // Priority 4: Electric, Generator, Fuel
+  {
+    priority: 4,
+    name: 'Power and Fuel',
+    keywords: ['electric', 'electricity', 'generator', 'fuel', 'diesel', 'petrol', 'power', 'energy', 'gas'],
+    h3: 'Other expenses',
+    h4: 'Power and Fuel'
+  },
+  // Priority 5: Interest
+  {
+    priority: 5,
+    name: 'Finance Costs',
+    keywords: ['interest', 'int.', 'int ', ' int', 'finance charge', 'bank interest'],
+    h3: 'Finance costs',
+    h4: 'Interest expense on borrowings'
+  },
+  // Priority 6: Legal, Professional, Fee (but not Audit Fee)
+  {
+    priority: 6,
+    name: 'Legal and Professional',
+    keywords: ['legal', 'professional', 'consultant', 'consultancy', 'fee', 'fees', 'ca ', 'advocate', 'lawyer'],
+    excludeKeywords: ['audit fee', 'audit fees', 'auditor'],
+    h3: 'Other expenses',
+    h4: 'Legal and Professional Fees'
+  },
+  // Priority 7: PF, Provident Fund
+  {
+    priority: 7,
+    name: 'Provident Fund',
+    keywords: ['pf', 'provident fund', 'p.f.', 'pf-', 'pf ', ' pf', 'epf', 'e.p.f'],
+    h3: 'Employee benefits expense',
+    h4: 'Contribution to Provident Fund'
+  }
+];
+
+// Additional keyword mappings for Other Expenses (lower priority)
 const OTHER_EXPENSES_KEYWORDS: Record<string, string[]> = {
   'Rent': ['rent', 'rental', 'lease'],
-  'Rates and Taxes': ['tax', 'rate', 'cess', 'municipal', 'property tax'],
-  'Repairs and Maintenance': ['repair', 'maintenance', 'maint', 'amc'],
-  'Insurance': ['insurance', 'premium'],
-  'Power and Fuel': ['electricity', 'power', 'fuel', 'diesel', 'petrol', 'gas'],
-  'Telephone and Internet': ['telephone', 'phone', 'mobile', 'internet', 'broadband', 'data'],
+  'Rates and Taxes': ['tax', 'rate', 'cess', 'municipal', 'property tax', 'gst', 'tds'],
+  'Repairs and Maintenance - Others': ['repair', 'maintenance', 'maint', 'amc'],
+  'Insurance': ['insurance', 'premium', 'lic'],
+  'Telephone and Internet': ['telephone', 'phone', 'mobile', 'internet', 'broadband', 'data', 'telecom'],
   'Printing and Stationery': ['printing', 'stationery', 'paper', 'stationary'],
-  'Travelling and Conveyance': ['travel', 'travelling', 'conveyance', 'taxi', 'transport', 'vehicle'],
-  'Legal and Professional': ['legal', 'professional', 'consultant', 'ca fee', 'audit'],
-  'Bank Charges': ['bank charge', 'bank charges', 'banking'],
-  'Advertisement': ['advertisement', 'advertising', 'marketing', 'promotion'],
-  'Commission': ['commission', 'brokerage'],
-  'Bad Debts': ['bad debt', 'doubtful debt', 'provision'],
-  'Donation': ['donation', 'charity', 'csr'],
-  'Miscellaneous Expenses': ['misc', 'miscellaneous', 'sundry']
+  'Travelling and Conveyance': ['travel', 'travelling', 'conveyance', 'taxi', 'transport', 'vehicle', 'cab'],
+  'Bank Charges': ['bank charge', 'bank charges', 'banking', 'bank fee'],
+  'Advertisement and Publicity': ['advertisement', 'advertising', 'marketing', 'promotion', 'publicity'],
+  'Commission and Brokerage': ['commission', 'brokerage'],
+  'Donations': ['donation', 'charity', 'csr'],
+  'Corporate Social Responsibility': ['csr expense', 'corporate social'],
+  'Miscellaneous Expenses': ['misc', 'miscellaneous', 'sundry', 'general expense']
 };
 
-function matchExpenseKeyword(ledgerName: string): string {
-  if (!ledgerName) return 'Others';
+/**
+ * Classify expense ledger using priority-based fuzzy matching
+ * Returns the classification result based on the highest priority match
+ */
+function classifyExpenseLedger(ledgerName: string): { h3: string; h4: string } | null {
+  if (!ledgerName) return null;
+  
+  const ledgerLower = ledgerName.toLowerCase();
+  
+  // Sort rules by priority (lowest number = highest priority)
+  const sortedRules = [...EXPENSE_CLASSIFICATION_RULES].sort((a, b) => a.priority - b.priority);
+  
+  // Find the first matching rule (highest priority)
+  for (const rule of sortedRules) {
+    // Check if any keyword matches
+    const hasKeywordMatch = rule.keywords.some(keyword => {
+      // Handle keywords with spaces carefully for word boundary matching
+      if (keyword.startsWith(' ') || keyword.endsWith(' ')) {
+        return ledgerLower.includes(keyword);
+      }
+      // For short keywords like 'pf', 'int', check word boundaries
+      if (keyword.length <= 3 && !keyword.includes('.')) {
+        const regex = new RegExp(`\\b${keyword}\\b|[^a-z]${keyword}[^a-z]|^${keyword}[^a-z]|[^a-z]${keyword}$`, 'i');
+        return regex.test(ledgerLower);
+      }
+      return ledgerLower.includes(keyword);
+    });
+    
+    if (!hasKeywordMatch) continue;
+    
+    // Check exclusions if present
+    if (rule.excludeKeywords && rule.excludeKeywords.length > 0) {
+      const hasExcludedKeyword = rule.excludeKeywords.some(exclude => 
+        ledgerLower.includes(exclude)
+      );
+      if (hasExcludedKeyword) continue;
+    }
+    
+    // Match found!
+    return { h3: rule.h3, h4: rule.h4 };
+  }
+  
+  return null;
+}
+
+/**
+ * Fallback matching for Other Expenses when no priority rule matches
+ */
+function matchOtherExpenseKeyword(ledgerName: string): string {
+  if (!ledgerName) return 'Miscellaneous Expenses';
   
   const ledgerLower = ledgerName.toLowerCase();
   
@@ -78,7 +210,7 @@ function matchExpenseKeyword(ledgerName: string): string {
     }
   }
   
-  return 'Others';
+  return 'Miscellaneous Expenses';
 }
 
 // Schedule III Mapping (simplified - full version would be much larger)
@@ -181,7 +313,7 @@ function inferH1FromH2(h2: string): string {
   if (['Assets', 'Liabilities', 'Equity'].includes(h2)) {
     return 'Balance Sheet';
   } else if (['Income', 'Expenses'].includes(h2)) {
-    return 'P&L Account';
+    return 'Profit and Loss';
   }
   return '';
 }
@@ -207,7 +339,7 @@ export function classifyLedgerWithPriority(
   // Trading Business: Purchase Accounts → Purchase of Stock-in-Trade
   if (businessType === 'Trading' && tallyGroup === 'Purchase Accounts') {
     return {
-      h1: 'P&L Account',
+      h1: 'Profit and Loss',
       h2: 'Expenses',
       h3: 'Purchases of stock-in-trade',
       h4: '',
@@ -222,7 +354,7 @@ export function classifyLedgerWithPriority(
   // Manufacturing Business: Purchase Accounts → Cost of materials consumed
   if (businessType === 'Manufacturing' && tallyGroup === 'Purchase Accounts') {
     return {
-      h1: 'P&L Account',
+      h1: 'Profit and Loss',
       h2: 'Expenses',
       h3: 'Cost of materials consumed',
       h4: 'Purchases of raw materials',
@@ -280,24 +412,27 @@ export function classifyLedgerWithPriority(
     };
   }
   
-  // RULE 3: Indirect Expenses - Special handling
-  if (tallyGroup === 'Indirect Expenses') {
-    if (ledgerName && ledgerName.toLowerCase().includes('depreciation')) {
+  // RULE 3: Indirect Expenses - Priority-based fuzzy matching
+  if (tallyGroup === 'Indirect Expenses' || tallyGroup === 'Direct Expenses') {
+    // Try priority-based expense classification first
+    const expenseMatch = classifyExpenseLedger(ledgerName);
+    
+    if (expenseMatch) {
       return {
-        h1: 'P&L Account',
+        h1: 'Profit and Loss',
         h2: 'Expenses',
-        h3: 'Depreciation and Amortization Expense',
-        h4: 'Depreciation on Tangible Assets',
+        h3: expenseMatch.h3,
+        h4: expenseMatch.h4,
         h5: ''
       };
     }
     
-    // Otherwise, match keywords for Other Expenses
-    const h4Matched = matchExpenseKeyword(ledgerName);
+    // Fallback to Other Expenses with keyword matching
+    const h4Matched = matchOtherExpenseKeyword(ledgerName);
     return {
-      h1: 'P&L Account',
+      h1: 'Profit and Loss',
       h2: 'Expenses',
-      h3: 'Other Expenses',
+      h3: 'Other expenses',
       h4: h4Matched,
       h5: ''
     };
@@ -307,7 +442,7 @@ export function classifyLedgerWithPriority(
   const ledgerLower = ledgerName.toLowerCase();
   if (ledgerLower.includes('opening stock') || ledgerLower.includes('opening balance stock')) {
     return {
-      h1: 'P&L Account',
+      h1: 'Profit and Loss',
       h2: 'Expenses',
       h3: 'Changes in inventories of FG, WIP and stock-in-trade',
       h4: 'Opening Stock',
@@ -317,7 +452,7 @@ export function classifyLedgerWithPriority(
   
   if (ledgerLower.includes('closing stock') || ledgerLower.includes('closing balance stock')) {
     return {
-      h1: 'P&L Account',
+      h1: 'Profit and Loss',
       h2: 'Expenses',
       h3: 'Changes in inventories of FG, WIP and stock-in-trade',
       h4: 'Less: Closing Stock',

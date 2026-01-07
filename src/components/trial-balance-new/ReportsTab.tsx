@@ -12,10 +12,12 @@ import {
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import { TrialBalanceLine } from '@/hooks/useTrialBalance';
 import { convertLedgerRowsToTrialBalanceLines } from '@/utils/trialBalanceNewAdapter';
+import { computePLNoteValues } from '@/utils/computePLNoteValues';
 import { ScheduleIIIBalanceSheet } from '@/components/trial-balance/ScheduleIIIBalanceSheet';
 import { ScheduleIIIProfitLoss } from '@/components/trial-balance/ScheduleIIIProfitLoss';
 import { CashFlowStatement } from '@/components/trial-balance/CashFlowStatement';
 import { ChangesInInventoriesNote } from '@/components/trial-balance/ChangesInInventoriesNote';
+import { CostOfMaterialsConsumedNote } from '@/components/trial-balance/CostOfMaterialsConsumedNote';
 import { NotesManagementTab } from '@/components/trial-balance/capital-notes/NotesManagementTab';
 import { FormatSelector } from '@/components/trial-balance/FormatSelector';
 import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSettings';
@@ -57,12 +59,13 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
   const [reportTab, setReportTab] = useState('balance-sheet');
-  const [reportingScale, setReportingScale] = useState<string>('auto');
+  const [reportingScale, setReportingScale] = useState<string>('rupees');
   const [bsStartingNote, setBsStartingNote] = useState<number>(3);
   const [plStartingNote, setPlStartingNote] = useState<number>(19);
 
   // Determine constitution from entity type
   const constitution = useMemo(() => {
+    if (!entityType) return 'company';
     const et = entityType.toLowerCase();
     if (et.includes('company')) return 'company';
     if (et.includes('llp') || et.includes('limited liability')) return 'llp';
@@ -76,7 +79,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
   // Convert LedgerRow[] to TrialBalanceLine[]
   const trialBalanceLines = useMemo(() => {
     try {
-      if (!data.length) return [];
+      if (!data || !Array.isArray(data) || data.length === 0) return [];
       // Use a temporary engagement ID if none exists
       const engagementId = currentEngagement?.id || 'temp-engagement';
       const userId = user?.id || 'temp-user';
@@ -93,6 +96,11 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
       return [];
     }
   }, [data, currentEngagement?.id, user?.id, toDate, stockData]);
+
+  // Compute P&L note values and ledger annexures
+  const { noteValues, noteLedgers } = useMemo(() => {
+    return computePLNoteValues(data, stockData);
+  }, [data, stockData]);
 
   // Parse financial year from toDate
   const financialYear = useMemo(() => {
@@ -163,7 +171,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
     }
   }, [data, companyName, financialYear, constitution, plStartingNote, toast]);
 
-  if (data.length === 0) {
+  if (!data || data.length === 0) {
     return (
       <div className="border rounded-lg p-8 text-center text-muted-foreground">
         No data available. Please import data first.
@@ -279,19 +287,10 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 constitution={constitution}
                 startingNoteNumber={plStartingNote}
                 stockData={stockData}
+                noteValues={noteValues}
+                noteLedgers={noteLedgers}
               />
             </div>
-
-            {/* Changes in Inventories Note */}
-            {stockData && stockData.length > 0 && (
-              <div className="bg-white rounded-lg shadow-sm border p-6">
-                <ChangesInInventoriesNote
-                  stockData={stockData}
-                  reportingScale={reportingScale}
-                  noteNumber={String(plStartingNote)}
-                />
-              </div>
-            )}
           </div>
         </TabsContent>
 
@@ -302,13 +301,39 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
         </TabsContent>
 
         <TabsContent value="capital-notes" className="mt-6">
-          <div className="bg-white rounded-lg shadow-sm border p-6">
-            <NotesManagementTab 
-              lines={trialBalanceLines}
-              constitution={constitution}
-              financialYear={financialYear}
-              clientName={companyName}
-            />
+          <div className="space-y-6">
+            {/* Changes in Inventories Note - For P&L */}
+            {stockData && Array.isArray(stockData) && stockData.length > 0 && (
+              <div className="bg-white rounded-lg shadow-sm border p-6">
+                <ChangesInInventoriesNote
+                  stockData={stockData}
+                  reportingScale={reportingScale}
+                  noteNumber={String(plStartingNote + 2)}
+                />
+              </div>
+            )}
+            
+            {/* Cost of Materials Consumed Note */}
+            {stockData && Array.isArray(stockData) && stockData.length > 0 && data && Array.isArray(data) && (
+              <div className="bg-white rounded-lg shadow-sm border p-6">
+                <CostOfMaterialsConsumedNote
+                  stockData={stockData}
+                  ledgerData={data}
+                  reportingScale={reportingScale}
+                  noteNumber={String(plStartingNote + 3)}
+                />
+              </div>
+            )}
+            
+            {/* Other Notes Management */}
+            <div className="bg-white rounded-lg shadow-sm border p-6">
+              <NotesManagementTab 
+                lines={trialBalanceLines}
+                constitution={constitution}
+                financialYear={financialYear}
+                clientName={companyName}
+              />
+            </div>
           </div>
         </TabsContent>
       </Tabs>

@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
+import { ColumnFilter } from '@/components/ui/column-filter';
 import {
   Database,
   FileSpreadsheet,
@@ -72,6 +73,7 @@ import { ClassificationManager } from '@/components/trial-balance-new/Classifica
 import { FilterModal } from '@/components/trial-balance-new/FilterModal';
 import { ClassificationResult } from '@/services/trialBalanceNewClassification';
 import { DEFAULT_GROUP_RULES, DEFAULT_KEYWORD_RULES, DEFAULT_OVERRIDE_RULES } from '@/data/scheduleIIIDefaultRules';
+import { H1_OPTIONS, getH2Options, getH3Options, getH4Options } from '@/data/classificationOptions';
 
 // Entity Types
 const ENTITY_TYPES = [
@@ -211,6 +213,59 @@ export default function TrialBalanceNew() {
   const [isRuleTemplateDialogOpen, setIsRuleTemplateDialogOpen] = useState(false);
   const [isResetConfirmDialogOpen, setIsResetConfirmDialogOpen] = useState(false);
   const [ruleTemplateName, setRuleTemplateName] = useState<string>('');
+  
+  // Compute stock item counts and totals directly via useMemo (avoids infinite loop from callbacks)
+  const { stockItemCount, stockTotals } = useMemo(() => {
+    // Safety check for array
+    if (!currentStockData || !Array.isArray(currentStockData)) {
+      return {
+        stockItemCount: { filtered: 0, total: 0 },
+        stockTotals: { opening: 0, closing: 0 }
+      };
+    }
+    
+    // Filter out items where both opening AND closing are 0
+    const nonZeroItems = currentStockData.filter(item => {
+      if (!item) return false;
+      const opening = Math.abs(item['Opening Value'] || 0);
+      const closing = Math.abs(item['Closing Value'] || 0);
+      return !(opening === 0 && closing === 0);
+    });
+    
+    // Apply search filter with null safety
+    const filtered = searchTerm
+      ? nonZeroItems.filter(item => {
+          if (!item) return false;
+          const itemName = (item['Item Name'] || '').toLowerCase();
+          const stockGroup = (item['Stock Group'] || '').toLowerCase();
+          const primaryGroup = (item['Primary Group'] || '').toLowerCase();
+          const search = searchTerm.toLowerCase();
+          return itemName.includes(search) || stockGroup.includes(search) || primaryGroup.includes(search);
+        })
+      : nonZeroItems;
+    
+    // Calculate totals from filtered items - use Math.abs since stock values are assets (Dr)
+    const totals = filtered.reduce((acc, item) => ({
+      opening: acc.opening + Math.abs(item?.['Opening Value'] || 0),
+      closing: acc.closing + Math.abs(item?.['Closing Value'] || 0),
+    }), { opening: 0, closing: 0 });
+    
+    return {
+      stockItemCount: { filtered: filtered.length, total: nonZeroItems.length },
+      stockTotals: totals
+    };
+  }, [currentStockData, searchTerm]);
+  
+  // Column filters and sorting state for Actual TB
+  const [actualTbColumnFilters, setActualTbColumnFilters] = useState<Record<string, Set<string | number>>>({});
+  const [actualTbSortColumn, setActualTbSortColumn] = useState<string | null>(null);
+  const [actualTbSortDirection, setActualTbSortDirection] = useState<'asc' | 'desc' | null>(null);
+  
+  // Column filters and sorting state for Classified TB
+  const [classifiedTbColumnFilters, setClassifiedTbColumnFilters] = useState<Record<string, Set<string | number>>>({});
+  const [classifiedTbSortColumn, setClassifiedTbSortColumn] = useState<string | null>(null);
+  const [classifiedTbSortDirection, setClassifiedTbSortDirection] = useState<'asc' | 'desc' | null>(null);
+  
   const [ruleForm, setRuleForm] = useState({
     conditionType: 'Primary Group',
     conditionValue: '',
@@ -251,8 +306,36 @@ export default function TrialBalanceNew() {
       });
     }
     
+    // Apply column filters
+    Object.entries(actualTbColumnFilters).forEach(([column, selectedValues]) => {
+      if (selectedValues.size > 0) {
+        filtered = filtered.filter(row => {
+          const value = row[column as keyof LedgerRow];
+          return selectedValues.has(value as string | number);
+        });
+      }
+    });
+    
+    // Apply sorting
+    if (actualTbSortColumn && actualTbSortDirection) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[actualTbSortColumn as keyof LedgerRow];
+        const bVal = b[actualTbSortColumn as keyof LedgerRow];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return actualTbSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal || '');
+        const bStr = String(bVal || '');
+        return actualTbSortDirection === 'asc' 
+          ? aStr.localeCompare(bStr) 
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
     return filtered;
-  }, [actualData, searchTerm, groupFilter, balanceFilter]);
+  }, [actualData, searchTerm, groupFilter, balanceFilter, actualTbColumnFilters, actualTbSortColumn, actualTbSortDirection]);
   
   // Filtered data for Classified TB
   const filteredData = useMemo(() => {
@@ -289,19 +372,96 @@ export default function TrialBalanceNew() {
       filtered = filtered.filter(row => (row['H3'] || '') === h3Filter);
     }
     
+    // Apply column filters
+    Object.entries(classifiedTbColumnFilters).forEach(([column, selectedValues]) => {
+      if (selectedValues.size > 0) {
+        filtered = filtered.filter(row => {
+          const value = row[column as keyof LedgerRow];
+          return selectedValues.has(value as string | number);
+        });
+      }
+    });
+    
+    // Apply sorting
+    if (classifiedTbSortColumn && classifiedTbSortDirection) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[classifiedTbSortColumn as keyof LedgerRow];
+        const bVal = b[classifiedTbSortColumn as keyof LedgerRow];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return classifiedTbSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal || '');
+        const bStr = String(bVal || '');
+        return classifiedTbSortDirection === 'asc' 
+          ? aStr.localeCompare(bStr) 
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
     return filtered;
-  }, [currentData, searchTerm, statusFilter, h1Filter, h2Filter, h3Filter]);
+  }, [currentData, searchTerm, statusFilter, h1Filter, h2Filter, h3Filter, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection]);
   
-  // Totals calculation
+  // Totals calculation - based on active tab
   const totals = useMemo(() => {
-    return filteredData.reduce((acc, row) => {
-      acc.opening += row['Opening Balance'] || 0;
-      acc.debit += row['Debit'] || 0;
-      acc.credit += row['Credit'] || 0;
-      acc.closing += row['Closing Balance'] || 0;
-      return acc;
-    }, { opening: 0, debit: 0, credit: 0, closing: 0 });
-  }, [filteredData]);
+    if (activeTab === 'actual-tb') {
+      // Calculate from actual TB filtered data
+      return filteredActualData.reduce((acc, row) => {
+        acc.opening += row['Opening Balance'] || 0;
+        acc.debit += row['Debit'] || 0;
+        acc.credit += row['Credit'] || 0;
+        acc.closing += row['Closing Balance'] || 0;
+        return acc;
+      }, { opening: 0, debit: 0, credit: 0, closing: 0 });
+    } else if (activeTab === 'stock-items') {
+      // Use filtered stock totals from StockItemsTab
+      return { 
+        opening: stockTotals.opening, 
+        debit: 0, 
+        credit: 0, 
+        closing: stockTotals.closing 
+      };
+    } else {
+      // Default to classified TB filtered data
+      return filteredData.reduce((acc, row) => {
+        acc.opening += row['Opening Balance'] || 0;
+        acc.debit += row['Debit'] || 0;
+        acc.credit += row['Credit'] || 0;
+        acc.closing += row['Closing Balance'] || 0;
+        return acc;
+      }, { opening: 0, debit: 0, credit: 0, closing: 0 });
+    }
+  }, [activeTab, filteredActualData, filteredData, stockTotals]);
+  
+  // Helper to get unique column values for filters
+  const getActualTbColumnValues = useCallback((column: string) => {
+    return actualData.map(row => row[column as keyof LedgerRow]).filter(v => v !== null && v !== undefined) as (string | number)[];
+  }, [actualData]);
+  
+  const getClassifiedTbColumnValues = useCallback((column: string) => {
+    return currentData.map(row => row[column as keyof LedgerRow]).filter(v => v !== null && v !== undefined) as (string | number)[];
+  }, [currentData]);
+  
+  // Handlers for actual TB column filter changes
+  const handleActualTbFilterChange = useCallback((column: string, values: Set<string | number>) => {
+    setActualTbColumnFilters(prev => ({ ...prev, [column]: values }));
+  }, []);
+  
+  const handleActualTbSort = useCallback((column: string, direction: 'asc' | 'desc' | null) => {
+    setActualTbSortColumn(direction ? column : null);
+    setActualTbSortDirection(direction);
+  }, []);
+  
+  // Handlers for classified TB column filter changes
+  const handleClassifiedTbFilterChange = useCallback((column: string, values: Set<string | number>) => {
+    setClassifiedTbColumnFilters(prev => ({ ...prev, [column]: values }));
+  }, []);
+  
+  const handleClassifiedTbSort = useCallback((column: string, direction: 'asc' | 'desc' | null) => {
+    setClassifiedTbSortColumn(direction ? column : null);
+    setClassifiedTbSortDirection(direction);
+  }, []);
   
   // Connect to Tally
   const handleConnectTally = useCallback(async () => {
@@ -389,11 +549,12 @@ export default function TrialBalanceNew() {
       // Store actual data (unclassified)
       setActualData(processedData);
       
-      // For classification: ONLY rows where Opening=0 AND Closing≠0
+      // For classification: Exclude rows where BOTH Opening=0 AND Closing=0
       const dataToClassify = processedData.filter(row => {
         const opening = row['Opening Balance'] || 0;
         const closing = row['Closing Balance'] || 0;
-        return opening === 0 && closing !== 0;
+        // Include if either opening or closing is non-zero
+        return !(opening === 0 && closing === 0);
       });
       
       // Auto-classify the filtered data
@@ -752,6 +913,128 @@ export default function TrialBalanceNew() {
       setSavedMappings(defaultMappings);
     }
   }, [currentEngagement?.id]);
+  
+  // Load data from database when engagement changes or database lines are loaded
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    
+    // Load saved entity info from localStorage
+    const savedEntityInfo = localStorage.getItem(`tb_entity_${currentEngagement.id}`);
+    if (savedEntityInfo) {
+      try {
+        const { entityType: savedEntityType, entityName: savedEntityName, businessType: savedBusinessType } = JSON.parse(savedEntityInfo);
+        if (savedEntityType) setEntityType(savedEntityType);
+        if (savedEntityName) setEntityName(savedEntityName);
+        if (savedBusinessType) setBusinessType(savedBusinessType);
+      } catch (e) {
+        console.error('Failed to load entity info:', e);
+      }
+    }
+    
+    // Load saved stock data from localStorage
+    const savedStockData = localStorage.getItem(`tb_stock_${currentEngagement.id}`);
+    if (savedStockData) {
+      try {
+        const parsedStock = JSON.parse(savedStockData);
+        if (Array.isArray(parsedStock) && parsedStock.length > 0) {
+          setCurrentStockData(parsedStock);
+        }
+      } catch (e) {
+        console.error('Failed to load stock data:', e);
+      }
+    }
+    
+    // Convert database lines to LedgerRow format
+    if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0 && currentData.length === 0) {
+      const loadedData: LedgerRow[] = trialBalanceDB.lines.map(line => ({
+        'Ledger Name': line.account_name,
+        'Primary Group': line.ledger_primary_group || '',
+        'Parent Group': line.ledger_parent || '',
+        'Composite Key': line.account_code,
+        'Opening Balance': line.opening_balance,
+        'Debit': line.debit,
+        'Credit': line.credit,
+        'Closing Balance': line.closing_balance,
+        'Is Revenue': line.aile === 'Income' || line.aile === 'Expense' ? 'Yes' : 'No',
+        'Sheet Name': 'TB CY',
+        'H1': line.face_group || '',
+        'H2': line.note_group || '',
+        'H3': line.sub_note || '',
+        'H4': line.level4_group || '',
+        'H5': line.level5_detail || '',
+        'Status': (line.face_group || line.note_group) ? 'Mapped' : 'Unmapped'
+      }));
+      
+      // Set both actualData and currentData
+      setActualData(loadedData);
+      setCurrentData(loadedData);
+      
+      toast({
+        title: 'Data Loaded',
+        description: `Loaded ${loadedData.length} ledgers from saved data`,
+      });
+    }
+  }, [currentEngagement?.id, trialBalanceDB.lines]);
+  
+  // Save entity info to localStorage when it changes
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    if (entityType || entityName || businessType) {
+      localStorage.setItem(`tb_entity_${currentEngagement.id}`, JSON.stringify({
+        entityType,
+        entityName,
+        businessType
+      }));
+    }
+  }, [currentEngagement?.id, entityType, entityName, businessType]);
+  
+  // Save stock data to localStorage when it changes
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    if (currentStockData.length > 0) {
+      localStorage.setItem(`tb_stock_${currentEngagement.id}`, JSON.stringify(currentStockData));
+    }
+  }, [currentEngagement?.id, currentStockData]);
+  
+  // Auto-save currentData to database when it changes (debounced)
+  useEffect(() => {
+    if (!currentEngagement?.id || currentData.length === 0) return;
+    
+    // Skip if this is just loaded data (already in database)
+    if (trialBalanceDB.loading) return;
+    
+    // Debounce the save operation
+    const saveTimeout = setTimeout(async () => {
+      try {
+        const dbLines: TrialBalanceLineInput[] = currentData.map(row => ({
+          account_code: row['Composite Key'] || '',
+          account_name: row['Ledger Name'] || '',
+          ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+          ledger_primary_group: row['Primary Group'] || null,
+          opening_balance: row['Opening Balance'] || 0,
+          debit: row['Debit'] || 0,
+          credit: row['Credit'] || 0,
+          closing_balance: row['Closing Balance'] || 0,
+          balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+          period_type: 'current',
+          period_ending: toDate || null,
+          face_group: row['H1'] || null,
+          note_group: row['H2'] || null,
+          sub_note: row['H3'] || null,
+          level4_group: row['H4'] || null,
+          level5_detail: row['H5'] || null,
+        }));
+        
+        // Use upsert mode to avoid duplicates
+        await trialBalanceDB.importLines(dbLines, true);
+        console.log('Auto-saved trial balance data');
+      } catch (error) {
+        console.error('Failed to auto-save trial balance:', error);
+      }
+    }, 2000); // 2 second debounce
+    
+    return () => clearTimeout(saveTimeout);
+  }, [currentData, currentEngagement?.id, toDate]);
   
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1789,6 +2072,11 @@ export default function TrialBalanceNew() {
               >
                 <Package className="w-4 h-4 mr-2" />
                 Stock Items
+                {stockItemCount.total > 0 && (
+                  <span className="ml-1 text-xs text-gray-500">
+                    ({stockItemCount.filtered} of {stockItemCount.total})
+                  </span>
+                )}
               </TabsTrigger>
               <TabsTrigger 
                 value="reports"
@@ -1832,14 +2120,114 @@ export default function TrialBalanceNew() {
                       title="Select All / Deselect All"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">Ledger Name</TableHead>
-                  <TableHead className="sticky top-0 bg-white">Parent Group</TableHead>
-                  <TableHead className="sticky top-0 bg-white">Primary Group</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">Opening</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">Debit</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">Credit</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">Closing</TableHead>
-                  <TableHead className="sticky top-0 bg-white">Is Revenue</TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Ledger Name
+                      <ColumnFilter
+                        column="Ledger Name"
+                        values={getActualTbColumnValues('Ledger Name')}
+                        selectedValues={actualTbColumnFilters['Ledger Name'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Ledger Name', values)}
+                        sortDirection={actualTbSortColumn === 'Ledger Name' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Ledger Name', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Parent Group
+                      <ColumnFilter
+                        column="Parent Group"
+                        values={getActualTbColumnValues('Parent Group')}
+                        selectedValues={actualTbColumnFilters['Parent Group'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Parent Group', values)}
+                        sortDirection={actualTbSortColumn === 'Parent Group' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Parent Group', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Primary Group
+                      <ColumnFilter
+                        column="Primary Group"
+                        values={getActualTbColumnValues('Primary Group')}
+                        selectedValues={actualTbColumnFilters['Primary Group'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Primary Group', values)}
+                        sortDirection={actualTbSortColumn === 'Primary Group' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Primary Group', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Opening
+                      <ColumnFilter
+                        column="Opening Balance"
+                        values={getActualTbColumnValues('Opening Balance')}
+                        selectedValues={actualTbColumnFilters['Opening Balance'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Opening Balance', values)}
+                        sortDirection={actualTbSortColumn === 'Opening Balance' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Opening Balance', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Debit
+                      <ColumnFilter
+                        column="Debit"
+                        values={getActualTbColumnValues('Debit')}
+                        selectedValues={actualTbColumnFilters['Debit'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Debit', values)}
+                        sortDirection={actualTbSortColumn === 'Debit' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Debit', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Credit
+                      <ColumnFilter
+                        column="Credit"
+                        values={getActualTbColumnValues('Credit')}
+                        selectedValues={actualTbColumnFilters['Credit'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Credit', values)}
+                        sortDirection={actualTbSortColumn === 'Credit' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Credit', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Closing
+                      <ColumnFilter
+                        column="Closing Balance"
+                        values={getActualTbColumnValues('Closing Balance')}
+                        selectedValues={actualTbColumnFilters['Closing Balance'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Closing Balance', values)}
+                        sortDirection={actualTbSortColumn === 'Closing Balance' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Closing Balance', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Is Revenue
+                      <ColumnFilter
+                        column="Is Revenue"
+                        values={getActualTbColumnValues('Is Revenue')}
+                        selectedValues={actualTbColumnFilters['Is Revenue'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Is Revenue', values)}
+                        sortDirection={actualTbSortColumn === 'Is Revenue' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Is Revenue', dir)}
+                      />
+                    </div>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1936,32 +2324,198 @@ export default function TrialBalanceNew() {
                       title="Select All / Deselect All"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">Ledger Name</TableHead>
-                  <TableHead className="sticky top-0 bg-white">Parent Group</TableHead>
-                  <TableHead className="sticky top-0 bg-white">Primary Group</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">Opening</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">Debit</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">Credit</TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">Closing</TableHead>
-                  <TableHead className="sticky top-0 bg-white">H1</TableHead>
-                  <TableHead className="sticky top-0 bg-white">H2</TableHead>
-                  <TableHead className="sticky top-0 bg-white">H3</TableHead>
-                  <TableHead className="sticky top-0 bg-white">H4</TableHead>
-                  <TableHead className="sticky top-0 bg-white">H5</TableHead>
-                  <TableHead className="sticky top-0 bg-white">Status</TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Ledger Name
+                      <ColumnFilter
+                        column="Ledger Name"
+                        values={getClassifiedTbColumnValues('Ledger Name')}
+                        selectedValues={classifiedTbColumnFilters['Ledger Name'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Ledger Name', values)}
+                        sortDirection={classifiedTbSortColumn === 'Ledger Name' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Ledger Name', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Parent Group
+                      <ColumnFilter
+                        column="Parent Group"
+                        values={getClassifiedTbColumnValues('Parent Group')}
+                        selectedValues={classifiedTbColumnFilters['Parent Group'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Parent Group', values)}
+                        sortDirection={classifiedTbSortColumn === 'Parent Group' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Parent Group', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Primary Group
+                      <ColumnFilter
+                        column="Primary Group"
+                        values={getClassifiedTbColumnValues('Primary Group')}
+                        selectedValues={classifiedTbColumnFilters['Primary Group'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Primary Group', values)}
+                        sortDirection={classifiedTbSortColumn === 'Primary Group' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Primary Group', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Opening
+                      <ColumnFilter
+                        column="Opening Balance"
+                        values={getClassifiedTbColumnValues('Opening Balance')}
+                        selectedValues={classifiedTbColumnFilters['Opening Balance'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Opening Balance', values)}
+                        sortDirection={classifiedTbSortColumn === 'Opening Balance' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Opening Balance', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Debit
+                      <ColumnFilter
+                        column="Debit"
+                        values={getClassifiedTbColumnValues('Debit')}
+                        selectedValues={classifiedTbColumnFilters['Debit'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Debit', values)}
+                        sortDirection={classifiedTbSortColumn === 'Debit' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Debit', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Credit
+                      <ColumnFilter
+                        column="Credit"
+                        values={getClassifiedTbColumnValues('Credit')}
+                        selectedValues={classifiedTbColumnFilters['Credit'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Credit', values)}
+                        sortDirection={classifiedTbSortColumn === 'Credit' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Credit', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Closing
+                      <ColumnFilter
+                        column="Closing Balance"
+                        values={getClassifiedTbColumnValues('Closing Balance')}
+                        selectedValues={classifiedTbColumnFilters['Closing Balance'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Closing Balance', values)}
+                        sortDirection={classifiedTbSortColumn === 'Closing Balance' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Closing Balance', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H1
+                      <ColumnFilter
+                        column="H1"
+                        values={getClassifiedTbColumnValues('H1')}
+                        selectedValues={classifiedTbColumnFilters['H1'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H1', values)}
+                        sortDirection={classifiedTbSortColumn === 'H1' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H1', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H2
+                      <ColumnFilter
+                        column="H2"
+                        values={getClassifiedTbColumnValues('H2')}
+                        selectedValues={classifiedTbColumnFilters['H2'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H2', values)}
+                        sortDirection={classifiedTbSortColumn === 'H2' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H2', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H3
+                      <ColumnFilter
+                        column="H3"
+                        values={getClassifiedTbColumnValues('H3')}
+                        selectedValues={classifiedTbColumnFilters['H3'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H3', values)}
+                        sortDirection={classifiedTbSortColumn === 'H3' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H3', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H4
+                      <ColumnFilter
+                        column="H4"
+                        values={getClassifiedTbColumnValues('H4')}
+                        selectedValues={classifiedTbColumnFilters['H4'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H4', values)}
+                        sortDirection={classifiedTbSortColumn === 'H4' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H4', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H5
+                      <ColumnFilter
+                        column="H5"
+                        values={getClassifiedTbColumnValues('H5')}
+                        selectedValues={classifiedTbColumnFilters['H5'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H5', values)}
+                        sortDirection={classifiedTbSortColumn === 'H5' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H5', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Status
+                      <ColumnFilter
+                        column="Status"
+                        values={getClassifiedTbColumnValues('Status')}
+                        selectedValues={classifiedTbColumnFilters['Status'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Status', values)}
+                        sortDirection={classifiedTbSortColumn === 'Status' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Status', dir)}
+                      />
+                    </div>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {currentData.length === 0 ? (
+                {filteredData.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={14} className="text-center text-muted-foreground py-8">
-                      No classified data. Import from Tally to get started.
+                      {currentData.length === 0 
+                        ? "No classified data. Import from Tally to get started."
+                        : "No results match your search criteria."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  currentData.map((row, index) => {
-                    const isSelected = selectedRowIndices.has(index);
-                    const isFocused = focusedClassifiedRowIndex === index;
+                  filteredData.map((row, index) => {
+                    // Find the original index in currentData for selection
+                    const originalIndex = currentData.findIndex(r => 
+                      r['Composite Key'] === row['Composite Key']
+                    );
+                    const isSelected = originalIndex !== -1 && selectedRowIndices.has(originalIndex);
+                    const isFocused = focusedClassifiedRowIndex === originalIndex;
                     
                     return (
                       <TableRow 
@@ -1972,22 +2526,22 @@ export default function TrialBalanceNew() {
                           "cursor-pointer hover:bg-gray-50 transition-colors"
                         )}
                         onClick={(e) => {
-                          setFocusedClassifiedRowIndex(index);
-                          toggleRowSelection(index, e);
+                          setFocusedClassifiedRowIndex(originalIndex);
+                          toggleRowSelection(originalIndex, e);
                         }}
                         onDoubleClick={() => {
                           setEditingLedger(row);
-                          setEditingLedgerIndex(index);
+                          setEditingLedgerIndex(originalIndex);
                           setIsSingleEditDialogOpen(true);
                         }}
                         tabIndex={0}
-                        onFocus={() => setFocusedClassifiedRowIndex(index)}
+                        onFocus={() => setFocusedClassifiedRowIndex(originalIndex)}
                       >
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => toggleRowSelection(index)}
+                            onChange={() => toggleRowSelection(originalIndex)}
                             onClick={(e) => e.stopPropagation()}
                           />
                         </TableCell>
@@ -2027,6 +2581,7 @@ export default function TrialBalanceNew() {
                 stockData={currentStockData} 
                 onUpdateStockData={setCurrentStockData}
                 businessType={businessType}
+                searchTerm={searchTerm}
               />
             </TabsContent>
             
@@ -2550,42 +3105,77 @@ export default function TrialBalanceNew() {
               <div className="space-y-3 border-t pt-4">
                 <div className="grid grid-cols-4 gap-2 items-center">
                   <Label className="text-sm font-medium">H1</Label>
-                  <Input
+                  <Select
                     value={editingLedger['H1'] || ''}
-                    onChange={(e) => setEditingLedger({...editingLedger, 'H1': e.target.value})}
-                    className="col-span-3"
-                    placeholder="e.g., Balance Sheet, Profit and Loss"
-                  />
+                    onValueChange={(val) => setEditingLedger({...editingLedger, 'H1': val, 'H2': '', 'H3': '', 'H4': ''})}
+                  >
+                    <SelectTrigger className="col-span-3">
+                      <SelectValue placeholder="Select Statement Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {H1_OPTIONS.map(opt => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2 items-center">
                   <Label className="text-sm font-medium">H2</Label>
-                  <Input
+                  <Select
                     value={editingLedger['H2'] || ''}
-                    onChange={(e) => setEditingLedger({...editingLedger, 'H2': e.target.value})}
-                    className="col-span-3"
-                    placeholder="e.g., Assets, Liabilities, Income, Expenses"
-                  />
+                    onValueChange={(val) => setEditingLedger({...editingLedger, 'H2': val, 'H3': '', 'H4': ''})}
+                    disabled={!editingLedger['H1']}
+                  >
+                    <SelectTrigger className="col-span-3">
+                      <SelectValue placeholder={!editingLedger['H1'] ? "Select H1 first" : "Select Category"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getH2Options(editingLedger['H1'] || '').map(opt => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2 items-center">
                   <Label className="text-sm font-medium">H3</Label>
-                  <Input
+                  <Select
                     value={editingLedger['H3'] || ''}
-                    onChange={(e) => setEditingLedger({...editingLedger, 'H3': e.target.value})}
-                    className="col-span-3"
-                    placeholder="e.g., Current Assets, Fixed Assets"
-                  />
+                    onValueChange={(val) => setEditingLedger({...editingLedger, 'H3': val, 'H4': ''})}
+                    disabled={!editingLedger['H2']}
+                  >
+                    <SelectTrigger className="col-span-3">
+                      <SelectValue placeholder={!editingLedger['H2'] ? "Select H2 first" : "Select Note/Section"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getH3Options(editingLedger['H2'] || '').map(opt => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2 items-center">
                   <Label className="text-sm font-medium">H4</Label>
-                  <Input
+                  <Select
                     value={editingLedger['H4'] || ''}
-                    onChange={(e) => setEditingLedger({...editingLedger, 'H4': e.target.value})}
-                    className="col-span-3"
-                    placeholder="e.g., Cash and Bank Balance"
-                  />
+                    onValueChange={(val) => setEditingLedger({...editingLedger, 'H4': val})}
+                    disabled={!editingLedger['H3'] || getH4Options(editingLedger['H3'] || '').length === 0}
+                  >
+                    <SelectTrigger className="col-span-3">
+                      <SelectValue placeholder={
+                        !editingLedger['H3'] ? "Select H3 first" : 
+                        getH4Options(editingLedger['H3'] || '').length === 0 ? "No sub-items available" :
+                        "Select Line Item"
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getH4Options(editingLedger['H3'] || '').map(opt => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2 items-center">
@@ -2594,7 +3184,7 @@ export default function TrialBalanceNew() {
                     value={editingLedger['H5'] || ''}
                     onChange={(e) => setEditingLedger({...editingLedger, 'H5': e.target.value})}
                     className="col-span-3"
-                    placeholder="e.g., Cash-in-Hand"
+                    placeholder="e.g., Cash-in-Hand (optional detail)"
                   />
                 </div>
               </div>

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { TrialBalanceLine } from '@/hooks/useTrialBalance';
 import {
   Table,
@@ -8,12 +8,40 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   getProfitLossFormat,
   getFormatLabel,
   FSLineItem,
 } from '@/data/financialStatementFormats';
+import { LedgerAnnexureDialog } from './LedgerAnnexureDialog';
+import { FileText } from 'lucide-react';
+
+// Note values that can be passed from computed notes
+export interface NoteValues {
+  costOfMaterialsConsumed?: number;
+  changesInInventories?: number;
+  employeeBenefits?: number;
+  financeCosts?: number;
+  depreciation?: number;
+  otherExpenses?: number;
+  [key: string]: number | undefined;
+}
+
+// Ledger item for annexure
+export interface NoteLedgerItem {
+  ledgerName: string;
+  groupName: string;
+  openingBalance: number;
+  closingBalance: number;
+  classification?: string;
+}
+
+// Note ledgers mapping
+export interface NoteLedgersMap {
+  [noteKey: string]: NoteLedgerItem[];
+}
 
 interface Props {
   currentLines: TrialBalanceLine[];
@@ -22,12 +50,15 @@ interface Props {
   constitution?: string;
   startingNoteNumber?: number;
   stockData?: any[];
+  noteValues?: NoteValues;
+  noteLedgers?: NoteLedgersMap;
 }
 
 interface DisplayLineItem extends FSLineItem {
   currentAmount: number;
   previousAmount: number;
   displayNoteNo?: string;
+  noteKey?: string; // Key for looking up ledgers
 }
 
 export function ScheduleIIIProfitLoss({ 
@@ -36,8 +67,18 @@ export function ScheduleIIIProfitLoss({
   reportingScale = 'auto',
   constitution = 'company',
   startingNoteNumber = 19,
-  stockData = []
+  stockData = [],
+  noteValues = {},
+  noteLedgers = {}
 }: Props) {
+  // State for annexure dialog
+  const [annexureOpen, setAnnexureOpen] = useState(false);
+  const [selectedNote, setSelectedNote] = useState<{
+    title: string;
+    noteNumber: string;
+    ledgers: NoteLedgerItem[];
+    total: number;
+  } | null>(null);
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
     const sign = amount < 0 ? '-' : '';
@@ -79,37 +120,60 @@ export function ScheduleIIIProfitLoss({
     }
   };
 
-  const hasPreviousPeriod = previousLines.length > 0;
+  const hasPreviousPeriod = previousLines && previousLines.length > 0;
   const formatLabel = getFormatLabel(constitution);
   const plFormat = getProfitLossFormat(constitution);
 
   // Helper to get amount from lines by fs_area
   const getAmountByFsArea = (lines: TrialBalanceLine[], fsArea: string): number => {
+    if (!lines || !Array.isArray(lines)) return 0;
     return lines
-      .filter(l => l.fs_area === fsArea)
-      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+      .filter(l => l && l.fs_area === fsArea)
+      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   };
 
   // Calculate Changes in Inventories from stock data
-  const calculateChangesInInventories = (): number => {
-    if (!stockData || stockData.length === 0) return 0;
+  const changesInInventories = useMemo(() => {
+    if (!stockData || !Array.isArray(stockData) || stockData.length === 0) {
+      console.log('ScheduleIIIProfitLoss: No stock data available');
+      return 0;
+    }
     
-    const totalOpening = stockData.reduce((sum, item) => sum + (item['Opening Value'] || 0), 0);
-    const totalClosing = stockData.reduce((sum, item) => sum + (item['Closing Value'] || 0), 0);
+    // Stock values are assets (Dr), so use Math.abs to ensure positive values
+    const totalOpening = stockData.reduce((sum, item) => {
+      if (!item) return sum;
+      return sum + Math.abs(item['Opening Value'] || 0);
+    }, 0);
+    const totalClosing = stockData.reduce((sum, item) => {
+      if (!item) return sum;
+      return sum + Math.abs(item['Closing Value'] || 0);
+    }, 0);
+    const changes = totalOpening - totalClosing;
     
-    return totalOpening - totalClosing; // Opening - Closing
-  };
-
-  const changesInInventories = calculateChangesInInventories();
+    console.log('ScheduleIIIProfitLoss: Changes in Inventories calculated:', {
+      stockItems: stockData.length,
+      totalOpening,
+      totalClosing,
+      changes
+    });
+    
+    return changes; // Opening - Closing
+  }, [stockData]);
 
   // Calculate computed totals
   const currentRevenue = getAmountByFsArea(currentLines, 'Revenue');
   const currentOtherIncome = getAmountByFsArea(currentLines, 'Other Income');
   const currentTotalIncome = currentRevenue + currentOtherIncome;
   
-  const currentTotalExpenses = currentLines
-    .filter(l => l.aile === 'Expense')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  // Calculate Total Expenses - sum all expense lines
+  const expenseLines = (currentLines || []).filter(l => l && (l.aile === 'Expense' || l.note_group === 'Expenses'));
+  const currentTotalExpenses = expenseLines.reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+  
+  console.log('ScheduleIIIProfitLoss: Total Expenses:', {
+    expenseLineCount: expenseLines.length,
+    totalExpenses: currentTotalExpenses,
+    sampleLines: expenseLines.slice(0, 3).map(l => ({ name: l.account_name, aile: l.aile, note_group: l.note_group, balance: l.closing_balance }))
+  });
   
   const currentPBT = currentTotalIncome - currentTotalExpenses;
   const currentTax = getAmountByFsArea(currentLines, 'Current Tax') + getAmountByFsArea(currentLines, 'Deferred Tax Expense');
@@ -119,9 +183,9 @@ export function ScheduleIIIProfitLoss({
   const prevOtherIncome = getAmountByFsArea(previousLines, 'Other Income');
   const prevTotalIncome = prevRevenue + prevOtherIncome;
   
-  const prevTotalExpenses = previousLines
-    .filter(l => l.aile === 'Expense')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const prevTotalExpenses = (previousLines || [])
+    .filter(l => l && l.aile === 'Expense')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   
   const prevPBT = prevTotalIncome - prevTotalExpenses;
   const prevTax = getAmountByFsArea(previousLines, 'Current Tax') + getAmountByFsArea(previousLines, 'Deferred Tax Expense');
@@ -132,17 +196,40 @@ export function ScheduleIIIProfitLoss({
     const items: DisplayLineItem[] = [];
     let noteCounter = startingNoteNumber;
 
+    // Map fsArea to noteValues keys
+    const fsAreaToNoteKey: Record<string, string> = {
+      'Cost of Materials': 'costOfMaterialsConsumed',
+      'Inventory Change': 'changesInInventories',
+      'Employee Benefits': 'employeeBenefits',
+      'Finance': 'financeCosts',
+      'Depreciation': 'depreciation',
+      'Other Expenses': 'otherExpenses',
+    };
+
     plFormat.forEach(formatItem => {
       let currentAmount = 0;
       let previousAmount = 0;
+      let noteKey: string | undefined;
 
+      // Check for note values first (from computed notes)
       if (formatItem.fsArea) {
-        currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
-        previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
-      } else if (formatItem.particulars.toLowerCase().includes('changes in inventories')) {
-        // Use calculated changes in inventories from stock data
-        currentAmount = changesInInventories;
-        previousAmount = 0; // TODO: Add previous year stock data support
+        noteKey = fsAreaToNoteKey[formatItem.fsArea];
+        
+        // Use noteValues if available for this fsArea
+        if (noteKey && noteValues[noteKey] !== undefined) {
+          currentAmount = noteValues[noteKey] as number;
+          console.log(`P&L: Using note value for ${formatItem.fsArea}:`, currentAmount);
+        } else if (formatItem.fsArea === 'Inventory Change' || 
+            formatItem.particulars.toLowerCase().includes('changes in inventories')) {
+          // Use calculated changes in inventories from stock data
+          currentAmount = changesInInventories;
+          noteKey = 'changesInInventories';
+          console.log('P&L: Applying Changes in Inventories:', currentAmount);
+        } else {
+          // Fall back to trial balance lines
+          currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
+          previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
+        }
       } else if (formatItem.particulars.includes('Total Income')) {
         currentAmount = currentTotalIncome;
         previousAmount = prevTotalIncome;
@@ -163,7 +250,7 @@ export function ScheduleIIIProfitLoss({
 
       // Only assign note number if there's a value in either period and it has an fsArea
       let displayNoteNo: string | undefined;
-      if (formatItem.fsArea && (currentAmount > 0 || previousAmount > 0)) {
+      if (formatItem.fsArea && (currentAmount !== 0 || previousAmount !== 0)) {
         displayNoteNo = noteCounter.toString();
         noteCounter++;
       }
@@ -173,15 +260,25 @@ export function ScheduleIIIProfitLoss({
         currentAmount,
         previousAmount,
         displayNoteNo,
+        noteKey,
       });
     });
 
     return items;
-  }, [plFormat, currentLines, previousLines, startingNoteNumber, currentTotalIncome, prevTotalIncome, currentTotalExpenses, prevTotalExpenses, currentPBT, prevPBT, currentPAT, prevPAT]);
+  }, [plFormat, currentLines, previousLines, startingNoteNumber, currentTotalIncome, prevTotalIncome, currentTotalExpenses, prevTotalExpenses, currentPBT, prevPBT, currentPAT, prevPAT, changesInInventories, noteValues]);
+
+  const handleNoteClick = (noteKey: string) => {
+    if (noteKey && noteLedgers[noteKey] && noteLedgers[noteKey].length > 0) {
+      setSelectedNote(noteKey);
+      setAnnexureOpen(true);
+    }
+  };
 
   const renderRow = (item: DisplayLineItem, index: number) => {
     const isHeader = item.level === 0 || (item.level === 1 && !item.srNo);
-    const showAmount = item.fsArea || item.isTotal || item.particulars.includes('Profit') || item.particulars.includes('Total');
+    const isChangesInInventories = item.particulars.toLowerCase().includes('changes in inventories');
+    const showAmount = item.fsArea || item.isTotal || item.particulars.includes('Profit') || item.particulars.includes('Total') || isChangesInInventories;
+    const hasAnnexure = item.noteKey && noteLedgers[item.noteKey] && noteLedgers[item.noteKey].length > 0;
     
     return (
       <TableRow key={index} className={cn(
@@ -198,7 +295,18 @@ export function ScheduleIIIProfitLoss({
           {item.particulars}
         </TableCell>
         <TableCell className="text-center w-16">
-          {item.displayNoteNo}
+          {item.displayNoteNo && hasAnnexure ? (
+            <button
+              onClick={() => handleNoteClick(item.noteKey!)}
+              className="inline-flex items-center gap-1 text-primary hover:text-primary/80 hover:underline font-medium"
+              title="Click to view ledger-wise annexure"
+            >
+              {item.displayNoteNo}
+              <FileText className="h-3 w-3" />
+            </button>
+          ) : (
+            item.displayNoteNo
+          )}
         </TableCell>
         <TableCell className={cn(
           "text-right font-mono w-32",
@@ -279,6 +387,14 @@ export function ScheduleIIIProfitLoss({
           )}
         </div>
       </div>
+
+      {/* Ledger Annexure Dialog */}
+      <LedgerAnnexureDialog
+        open={annexureOpen}
+        onOpenChange={setAnnexureOpen}
+        noteKey={selectedNote}
+        ledgers={selectedNote ? noteLedgers[selectedNote] || [] : []}
+      />
     </div>
   );
 }
