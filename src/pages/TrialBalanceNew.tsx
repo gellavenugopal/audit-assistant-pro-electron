@@ -110,7 +110,6 @@ export default function TrialBalanceNew() {
   const [odbcPort, setOdbcPort] = useState<string>('9000');
   const [isFetching, setIsFetching] = useState(false);
   const [isEntityDialogOpen, setIsEntityDialogOpen] = useState(false);
-  const [isBusinessDialogOpen, setIsBusinessDialogOpen] = useState(false);
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [isClassificationManagerOpen, setIsClassificationManagerOpen] = useState(false);
