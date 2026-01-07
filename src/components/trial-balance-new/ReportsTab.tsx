@@ -15,6 +15,7 @@ import { convertLedgerRowsToTrialBalanceLines } from '@/utils/trialBalanceNewAda
 import { ScheduleIIIBalanceSheet } from '@/components/trial-balance/ScheduleIIIBalanceSheet';
 import { ScheduleIIIProfitLoss } from '@/components/trial-balance/ScheduleIIIProfitLoss';
 import { CashFlowStatement } from '@/components/trial-balance/CashFlowStatement';
+import { ChangesInInventoriesNote } from '@/components/trial-balance/ChangesInInventoriesNote';
 import { NotesManagementTab } from '@/components/trial-balance/capital-notes/NotesManagementTab';
 import { FormatSelector } from '@/components/trial-balance/FormatSelector';
 import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSettings';
@@ -259,7 +260,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
         </TabsContent>
 
         <TabsContent value="profit-loss" className="mt-4">
-          <div className="space-y-3">
+          <div className="space-y-6">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-gray-900">Profit & Loss Account</h2>
               {plStartingNote !== 19 && (
@@ -268,6 +269,8 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 </Badge>
               )}
             </div>
+            
+            {/* Profit & Loss Statement */}
             <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
               <ScheduleIIIProfitLoss 
                 currentLines={trialBalanceLines} 
@@ -277,6 +280,17 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 startingNoteNumber={plStartingNote}
               />
             </div>
+
+            {/* Changes in Inventories Note */}
+            {stockData && stockData.length > 0 && (
+              <div className="bg-white rounded-lg shadow-sm border p-6">
+                <ChangesInInventoriesNote
+                  stockData={stockData}
+                  reportingScale={reportingScale}
+                  noteNumber={String(plStartingNote)}
+                />
+              </div>
+            )}
           </div>
         </TabsContent>
 
