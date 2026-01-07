@@ -48,6 +48,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useTallyODBC } from '@/hooks/useTallyODBC';
 import { useEngagement } from '@/contexts/EngagementContext';
+import { useTrialBalance, TrialBalanceLineInput } from '@/hooks/useTrialBalance';
 import { classifyDataframeBatch, LedgerRow, generateLedgerKey } from '@/services/trialBalanceNewClassification';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -87,6 +88,7 @@ export default function TrialBalanceNew() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
   const odbcConnection = useTallyODBC();
+  const trialBalanceDB = useTrialBalance(currentEngagement?.id);
   
   // Entity and Business Info
   const [entityType, setEntityType] = useState<string>('');
@@ -249,6 +251,30 @@ export default function TrialBalanceNew() {
       // Auto-classify
       const classified = classifyDataframeBatch(processedData, savedMappings);
       setCurrentData(classified);
+      
+      // Save to database
+      if (currentEngagement?.id) {
+        const dbLines: TrialBalanceLineInput[] = classified.map(row => ({
+          account_code: row['Composite Key'] || '',
+          account_name: row['Ledger Name'] || '',
+          ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+          ledger_primary_group: row['Primary Group'] || null,
+          opening_balance: row['Opening Balance'] || 0,
+          debit: row['Debit'] || 0,
+          credit: row['Credit'] || 0,
+          closing_balance: row['Closing Balance'] || 0,
+          balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+          period_type: 'current',
+          period_ending: toDate || null,
+          face_group: row.H1 || null,
+          note_group: row.H2 || null,
+          sub_note: row.H3 || null,
+          level4_group: row.H4 || null,
+          level5_detail: row.H5 || null,
+        }));
+        
+        await trialBalanceDB.importLines(dbLines, false);
+      }
       
       // Fetch stock items if required
       if (includeStockItems && (businessType === 'Trading' || businessType === 'Manufacturing')) {
@@ -675,6 +701,30 @@ export default function TrialBalanceNew() {
         
         const classified = classifyDataframeBatch(processedData, savedMappings);
         setCurrentData(classified);
+        
+        // Save to database
+        if (currentEngagement?.id) {
+          const dbLines: TrialBalanceLineInput[] = classified.map(row => ({
+            account_code: row['Composite Key'] || '',
+            account_name: row['Ledger Name'] || '',
+            ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+            ledger_primary_group: row['Primary Group'] || null,
+            opening_balance: row['Opening Balance'] || 0,
+            debit: row['Debit'] || 0,
+            credit: row['Credit'] || 0,
+            closing_balance: row['Closing Balance'] || 0,
+            balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+            period_type: 'current',
+            period_ending: toDate || null,
+            face_group: row.H1 || null,
+            note_group: row.H2 || null,
+            sub_note: row.H3 || null,
+            level4_group: row.H4 || null,
+            level5_detail: row.H5 || null,
+          }));
+          
+          await trialBalanceDB.importLines(dbLines, false);
+        }
         
         toast({
           title: 'Import Successful',
@@ -1159,7 +1209,8 @@ export default function TrialBalanceNew() {
                     />
                   </TableHead>
                   <TableHead>Ledger Name</TableHead>
-                  <TableHead>Parent</TableHead>
+                  <TableHead>Parent Group</TableHead>
+                  <TableHead>Primary Group</TableHead>
                   <TableHead className="text-right">Opening</TableHead>
                   <TableHead className="text-right">Debit</TableHead>
                   <TableHead className="text-right">Credit</TableHead>
@@ -1175,7 +1226,7 @@ export default function TrialBalanceNew() {
               <TableBody>
                 {filteredData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={14} className="text-center text-muted-foreground py-8">
                       No data loaded. Import from Tally or Excel to get started.
                     </TableCell>
                   </TableRow>
@@ -1217,6 +1268,7 @@ export default function TrialBalanceNew() {
                           />
                         </TableCell>
                         <TableCell className="font-medium">{row['Ledger Name']}</TableCell>
+                        <TableCell>{row['Parent Group'] || row['Primary Group'] || '-'}</TableCell>
                         <TableCell>{row['Primary Group']}</TableCell>
                         <TableCell className="text-right">{formatNumber(row['Opening Balance'])}</TableCell>
                         <TableCell className="text-right">{formatNumber(row['Debit'])}</TableCell>

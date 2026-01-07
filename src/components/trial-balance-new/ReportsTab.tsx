@@ -85,36 +85,85 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
   // Download Balance Sheet
   const handleDownloadBS = useCallback(() => {
     try {
-      // Group data by H2 (Balance Sheet sections)
+      // Group data by H2 and H3 for proper note structure
       const bsData = data.filter(row => row.H1 === 'Balance Sheet' || row.H1 === 'BS');
       
-      const grouped = bsData.reduce((acc: any, row) => {
-        const section = row.H2 || 'Unmapped';
-        if (!acc[section]) acc[section] = [];
-        acc[section].push({
-          'Ledger Name': row['Ledger Name'] || '',
-          'H2': row.H2 || '',
-          'H3': row.H3 || '',
-          'H4': row.H4 || '',
-          'H5': row.H5 || '',
-          'Closing Balance': row['Closing Balance'] || 0
-        });
+      // Create main Balance Sheet sheet with note references
+      const bsSummary: any[] = [];
+      const noteCounter: { [key: string]: number } = {};
+      let currentNote = bsStartingNote;
+      
+      // Group by H2 (main sections)
+      const h2Groups = bsData.reduce((acc: any, row) => {
+        const h2 = row.H2 || 'Unmapped';
+        if (!acc[h2]) acc[h2] = [];
+        acc[h2].push(row);
         return acc;
       }, {});
       
-      const workbook = XLSX.utils.book_new();
-      
-      // Create separate sheets for each section
-      Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
-        const worksheet = XLSX.utils.json_to_sheet(rows);
-        XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+      // Create summary with note references
+      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
+        const total = rows.reduce((sum: number, r: any) => sum + (r['Closing Balance'] || 0), 0);
+        
+        // Assign note number if has H3 (notes)
+        const hasNotes = rows.some((r: any) => r.H3 && r.H3.trim());
+        const noteNum = hasNotes ? currentNote++ : '';
+        if (hasNotes) noteCounter[h2] = noteNum;
+        
+        bsSummary.push({
+          'Particulars': h2,
+          'Note No.': noteNum ? `Note ${noteNum}` : '',
+          'Current Year (₹)': total,
+          'Previous Year (₹)': 0  // Add previous year column
+        });
       });
       
-      XLSX.writeFile(workbook, `Balance_Sheet_${companyName}_${financialYear}.xlsx`);
+      const workbook = XLSX.utils.book_new();
+      
+      // Main Balance Sheet sheet
+      const bsSheet = XLSX.utils.json_to_sheet(bsSummary);
+      bsSheet['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(workbook, bsSheet, 'Balance Sheet');
+      
+      // Create detailed notes sheets
+      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
+        const noteNum = noteCounter[h2];
+        if (!noteNum) return;  // Skip if no note number assigned
+        
+        // Group by H3 within this H2
+        const h3Groups = rows.reduce((acc: any, row: any) => {
+          const h3 = row.H3 || 'Others';
+          if (!acc[h3]) acc[h3] = [];
+          acc[h3].push(row);
+          return acc;
+        }, {});
+        
+        const noteData: any[] = [];
+        Object.entries(h3Groups).forEach(([h3, items]: [string, any]) => {
+          items.forEach((item: any) => {
+            noteData.push({
+              'Particulars': item['Ledger Name'] || '',
+              'H3': h3,
+              'H4': item.H4 || '',
+              'H5': item.H5 || '',
+              'Current Year (₹)': item['Closing Balance'] || 0,
+              'Previous Year (₹)': 0
+            });
+          });
+        });
+        
+        if (noteData.length > 0) {
+          const noteSheet = XLSX.utils.json_to_sheet(noteData);
+          noteSheet['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }];
+          XLSX.utils.book_append_sheet(workbook, noteSheet, `Note ${noteNum} - ${h2}`.substring(0, 31));
+        }
+      });
+      
+      XLSX.writeFile(workbook, `Balance_Sheet_with_Notes_${companyName}_${financialYear}.xlsx`);
       
       toast({
         title: 'Downloaded',
-        description: 'Balance Sheet exported successfully'
+        description: 'Balance Sheet with Notes exported successfully'
       });
     } catch (error) {
       toast({
@@ -123,41 +172,90 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
         variant: 'destructive'
       });
     }
-  }, [data, companyName, financialYear, toast]);
+  }, [data, companyName, financialYear, bsStartingNote, toast]);
 
   // Download P&L
   const handleDownloadPL = useCallback(() => {
     try {
-      // Group data by H2 (P&L sections)
+      // Group data by H2 and H3 for proper note structure
       const plData = data.filter(row => row.H1 === 'Profit & Loss' || row.H1 === 'P&L' || row.H1 === 'PL');
       
-      const grouped = plData.reduce((acc: any, row) => {
-        const section = row.H2 || 'Unmapped';
-        if (!acc[section]) acc[section] = [];
-        acc[section].push({
-          'Ledger Name': row['Ledger Name'] || '',
-          'H2': row.H2 || '',
-          'H3': row.H3 || '',
-          'H4': row.H4 || '',
-          'H5': row.H5 || '',
-          'Closing Balance': row['Closing Balance'] || 0
-        });
+      // Create main P&L sheet with note references
+      const plSummary: any[] = [];
+      const noteCounter: { [key: string]: number } = {};
+      let currentNote = plStartingNote;
+      
+      // Group by H2 (main sections like Revenue, Expenses)
+      const h2Groups = plData.reduce((acc: any, row) => {
+        const h2 = row.H2 || 'Unmapped';
+        if (!acc[h2]) acc[h2] = [];
+        acc[h2].push(row);
         return acc;
       }, {});
       
-      const workbook = XLSX.utils.book_new();
-      
-      // Create separate sheets for each section
-      Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
-        const worksheet = XLSX.utils.json_to_sheet(rows);
-        XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+      // Create summary with note references
+      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
+        const total = rows.reduce((sum: number, r: any) => sum + Math.abs(r['Closing Balance'] || 0), 0);
+        
+        // Assign note number if has H3 (notes)
+        const hasNotes = rows.some((r: any) => r.H3 && r.H3.trim());
+        const noteNum = hasNotes ? currentNote++ : '';
+        if (hasNotes) noteCounter[h2] = noteNum;
+        
+        plSummary.push({
+          'Particulars': h2,
+          'Note No.': noteNum ? `Note ${noteNum}` : '',
+          'Current Year (₹)': total,
+          'Previous Year (₹)': 0
+        });
       });
       
-      XLSX.writeFile(workbook, `Profit_Loss_${companyName}_${financialYear}.xlsx`);
+      const workbook = XLSX.utils.book_new();
+      
+      // Main P&L sheet
+      const plSheet = XLSX.utils.json_to_sheet(plSummary);
+      plSheet['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(workbook, plSheet, 'Profit & Loss');
+      
+      // Create detailed notes sheets
+      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
+        const noteNum = noteCounter[h2];
+        if (!noteNum) return;
+        
+        // Group by H3 within this H2
+        const h3Groups = rows.reduce((acc: any, row: any) => {
+          const h3 = row.H3 || 'Others';
+          if (!acc[h3]) acc[h3] = [];
+          acc[h3].push(row);
+          return acc;
+        }, {});
+        
+        const noteData: any[] = [];
+        Object.entries(h3Groups).forEach(([h3, items]: [string, any]) => {
+          items.forEach((item: any) => {
+            noteData.push({
+              'Particulars': item['Ledger Name'] || '',
+              'H3': h3,
+              'H4': item.H4 || '',
+              'H5': item.H5 || '',
+              'Current Year (₹)': Math.abs(item['Closing Balance'] || 0),
+              'Previous Year (₹)': 0
+            });
+          });
+        });
+        
+        if (noteData.length > 0) {
+          const noteSheet = XLSX.utils.json_to_sheet(noteData);
+          noteSheet['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }];
+          XLSX.utils.book_append_sheet(workbook, noteSheet, `Note ${noteNum} - ${h2}`.substring(0, 31));
+        }
+      });
+      
+      XLSX.writeFile(workbook, `Profit_Loss_with_Notes_${companyName}_${financialYear}.xlsx`);
       
       toast({
         title: 'Downloaded',
-        description: 'Profit & Loss exported successfully'
+        description: 'Profit & Loss with Notes exported successfully'
       });
     } catch (error) {
       toast({
@@ -166,7 +264,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
         variant: 'destructive'
       });
     }
-  }, [data, companyName, financialYear, toast]);
+  }, [data, companyName, financialYear, plStartingNote, toast]);
 
   if (data.length === 0) {
     return (
