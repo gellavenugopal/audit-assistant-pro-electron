@@ -209,19 +209,26 @@ export default function TrialBalanceNew() {
         return;
       }
       
-      // Convert to LedgerRow format
-      const processedData: LedgerRow[] = lines.map(line => ({
-        'Ledger Name': line.accountHead,
-        'Primary Group': line.primaryGroup || '',
-        'Parent Group': line.parent || '',
-        'Composite Key': generateLedgerKey(line.accountHead, line.primaryGroup || ''),
-        'Opening Balance': line.openingBalance || 0,
-        'Debit': Math.abs(line.totalDebit || 0),
-        'Credit': Math.abs(line.totalCredit || 0),
-        'Closing Balance': line.closingBalance || 0,
-        'Is Revenue': line.isRevenue ? 'Yes' : 'No',
-        'Sheet Name': 'TB CY'
-      }));
+      // Convert to LedgerRow format and filter out zero balance rows
+      const processedData: LedgerRow[] = lines
+        .filter(line => {
+          // Filter out rows where both opening and closing balances are 0
+          const opening = line.openingBalance || 0;
+          const closing = line.closingBalance || 0;
+          return opening !== 0 || closing !== 0;
+        })
+        .map(line => ({
+          'Ledger Name': line.accountHead,
+          'Primary Group': line.primaryGroup || '',
+          'Parent Group': line.parent || '',
+          'Composite Key': generateLedgerKey(line.accountHead, line.primaryGroup || ''),
+          'Opening Balance': line.openingBalance || 0,
+          'Debit': Math.abs(line.totalDebit || 0),
+          'Credit': Math.abs(line.totalCredit || 0),
+          'Closing Balance': line.closingBalance || 0,
+          'Is Revenue': line.isRevenue ? 'Yes' : 'No',
+          'Sheet Name': 'TB CY'
+        }));
       
       // Auto-classify
       const classified = classifyDataframeBatch(processedData, savedMappings);
@@ -480,27 +487,32 @@ export default function TrialBalanceNew() {
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
         
-        const processedData: LedgerRow[] = jsonData.map((row: any) => ({
-          'Ledger Name': row['Ledger Name'] || row['ledger_name'] || '',
-          'Primary Group': row['Primary Group'] || row['primary_group'] || '',
-          'Parent Group': row['Parent Group'] || row['parent_group'] || '',
-          'Composite Key': generateLedgerKey(
-            row['Ledger Name'] || row['ledger_name'] || '',
-            row['Primary Group'] || row['primary_group'] || ''
-          ),
-          'Opening Balance': parseFloat(row['Opening Balance'] || row['opening_balance'] || 0),
-          'Debit': parseFloat(row['Debit'] || row['debit'] || 0),
-          'Credit': parseFloat(row['Credit'] || row['credit'] || 0),
-          'Closing Balance': parseFloat(row['Closing Balance'] || row['closing_balance'] || 0),
-          'Is Revenue': row['Is Revenue'] || row['is_revenue'] || 'No',
-          'H1': row['H1'] || '',
-          'H2': row['H2'] || '',
-          'H3': row['H3'] || '',
-          'H4': row['H4'] || '',
-          'H5': row['H5'] || '',
-          'Status': row['Status'] || 'Unmapped',
-          'Sheet Name': 'TB CY'
-        }));
+        const processedData: LedgerRow[] = jsonData
+          .map((row: any) => ({
+            'Ledger Name': row['Ledger Name'] || row['ledger_name'] || '',
+            'Primary Group': row['Primary Group'] || row['primary_group'] || '',
+            'Parent Group': row['Parent Group'] || row['parent_group'] || '',
+            'Composite Key': generateLedgerKey(
+              row['Ledger Name'] || row['ledger_name'] || '',
+              row['Primary Group'] || row['primary_group'] || ''
+            ),
+            'Opening Balance': parseFloat(row['Opening Balance'] || row['opening_balance'] || 0),
+            'Debit': parseFloat(row['Debit'] || row['debit'] || 0),
+            'Credit': parseFloat(row['Credit'] || row['credit'] || 0),
+            'Closing Balance': parseFloat(row['Closing Balance'] || row['closing_balance'] || 0),
+            'Is Revenue': row['Is Revenue'] || row['is_revenue'] || 'No',
+            'H1': row['H1'] || '',
+            'H2': row['H2'] || '',
+            'H3': row['H3'] || '',
+            'H4': row['H4'] || '',
+            'H5': row['H5'] || '',
+            'Status': row['Status'] || 'Unmapped',
+            'Sheet Name': 'TB CY'
+          }))
+          .filter(row => {
+            // Filter out rows where both opening and closing balances are 0
+            return row['Opening Balance'] !== 0 || row['Closing Balance'] !== 0;
+          });
         
         const classified = classifyDataframeBatch(processedData, savedMappings);
         setCurrentData(classified);
