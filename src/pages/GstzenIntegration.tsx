@@ -276,16 +276,10 @@ export default function GstzenIntegration() {
                                                 Manage GSTR-1
                                             </Button>
 
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <Button variant="outline" size="sm" className="w-full" onClick={() => handleOpenLogin(gstin)} title="Login to GST Portal">
-                                                    <LogIn className="h-3.5 w-3.5 mr-2" />
-                                                    Sync
-                                                </Button>
-                                                <Button variant="outline" size="sm" className="w-full" onClick={() => handleOpenCredentials(gstin)} title="Configure Credentials">
-                                                    <Settings className="h-3.5 w-3.5 mr-2" />
-                                                    Settings
-                                                </Button>
-                                            </div>
+                                            <Button variant="outline" size="sm" className="w-full" onClick={() => handleOpenCredentials(gstin)} title="Configure Credentials">
+                                                <Settings className="h-3.5 w-3.5 mr-2" />
+                                                Settings
+                                            </Button>
                                         </div>
                                     </Card>
                                 ))}
