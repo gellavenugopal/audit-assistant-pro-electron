@@ -14,6 +14,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { FileSpreadsheet, AlertCircle, CheckCircle2, Download, Info } from 'lucide-react';
 import { TrialBalanceLineInput } from '@/hooks/useTrialBalance';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useTally } from '@/contexts/TallyContext';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2 } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -153,6 +156,19 @@ export function TrialBalanceImportDialog({ open, onOpenChange, onImport }: Props
   const [sheet1StartRow, setSheet1StartRow] = useState<number>(2);
   const [sheet2StartRow, setSheet2StartRow] = useState<number>(2);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tallyConnection = useTally();
+  const { toast } = useToast();
+  const [isFetchingTally, setIsFetchingTally] = useState(false);
+  const [tallyFromDate, setTallyFromDate] = useState<string>(() => {
+    // Default to FY start based on current date (April 1st)
+    const now = new Date();
+    const year = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+    return `${year}-04-01`;
+  });
+  const [tallyToDate, setTallyToDate] = useState<string>(() => {
+    const now = new Date();
+    return now.toISOString().slice(0, 10);
+  });
 
   const resetState = () => {
     setFile(null);
@@ -162,6 +178,52 @@ export function TrialBalanceImportDialog({ open, onOpenChange, onImport }: Props
     setPeriodType('current');
     setSheet1StartRow(2);
     setSheet2StartRow(2);
+    setIsFetchingTally(false);
+  };
+
+  const handleFetchFromTally = async () => {
+    if (!tallyFromDate || !tallyToDate) {
+      toast({ title: 'Invalid Dates', description: 'Please select a valid from and to date for Tally fetch', variant: 'destructive' });
+      return;
+    }
+
+    setIsFetchingTally(true);
+    try {
+      const result = await tallyConnection.fetchTrialBalance(tallyFromDate, tallyToDate);
+      if (!result || !result.success) {
+        toast({ title: 'Tally Fetch Failed', description: 'Unable to fetch Trial Balance from Tally', variant: 'destructive' });
+        setIsFetchingTally(false);
+        return;
+      }
+
+      // Map TallyTrialBalanceLine[] to ParsedRow[]
+      const rows: ParsedRow[] = result.lines.map((line) => {
+        // closing_balance uses sign convention: negative = Debit, positive = Credit
+        const closingBalance = line.closingCr > 0 ? line.closingCr : line.closingDr > 0 ? -line.closingDr : 0;
+        const openingBalance = line.openingCr > 0 ? line.openingCr : line.openingDr > 0 ? -line.openingDr : 0;
+
+        return {
+          account_name: line.accountName,
+          account_code: line.accountName.substring(0, 20).toUpperCase().replace(/\s+/g, '_'),
+          ledger_parent: line.parentGroup || undefined,
+          ledger_primary_group: line.primaryGroup || undefined,
+          opening_balance: openingBalance,
+          debit: Math.abs(line.debitTotals || 0),
+          credit: Math.abs(line.creditTotals || 0),
+          closing_balance: closingBalance,
+          period_type: periodType,
+          period_ending: periodEnding || tallyToDate,
+        } as ParsedRow;
+      });
+
+      setParsedData(rows);
+      toast({ title: 'Tally Fetch Complete', description: `Fetched ${rows.length} ledgers from Tally` });
+    } catch (err) {
+      console.error('Error fetching from Tally:', err);
+      toast({ title: 'Tally Fetch Error', description: (err as Error)?.message || 'Unknown error', variant: 'destructive' });
+    } finally {
+      setIsFetchingTally(false);
+    }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -341,6 +403,30 @@ export function TrialBalanceImportDialog({ open, onOpenChange, onImport }: Props
                 value={periodEnding}
                 onChange={(e) => setPeriodEnding(e.target.value)}
               />
+            </div>
+          </div>
+
+          {/* Tally Import */}
+          <div className="grid grid-cols-3 gap-4 items-end">
+            <div className="col-span-1 space-y-2">
+              <Label>Fetch from Tally</Label>
+              <p className="text-xs text-muted-foreground">Requires Tally Bridge connection</p>
+            </div>
+            <div className="col-span-1 space-y-2">
+              <Label htmlFor="tally_from">From</Label>
+              <Input id="tally_from" type="date" value={tallyFromDate} onChange={(e) => setTallyFromDate(e.target.value)} />
+            </div>
+            <div className="col-span-1 space-y-2">
+              <Label htmlFor="tally_to">To</Label>
+              <Input id="tally_to" type="date" value={tallyToDate} onChange={(e) => setTallyToDate(e.target.value)} />
+            </div>
+            <div className="col-span-3 flex items-center gap-3">
+              <div className="text-sm text-muted-foreground">
+                {tallyConnection?.isConnected ? <span className="text-success">Tally Bridge connected</span> : <span className="text-destructive">Not connected</span>}
+              </div>
+              <Button onClick={handleFetchFromTally} disabled={isFetchingTally} className="ml-auto">
+                {isFetchingTally ? (<><Loader2 className="w-4 h-4 animate-spin mr-2" />Fetching...</>) : 'Fetch from Tally'}
+              </Button>
             </div>
           </div>
 
