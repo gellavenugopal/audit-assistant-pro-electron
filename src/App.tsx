@@ -15,6 +15,7 @@ import StaffDashboard from "./pages/StaffDashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
 import TrialBalance from "./pages/TrialBalance";
+import TrialBalanceNew from "./pages/TrialBalanceNew";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
 import AuditPrograms from "./pages/AuditPrograms";
@@ -34,6 +35,8 @@ import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from '@/pages/Gstr1Dashboard';
 import NotFound from "./pages/NotFound";
+
+import ComplianceApplicability from "./pages/ComplianceApplicability";
 
 const queryClient = new QueryClient();
 
