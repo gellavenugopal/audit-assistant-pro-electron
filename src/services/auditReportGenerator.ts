@@ -70,6 +70,7 @@ export class AuditReportGenerator {
           includeCashFlow,
           hasBranchAuditors: Boolean(setup.has_branch_auditors),
           branchLocations: setup.branch_locations,
+          profitOrLoss: setup.company_profit_or_loss as 'profit' | 'loss' | null,
           ifcApplicable: Boolean(setup.ifc_applicable),
           ifcAnnexureLetter: setup.ifc_annexure_letter,
         }),
