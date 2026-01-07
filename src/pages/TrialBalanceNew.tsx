@@ -97,6 +97,18 @@ export default function TrialBalanceNew() {
   const [includeStockItems, setIncludeStockItems] = useState<boolean>(false);
   const [isBusinessDialogOpen, setIsBusinessDialogOpen] = useState(false);
   
+  // Derive constitution from entity type
+  const constitution = useMemo(() => {
+    const et = entityType.toLowerCase();
+    if (et.includes('company') || et.includes('opc')) return 'company';
+    if (et.includes('llp') || et.includes('limited liability')) return 'llp';
+    if (et.includes('partnership')) return 'partnership';
+    if (et.includes('proprietorship') || et.includes('sole') || et.includes('individual')) return 'proprietorship';
+    if (et.includes('trust')) return 'trust';
+    if (et.includes('society')) return 'society';
+    return 'company'; // default
+  }, [entityType]);
+  
   // Data State
   const [currentData, setCurrentData] = useState<LedgerRow[]>([]);
   const [previousData, setPreviousData] = useState<LedgerRow[]>([]);
@@ -276,7 +288,7 @@ export default function TrialBalanceNew() {
         }));
       
       // Auto-classify
-      const classified = classifyDataframeBatch(processedData, savedMappings, businessType);
+      const classified = classifyDataframeBatch(processedData, savedMappings, businessType, constitution);
       
       // Store temporarily and show period selection dialog
       setPendingImportData(classified);
@@ -378,7 +390,7 @@ export default function TrialBalanceNew() {
     };
     
     // Classify the new line
-    const classified = classifyDataframeBatch([newLine], savedMappings, businessType);
+    const classified = classifyDataframeBatch([newLine], savedMappings, businessType, constitution);
     
     if (newLineForm.periodType === 'current') {
       setCurrentData(prev => [...prev, classified[0]]);
@@ -415,7 +427,7 @@ export default function TrialBalanceNew() {
       return;
     }
     
-    const classified = classifyDataframeBatch(currentData, savedMappings, businessType);
+    const classified = classifyDataframeBatch(currentData, savedMappings, businessType, constitution);
     setCurrentData(classified);
     
     const mappedCount = classified.filter(row => row['Status'] === 'Mapped').length;
@@ -785,7 +797,7 @@ export default function TrialBalanceNew() {
             return row['Opening Balance'] !== 0 || row['Closing Balance'] !== 0;
           });
         
-        const classified = classifyDataframeBatch(processedData, savedMappings, businessType);
+        const classified = classifyDataframeBatch(processedData, savedMappings, businessType, constitution);
         setCurrentData(classified);
         
         // Save to database
