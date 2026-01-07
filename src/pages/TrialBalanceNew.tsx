@@ -57,6 +57,7 @@ import { BulkUpdateDialog } from '@/components/trial-balance-new/BulkUpdateDialo
 import { ClassificationManager } from '@/components/trial-balance-new/ClassificationManager';
 import { Ribbon } from '@/components/trial-balance-new/Ribbon';
 import { ClassificationResult } from '@/services/trialBalanceNewClassification';
+import { DEFAULT_GROUP_RULES, DEFAULT_KEYWORD_RULES, DEFAULT_OVERRIDE_RULES } from '@/data/scheduleIIIDefaultRules';
 
 // Entity Types
 const ENTITY_TYPES = [
@@ -113,6 +114,20 @@ export default function TrialBalanceNew() {
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [isClassificationManagerOpen, setIsClassificationManagerOpen] = useState(false);
+  const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
+  const [editingRuleKey, setEditingRuleKey] = useState<string | null>(null);
+  const [isRuleTemplateDialogOpen, setIsRuleTemplateDialogOpen] = useState(false);
+  const [isResetConfirmDialogOpen, setIsResetConfirmDialogOpen] = useState(false);
+  const [ruleTemplateName, setRuleTemplateName] = useState<string>('');
+  const [ruleForm, setRuleForm] = useState({
+    conditionType: 'Primary Group',
+    conditionValue: '',
+    h1: '',
+    h2: '',
+    h3: '',
+    h4: '',
+    h5: ''
+  });
   
   // Filtered data
   const filteredData = useMemo(() => {
@@ -237,16 +252,26 @@ export default function TrialBalanceNew() {
       // Fetch stock items if required
       if (includeStockItems && (businessType === 'Trading' || businessType === 'Manufacturing')) {
         try {
-          // TODO: Implement stock items fetch from Tally ODBC
-          // const stockItems = await odbcConnection.fetchStockItems();
-          // setCurrentStockData(stockItems);
-          toast({
-            title: 'Stock Items',
-            description: 'Stock items fetching not yet implemented',
-            variant: 'default'
-          });
+          const stockItems = await odbcConnection.fetchStockItems();
+          
+          // Transform stock items to match the expected format
+          const transformedStockItems = stockItems.map((item: any) => ({
+            'Item Name': item['Item Name'] || '',
+            'Stock Group': item['Stock Group'] || '',
+            'Opening Value': parseFloat(item['Opening Value'] || 0),
+            'Closing Value': parseFloat(item['Closing Value'] || 0),
+            'Stock Category': item['Stock Category'] || '',
+            'Key': item['Key'] || ''
+          }));
+          
+          setCurrentStockData(transformedStockItems);
         } catch (error) {
           console.error('Failed to fetch stock items:', error);
+          toast({
+            title: 'Stock Items Error',
+            description: 'Failed to fetch stock items from Tally',
+            variant: 'destructive'
+          });
         }
       }
       
@@ -387,6 +412,45 @@ export default function TrialBalanceNew() {
 
   // Excel-like keyboard navigation
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
+  
+  // Load default rules and engagement-specific rules on mount
+  useEffect(() => {
+    // Initialize with default rules
+    const defaultMappings: Record<string, ClassificationResult> = {};
+    
+    // Convert DEFAULT_GROUP_RULES to mapping format
+    DEFAULT_GROUP_RULES.forEach(rule => {
+      const key = `${rule.tallyGroupName}`;
+      defaultMappings[key] = {
+        h1: rule.mapsToCode.split('-')[0] || '',
+        h2: rule.mapsToCode.split('-')[1] || '',
+        h3: rule.mapsToCode.split('-')[2] || '',
+        h4: rule.mapsToCode.split('-')[3] || '',
+        h5: rule.mapsToCode.split('-')[4] || '',
+        compositeKey: `${rule.tallyGroupName}_DEFAULT`,
+        confidence: 'High'
+      };
+    });
+    
+    // Load engagement-specific rules if available
+    if (currentEngagement?.id) {
+      const savedTemplateKey = `trialbalance_rules_${currentEngagement.id}`;
+      const savedTemplate = localStorage.getItem(savedTemplateKey);
+      if (savedTemplate) {
+        try {
+          const parsed = JSON.parse(savedTemplate);
+          setSavedMappings({ ...defaultMappings, ...parsed });
+        } catch (error) {
+          console.error('Failed to parse saved rules:', error);
+          setSavedMappings(defaultMappings);
+        }
+      } else {
+        setSavedMappings(defaultMappings);
+      }
+    } else {
+      setSavedMappings(defaultMappings);
+    }
+  }, [currentEngagement?.id]);
   
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -592,6 +656,219 @@ export default function TrialBalanceNew() {
     }
   }, [toast]);
   
+  // Rule Engine Handlers
+  const handleAddRule = useCallback(() => {
+    setEditingRuleKey(null);
+    setRuleForm({
+      conditionType: 'Primary Group',
+      conditionValue: '',
+      h1: '',
+      h2: '',
+      h3: '',
+      h4: '',
+      h5: ''
+    });
+    setIsRuleDialogOpen(true);
+  }, []);
+  
+  const handleEditRule = useCallback((key: string, mapping: ClassificationResult) => {
+    setEditingRuleKey(key);
+    setRuleForm({
+      conditionType: 'Primary Group',
+      conditionValue: key.split('|')[1] || key,
+      h1: mapping.h1 || '',
+      h2: mapping.h2 || '',
+      h3: mapping.h3 || '',
+      h4: mapping.h4 || '',
+      h5: mapping.h5 || ''
+    });
+    setIsRuleDialogOpen(true);
+  }, []);
+  
+  const handleSaveRule = useCallback(() => {
+    if (!ruleForm.conditionValue) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a condition value',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    const key = `*|${ruleForm.conditionValue}`;
+    const newMapping: ClassificationResult = {
+      h1: ruleForm.h1,
+      h2: ruleForm.h2,
+      h3: ruleForm.h3,
+      h4: ruleForm.h4,
+      h5: ruleForm.h5,
+      status: 'Mapped'
+    };
+    
+    handleSaveMapping(key, newMapping);
+    setIsRuleDialogOpen(false);
+    
+    toast({
+      title: editingRuleKey ? 'Rule Updated' : 'Rule Added',
+      description: `Classification rule ${editingRuleKey ? 'updated' : 'created'} successfully`
+    });
+  }, [ruleForm, editingRuleKey, handleSaveMapping, toast]);
+  
+  const handleImportRules = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        
+        const newMappings: Record<string, ClassificationResult> = {};
+        jsonData.forEach((row: any) => {
+          const key = `*|${row['Condition Value'] || row['condition_value'] || ''}`;
+          if (key !== '*|') {
+            newMappings[key] = {
+              h1: row['H1'] || '',
+              h2: row['H2'] || '',
+              h3: row['H3'] || '',
+              h4: row['H4'] || '',
+              h5: row['H5'] || '',
+              status: 'Mapped'
+            };
+          }
+        });
+        
+        setSavedMappings(prev => ({ ...prev, ...newMappings }));
+        
+        toast({
+          title: 'Import Successful',
+          description: `Imported ${Object.keys(newMappings).length} rules from Excel`
+        });
+      } catch (error) {
+        toast({
+          title: 'Import Failed',
+          description: error instanceof Error ? error.message : 'Failed to import rules',
+          variant: 'destructive'
+        });
+      }
+    };
+    input.click();
+  }, [toast]);
+  
+  const handleExportRules = useCallback(() => {
+    if (Object.keys(savedMappings).length === 0) {
+      toast({
+        title: 'No Rules',
+        description: 'No rules to export',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    try {
+      const rulesData = Object.entries(savedMappings).map(([key, mapping]) => ({
+        'Condition Type': 'Primary Group',
+        'Condition Value': key.split('|')[1] || key,
+        'H1': mapping.h1 || '',
+        'H2': mapping.h2 || '',
+        'H3': mapping.h3 || '',
+        'H4': mapping.h4 || '',
+        'H5': mapping.h5 || ''
+      }));
+      
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(rulesData);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Classification Rules');
+      XLSX.writeFile(workbook, `Classification_Rules_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      toast({
+        title: 'Export Successful',
+        description: `Exported ${rulesData.length} rules to Excel`
+      });
+    } catch (error) {
+      toast({
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export rules',
+        variant: 'destructive'
+      });
+    }
+  }, [savedMappings, toast]);
+  
+  // Save Rule Template
+  const handleSaveRuleTemplate = useCallback(() => {
+    if (!ruleTemplateName.trim()) {
+      toast({
+        title: 'Template Name Required',
+        description: 'Please enter a name for this rule template',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    if (currentEngagement?.id) {
+      try {
+        const templateKey = `trialbalance_rules_${currentEngagement.id}`;
+        localStorage.setItem(templateKey, JSON.stringify(savedMappings));
+        
+        // Save template metadata
+        const metadataKey = `trialbalance_rules_metadata_${currentEngagement.id}`;
+        const metadata = {
+          name: ruleTemplateName,
+          savedAt: new Date().toISOString(),
+          engagementId: currentEngagement.id,
+          engagementName: currentEngagement.client_name
+        };
+        localStorage.setItem(metadataKey, JSON.stringify(metadata));
+        
+        toast({
+          title: 'Template Saved',
+          description: `Rule template "${ruleTemplateName}" saved successfully`
+        });
+        
+        setIsRuleTemplateDialogOpen(false);
+        setRuleTemplateName('');
+      } catch (error) {
+        toast({
+          title: 'Save Failed',
+          description: error instanceof Error ? error.message : 'Failed to save rule template',
+          variant: 'destructive'
+        });
+      }
+    } else {
+      toast({
+        title: 'No Engagement',
+        description: 'Please select an engagement first',
+        variant: 'destructive'
+      });
+    }
+  }, [ruleTemplateName, currentEngagement, savedMappings, toast]);
+  
+  // Modified handleClear to prompt for saving rules first
+  const handleClearWithConfirmation = useCallback(() => {
+    setIsResetConfirmDialogOpen(true);
+  }, []);
+  
+  const handleConfirmReset = useCallback((saveTemplate: boolean) => {
+    if (saveTemplate) {
+      setIsResetConfirmDialogOpen(false);
+      setIsRuleTemplateDialogOpen(true);
+    } else {
+      setCurrentData([]);
+      setCurrentStockData([]);
+      setIsResetConfirmDialogOpen(false);
+      toast({
+        title: 'Data Cleared',
+        description: 'All data has been cleared'
+      });
+    }
+  }, [toast]);
+  
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Excel-style Ribbon */}
@@ -624,7 +901,7 @@ export default function TrialBalanceNew() {
         onFinancialStatements={() => setActiveTab('reports')}
         onExcelExport={handleExcelExport}
         onSave={handleSave}
-        onClear={handleClear}
+        onClear={handleClearWithConfirmation}
       />
 
       {/* Entity Information Bar (Compact) */}
@@ -710,38 +987,52 @@ export default function TrialBalanceNew() {
         {/* Sheet Tabs (Excel-style) */}
         <div className="flex items-center border-b bg-gray-50 px-2">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="bg-transparent h-8 p-0">
+            <TabsList className="bg-gray-100 h-8 p-0 gap-0 border-b">
               <TabsTrigger 
                 value="trial-balance"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=inactive]:bg-gray-100 data-[state=inactive]:text-gray-600 rounded-none h-8 px-4"
               >
                 <FileSpreadsheet className="w-3 h-3 mr-1.5" />
                 Trial Balance
               </TabsTrigger>
               <TabsTrigger 
                 value="stock-items"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=inactive]:bg-gray-100 data-[state=inactive]:text-gray-600 rounded-none h-8 px-4"
               >
                 <Package className="w-3 h-3 mr-1.5" />
                 Stock Items
               </TabsTrigger>
               <TabsTrigger 
                 value="hierarchy"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=inactive]:bg-gray-100 data-[state=inactive]:text-gray-600 rounded-none h-8 px-4"
               >
                 <Layers className="w-3 h-3 mr-1.5" />
                 Hierarchy
               </TabsTrigger>
               <TabsTrigger 
                 value="reports"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=inactive]:bg-gray-100 data-[state=inactive]:text-gray-600 rounded-none h-8 px-4"
               >
                 <FileText className="w-3 h-3 mr-1.5" />
                 Reports
               </TabsTrigger>
               <TabsTrigger 
+                value="notes"
+                className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=inactive]:bg-gray-100 data-[state=inactive]:text-gray-600 rounded-none h-8 px-4"
+              >
+                <FileText className="w-3 h-3 mr-1.5" />
+                Notes to Account
+              </TabsTrigger>
+              <TabsTrigger 
+                value="annexures"
+                className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=inactive]:bg-gray-100 data-[state=inactive]:text-gray-600 rounded-none h-8 px-4"
+              >
+                <FileText className="w-3 h-3 mr-1.5" />
+                Annexures
+              </TabsTrigger>
+              <TabsTrigger 
                 value="rule-engine"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                className="data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=inactive]:bg-gray-100 data-[state=inactive]:text-gray-600 rounded-none h-8 px-4"
               >
                 <Cog className="w-3 h-3 mr-1.5" />
                 Rule Engine
@@ -772,7 +1063,7 @@ export default function TrialBalanceNew() {
                     />
                   </TableHead>
                   <TableHead>Ledger Name</TableHead>
-                  <TableHead>Primary Group</TableHead>
+                  <TableHead>Parent</TableHead>
                   <TableHead className="text-right">Opening</TableHead>
                   <TableHead className="text-right">Debit</TableHead>
                   <TableHead className="text-right">Credit</TableHead>
@@ -914,6 +1205,201 @@ export default function TrialBalanceNew() {
               />
             </TabsContent>
             
+            <TabsContent value="notes" className="mt-0 p-4">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-lg font-semibold">Notes to Account</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Detailed notes grouped by Schedule III classifications from Rule Engine
+                    </p>
+                  </div>
+                  <Button 
+                    onClick={() => {
+                      try {
+                        // Group data by H3 and H4 for detailed notes
+                        const notesData = currentData.filter(row => row.H3 && row.H3.trim() !== '');
+                        
+                        const grouped = notesData.reduce((acc: any, row) => {
+                          const noteSection = `${row.H2 || 'Unmapped'} - ${row.H3 || 'Unmapped'}`;
+                          if (!acc[noteSection]) acc[noteSection] = [];
+                          acc[noteSection].push({
+                            'Ledger Name': row['Ledger Name'] || '',
+                            'Parent': row['Primary Group'] || '',
+                            'H2': row.H2 || '',
+                            'H3': row.H3 || '',
+                            'H4': row.H4 || '',
+                            'H5': row.H5 || '',
+                            'Opening Balance': row['Opening Balance'] || 0,
+                            'Closing Balance': row['Closing Balance'] || 0
+                          });
+                          return acc;
+                        }, {});
+                        
+                        const workbook = XLSX.utils.book_new();
+                        
+                        Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
+                          const worksheet = XLSX.utils.json_to_sheet(rows);
+                          XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+                        });
+                        
+                        XLSX.writeFile(workbook, `Notes_to_Account_${entityName}_${new Date().toISOString().split('T')[0]}.xlsx`);
+                        
+                        toast({
+                          title: 'Downloaded',
+                          description: 'Notes to Account exported successfully'
+                        });
+                      } catch (error) {
+                        toast({
+                          title: 'Export Failed',
+                          description: error instanceof Error ? error.message : 'Failed to export Notes',
+                          variant: 'destructive'
+                        });
+                      }
+                    }}
+                    variant="outline"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Download Notes
+                  </Button>
+                </div>
+                
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Note Category</TableHead>
+                        <TableHead>Ledger Name</TableHead>
+                        <TableHead>H3 Classification</TableHead>
+                        <TableHead>H4 Classification</TableHead>
+                        <TableHead className="text-right">Opening</TableHead>
+                        <TableHead className="text-right">Closing</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentData.filter(row => row.H3 && row.H3.trim() !== '').length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                            No notes available. Ensure data is properly classified with H3 level in Rule Engine.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        currentData
+                          .filter(row => row.H3 && row.H3.trim() !== '')
+                          .map((row, index) => (
+                            <TableRow key={index}>
+                              <TableCell className="font-medium">{row.H2 || '-'}</TableCell>
+                              <TableCell>{row['Ledger Name']}</TableCell>
+                              <TableCell>{row.H3}</TableCell>
+                              <TableCell>{row.H4 || '-'}</TableCell>
+                              <TableCell className="text-right">{formatNumber(row['Opening Balance'])}</TableCell>
+                              <TableCell className="text-right">{formatNumber(row['Closing Balance'])}</TableCell>
+                            </TableRow>
+                          ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </TabsContent>
+            
+            <TabsContent value="annexures" className="mt-0 p-4">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-lg font-semibold">Annexures to Notes</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Detailed annexures grouped by H4 and H5 classifications
+                    </p>
+                  </div>
+                  <Button 
+                    onClick={() => {
+                      try {
+                        // Group data by H4 and H5 for annexures
+                        const annexuresData = currentData.filter(row => row.H4 && row.H4.trim() !== '');
+                        
+                        const grouped = annexuresData.reduce((acc: any, row) => {
+                          const annexureSection = `${row.H3 || 'Unmapped'} - ${row.H4 || 'Unmapped'}`;
+                          if (!acc[annexureSection]) acc[annexureSection] = [];
+                          acc[annexureSection].push({
+                            'Ledger Name': row['Ledger Name'] || '',
+                            'Parent': row['Primary Group'] || '',
+                            'H3': row.H3 || '',
+                            'H4': row.H4 || '',
+                            'H5': row.H5 || '',
+                            'Opening Balance': row['Opening Balance'] || 0,
+                            'Closing Balance': row['Closing Balance'] || 0
+                          });
+                          return acc;
+                        }, {});
+                        
+                        const workbook = XLSX.utils.book_new();
+                        
+                        Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
+                          const worksheet = XLSX.utils.json_to_sheet(rows);
+                          XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+                        });
+                        
+                        XLSX.writeFile(workbook, `Annexures_${entityName}_${new Date().toISOString().split('T')[0]}.xlsx`);
+                        
+                        toast({
+                          title: 'Downloaded',
+                          description: 'Annexures exported successfully'
+                        });
+                      } catch (error) {
+                        toast({
+                          title: 'Export Failed',
+                          description: error instanceof Error ? error.message : 'Failed to export Annexures',
+                          variant: 'destructive'
+                        });
+                      }
+                    }}
+                    variant="outline"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Download Annexures
+                  </Button>
+                </div>
+                
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Annexure Group</TableHead>
+                        <TableHead>Ledger Name</TableHead>
+                        <TableHead>H4 Classification</TableHead>
+                        <TableHead>H5 Classification</TableHead>
+                        <TableHead className="text-right">Opening</TableHead>
+                        <TableHead className="text-right">Closing</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentData.filter(row => row.H4 && row.H4.trim() !== '').length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                            No annexures available. Ensure data is properly classified with H4 level in Rule Engine.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        currentData
+                          .filter(row => row.H4 && row.H4.trim() !== '')
+                          .map((row, index) => (
+                            <TableRow key={index}>
+                              <TableCell className="font-medium">{row.H3 || '-'}</TableCell>
+                              <TableCell>{row['Ledger Name']}</TableCell>
+                              <TableCell>{row.H4}</TableCell>
+                              <TableCell>{row.H5 || '-'}</TableCell>
+                              <TableCell className="text-right">{formatNumber(row['Opening Balance'])}</TableCell>
+                              <TableCell className="text-right">{formatNumber(row['Closing Balance'])}</TableCell>
+                            </TableRow>
+                          ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </TabsContent>
+            
             <TabsContent value="rule-engine" className="mt-0 p-4">
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
@@ -923,10 +1409,24 @@ export default function TrialBalanceNew() {
                       Manage automatic classification rules for trial balance items
                     </p>
                   </div>
-                  <Button onClick={() => toast({ title: 'Add Rule', description: 'Rule creation dialog coming soon' })}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add New Rule
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setIsRuleTemplateDialogOpen(true)}>
+                      <Save className="w-4 h-4 mr-2" />
+                      Save as Template
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleImportRules}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Import Rules
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleExportRules}>
+                      <Download className="w-4 h-4 mr-2" />
+                      Export Rules
+                    </Button>
+                    <Button onClick={handleAddRule}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New Rule
+                    </Button>
+                  </div>
                 </div>
                 
                 <div className="border rounded-lg">
@@ -944,7 +1444,7 @@ export default function TrialBalanceNew() {
                       {Object.entries(savedMappings).length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                            No rules defined yet. Create rules to automate classification.
+                            No rules defined yet. Click "Add New Rule" or import from Excel to get started.
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -962,6 +1462,8 @@ export default function TrialBalanceNew() {
                                 <div><strong>H1:</strong> {mapping.h1}</div>
                                 <div><strong>H2:</strong> {mapping.h2}</div>
                                 <div><strong>H3:</strong> {mapping.h3}</div>
+                                {mapping.h4 && <div><strong>H4:</strong> {mapping.h4}</div>}
+                                {mapping.h5 && <div><strong>H5:</strong> {mapping.h5}</div>}
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
@@ -969,7 +1471,7 @@ export default function TrialBalanceNew() {
                                 <Button 
                                   size="sm" 
                                   variant="ghost"
-                                  onClick={() => toast({ title: 'Edit Rule', description: 'Edit functionality coming soon' })}
+                                  onClick={() => handleEditRule(key, mapping)}
                                 >
                                   <Edit className="w-4 h-4" />
                                 </Button>
@@ -1163,6 +1665,173 @@ export default function TrialBalanceNew() {
         onSaveMapping={handleSaveMapping}
         onDeleteMapping={handleDeleteMapping}
       />
+
+      {/* Rule Add/Edit Dialog */}
+      <Dialog open={isRuleDialogOpen} onOpenChange={setIsRuleDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingRuleKey ? 'Edit Classification Rule' : 'Add New Classification Rule'}</DialogTitle>
+            <DialogDescription>
+              Define a rule to automatically classify trial balance items based on Tally Primary Group
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Condition Type</label>
+              <Select value={ruleForm.conditionType} onValueChange={(val) => setRuleForm(prev => ({ ...prev, conditionType: val }))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Primary Group">Tally Primary Group</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Condition Value *</label>
+              <Input
+                value={ruleForm.conditionValue}
+                onChange={(e) => setRuleForm(prev => ({ ...prev, conditionValue: e.target.value }))}
+                placeholder="e.g., Current Assets, Bank Accounts"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H1 Classification</label>
+                <Input
+                  value={ruleForm.h1}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h1: e.target.value }))}
+                  placeholder="e.g., Balance Sheet"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H2 Classification</label>
+                <Input
+                  value={ruleForm.h2}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h2: e.target.value }))}
+                  placeholder="e.g., Assets"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H3 Classification</label>
+                <Input
+                  value={ruleForm.h3}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h3: e.target.value }))}
+                  placeholder="e.g., Current Assets"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H4 Classification</label>
+                <Input
+                  value={ruleForm.h4}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h4: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H5 Classification</label>
+                <Input
+                  value={ruleForm.h5}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h5: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setIsRuleDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveRule}>
+                {editingRuleKey ? 'Update Rule' : 'Create Rule'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Rule Template Save Dialog */}
+      <Dialog open={isRuleTemplateDialogOpen} onOpenChange={setIsRuleTemplateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Rule Template</DialogTitle>
+            <DialogDescription>
+              Save the current mapping rules as a named template for this engagement
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Template Name *</label>
+              <Input
+                value={ruleTemplateName}
+                onChange={(e) => setRuleTemplateName(e.target.value)}
+                placeholder="e.g., Manufacturing Company - Standard, Retail Business - Q1 2024"
+              />
+            </div>
+            
+            <div className="text-sm text-muted-foreground bg-muted p-3 rounded">
+              <p>This template will be saved for engagement: <strong>{currentEngagement?.client_name}</strong></p>
+              <p className="mt-1">Total rules: <strong>{Object.keys(savedMappings).length}</strong></p>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => {
+                setIsRuleTemplateDialogOpen(false);
+                setRuleTemplateName('');
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveRuleTemplate}>
+                Save Template
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Reset Confirmation Dialog */}
+      <Dialog open={isResetConfirmDialogOpen} onOpenChange={setIsResetConfirmDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear Trial Balance Data</DialogTitle>
+            <DialogDescription>
+              Would you like to save the current mapping rules as a template before clearing the data?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm bg-yellow-50 border border-yellow-200 p-3 rounded">
+              <p className="font-medium text-yellow-900">⚠️ Warning</p>
+              <p className="mt-1 text-yellow-800">All trial balance data and stock items will be cleared. This action cannot be undone.</p>
+            </div>
+            
+            <div className="text-sm text-muted-foreground">
+              <p>Current mapping rules: <strong>{Object.keys(savedMappings).length} rules</strong></p>
+              <p>Ledger rows: <strong>{currentData.length} rows</strong></p>
+              {currentStockData.length > 0 && (
+                <p>Stock items: <strong>{currentStockData.length} items</strong></p>
+              )}
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setIsResetConfirmDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="secondary" onClick={() => handleConfirmReset(true)}>
+                Save Template & Clear
+              </Button>
+              <Button variant="destructive" onClick={() => handleConfirmReset(false)}>
+                Clear Without Saving
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
