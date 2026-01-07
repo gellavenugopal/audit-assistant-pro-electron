@@ -21,6 +21,7 @@ interface Props {
   reportingScale?: string;
   constitution?: string;
   startingNoteNumber?: number;
+  stockData?: any[];
 }
 
 interface DisplayLineItem extends FSLineItem {
@@ -34,7 +35,8 @@ export function ScheduleIIIProfitLoss({
   previousLines = [], 
   reportingScale = 'auto',
   constitution = 'company',
-  startingNoteNumber = 19
+  startingNoteNumber = 19,
+  stockData = []
 }: Props) {
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
@@ -88,6 +90,18 @@ export function ScheduleIIIProfitLoss({
       .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
   };
 
+  // Calculate Changes in Inventories from stock data
+  const calculateChangesInInventories = (): number => {
+    if (!stockData || stockData.length === 0) return 0;
+    
+    const totalOpening = stockData.reduce((sum, item) => sum + (item['Opening Value'] || 0), 0);
+    const totalClosing = stockData.reduce((sum, item) => sum + (item['Closing Value'] || 0), 0);
+    
+    return totalOpening - totalClosing; // Opening - Closing
+  };
+
+  const changesInInventories = calculateChangesInInventories();
+
   // Calculate computed totals
   const currentRevenue = getAmountByFsArea(currentLines, 'Revenue');
   const currentOtherIncome = getAmountByFsArea(currentLines, 'Other Income');
@@ -125,6 +139,10 @@ export function ScheduleIIIProfitLoss({
       if (formatItem.fsArea) {
         currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
         previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
+      } else if (formatItem.particulars.toLowerCase().includes('changes in inventories')) {
+        // Use calculated changes in inventories from stock data
+        currentAmount = changesInInventories;
+        previousAmount = 0; // TODO: Add previous year stock data support
       } else if (formatItem.particulars.includes('Total Income')) {
         currentAmount = currentTotalIncome;
         previousAmount = prevTotalIncome;

@@ -7,6 +7,10 @@ export interface ClassificationResult {
   h3: string;
   h4: string;
   h5: string;
+  technicalCode?: string;
+  headCode?: string;
+  sectionCode?: string;
+  noteCode?: string;
 }
 
 export interface LedgerRow {
@@ -29,6 +33,10 @@ export interface LedgerRow {
   'Verified'?: string;
   'Notes'?: string;
   'Sheet Name'?: string;
+  'Technical Code'?: string;
+  'Head Code'?: string;
+  'Section Code'?: string;
+  'Note Code'?: string;
 }
 
 // Generate composite key for ledger lookup
@@ -183,7 +191,8 @@ export function classifyLedgerWithPriority(
   tallyGroup: string,
   closingBalance: number,
   savedMappingsDict: Record<string, ClassificationResult> | null = null,
-  businessType: string = ''
+  businessType: string = '',
+  constitution: string = 'company'
 ): ClassificationResult {
   // Generate composite key for lookup
   const compositeKey = generateLedgerKey(ledgerName, tallyGroup);
@@ -202,7 +211,11 @@ export function classifyLedgerWithPriority(
       h2: 'Expenses',
       h3: 'Purchases of stock-in-trade',
       h4: '',
-      h5: ''
+      h5: '',
+      technicalCode: 'PL_PURCHASES_STOCK',
+      headCode: 'EXPENSES_HEAD',
+      sectionCode: 'PURCHASES_STOCK_TRADE',
+      noteCode: 'NOTE_PURCHASES'
     };
   }
   
@@ -213,7 +226,11 @@ export function classifyLedgerWithPriority(
       h2: 'Expenses',
       h3: 'Cost of materials consumed',
       h4: 'Purchases of raw materials',
-      h5: ''
+      h5: '',
+      technicalCode: 'PL_COST_MATERIALS',
+      headCode: 'EXPENSES_HEAD',
+      sectionCode: 'COST_MATERIALS',
+      noteCode: 'NOTE_COST_MATERIALS'
     };
   }
   
@@ -226,7 +243,11 @@ export function classifyLedgerWithPriority(
       h2: 'Assets',
       h3: 'Trade Receivables',
       h4: 'Unsecured Considered Good',
-      h5: ''
+      h5: '',
+      technicalCode: 'BS_TRADE_RECEIVABLES',
+      headCode: 'ASSETS_HEAD',
+      sectionCode: 'TRADE_RECEIVABLES',
+      noteCode: 'NOTE_TRADE_RECEIVABLES'
     };
   }
   
@@ -238,7 +259,11 @@ export function classifyLedgerWithPriority(
         h2: 'Assets',
         h3: 'Inventories',
         h4: 'Stock-in-Trade',
-        h5: ''
+        h5: '',
+        technicalCode: 'BS_INVENTORIES',
+        headCode: 'ASSETS_HEAD',
+        sectionCode: 'INVENTORIES',
+        noteCode: 'NOTE_INVENTORIES'
       };
     }
     // For Manufacturing, default to general stock mapping
@@ -247,7 +272,11 @@ export function classifyLedgerWithPriority(
       h2: 'Assets',
       h3: 'Inventories',
       h4: '', // Will be classified based on stock items
-      h5: ''
+      h5: '',
+      technicalCode: 'BS_INVENTORIES',
+      headCode: 'ASSETS_HEAD',
+      sectionCode: 'INVENTORIES',
+      noteCode: 'NOTE_INVENTORIES'
     };
   }
   
@@ -345,7 +374,8 @@ export function classifyLedgerWithPriority(
 export function classifyDataframeBatch(
   dataframe: LedgerRow[],
   savedMappingsDict: Record<string, ClassificationResult> | null = null,
-  businessType: string = ''
+  businessType: string = '',
+  constitution: string = 'company'
 ): LedgerRow[] {
   return dataframe.map(row => {
     const classification = classifyLedgerWithPriority(
@@ -353,7 +383,8 @@ export function classifyDataframeBatch(
       row['Primary Group'] || '',
       row['Closing Balance'] || 0,
       savedMappingsDict,
-      businessType
+      businessType,
+      constitution
     );
     
     // Determine status
@@ -371,6 +402,10 @@ export function classifyDataframeBatch(
       'H3': classification.h3,
       'H4': classification.h4,
       'H5': classification.h5,
+      'Technical Code': classification.technicalCode,
+      'Head Code': classification.headCode,
+      'Section Code': classification.sectionCode,
+      'Note Code': classification.noteCode,
       'Status': status,
       'Composite Key': row['Composite Key'] || generateLedgerKey(row['Ledger Name'] || '', row['Primary Group'] || '')
     };

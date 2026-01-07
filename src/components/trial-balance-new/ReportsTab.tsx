@@ -1,20 +1,35 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import { TrialBalanceLine } from '@/hooks/useTrialBalance';
 import { convertLedgerRowsToTrialBalanceLines } from '@/utils/trialBalanceNewAdapter';
 import { ScheduleIIIBalanceSheet } from '@/components/trial-balance/ScheduleIIIBalanceSheet';
 import { ScheduleIIIProfitLoss } from '@/components/trial-balance/ScheduleIIIProfitLoss';
 import { CashFlowStatement } from '@/components/trial-balance/CashFlowStatement';
+import { ChangesInInventoriesNote } from '@/components/trial-balance/ChangesInInventoriesNote';
 import { NotesManagementTab } from '@/components/trial-balance/capital-notes/NotesManagementTab';
 import { FormatSelector } from '@/components/trial-balance/FormatSelector';
 import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useToast } from '@/hooks/use-toast';
-import { FileText, BarChart3, TrendingUp, Building2, Download } from 'lucide-react';
+import { FileText, BarChart3, TrendingUp, Building2, Download, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import {
+  exportBalanceSheetWithNotes,
+  exportProfitLossWithNotes,
+  downloadWorkbook,
+  ExportOptions
+} from '@/utils/enhancedExcelExport';
 import {
   Select,
   SelectContent,
@@ -29,9 +44,15 @@ interface ReportsTabProps {
   companyName: string;
   toDate: string;
   entityType: string;
+  signingDetails?: {
+    date: string;
+    place: string;
+    partnerName: string;
+    firmName: string;
+  };
 }
 
-export function ReportsTab({ data, stockData, companyName, toDate, entityType }: ReportsTabProps) {
+export function ReportsTab({ data, stockData, companyName, toDate, entityType, signingDetails }: ReportsTabProps) {
   const { user } = useAuth();
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
@@ -82,189 +103,65 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
     return `${prevYear}-${year.toString().slice(-2)}`;
   }, [toDate]);
 
-  // Download Balance Sheet
+  // Download Balance Sheet (using enhanced export)
   const handleDownloadBS = useCallback(() => {
     try {
-      // Group data by H2 and H3 for proper note structure
-      const bsData = data.filter(row => row.H1 === 'Balance Sheet' || row.H1 === 'BS');
+      const exportOptions: ExportOptions = {
+        companyName,
+        financialYear,
+        constitution,
+        bsStartingNote,
+        includeMetadata: true, // Include technical codes and metadata
+        includePreviousYear: false, // TODO: Add previous year support
+        previousYearData: []
+      };
       
-      // Create main Balance Sheet sheet with note references
-      const bsSummary: any[] = [];
-      const noteCounter: { [key: string]: number } = {};
-      let currentNote = bsStartingNote;
-      
-      // Group by H2 (main sections)
-      const h2Groups = bsData.reduce((acc: any, row) => {
-        const h2 = row.H2 || 'Unmapped';
-        if (!acc[h2]) acc[h2] = [];
-        acc[h2].push(row);
-        return acc;
-      }, {});
-      
-      // Create summary with note references
-      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
-        const total = rows.reduce((sum: number, r: any) => sum + (r['Closing Balance'] || 0), 0);
-        
-        // Assign note number if has H3 (notes)
-        const hasNotes = rows.some((r: any) => r.H3 && r.H3.trim());
-        const noteNum = hasNotes ? currentNote++ : '';
-        if (hasNotes) noteCounter[h2] = noteNum;
-        
-        bsSummary.push({
-          'Particulars': h2,
-          'Note No.': noteNum ? `Note ${noteNum}` : '',
-          'Current Year (₹)': total,
-          'Previous Year (₹)': 0  // Add previous year column
-        });
-      });
-      
-      const workbook = XLSX.utils.book_new();
-      
-      // Main Balance Sheet sheet
-      const bsSheet = XLSX.utils.json_to_sheet(bsSummary);
-      bsSheet['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 20 }];
-      XLSX.utils.book_append_sheet(workbook, bsSheet, 'Balance Sheet');
-      
-      // Create detailed notes sheets
-      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
-        const noteNum = noteCounter[h2];
-        if (!noteNum) return;  // Skip if no note number assigned
-        
-        // Group by H3 within this H2
-        const h3Groups = rows.reduce((acc: any, row: any) => {
-          const h3 = row.H3 || 'Others';
-          if (!acc[h3]) acc[h3] = [];
-          acc[h3].push(row);
-          return acc;
-        }, {});
-        
-        const noteData: any[] = [];
-        Object.entries(h3Groups).forEach(([h3, items]: [string, any]) => {
-          items.forEach((item: any) => {
-            noteData.push({
-              'Particulars': item['Ledger Name'] || '',
-              'H3': h3,
-              'H4': item.H4 || '',
-              'H5': item.H5 || '',
-              'Current Year (₹)': item['Closing Balance'] || 0,
-              'Previous Year (₹)': 0
-            });
-          });
-        });
-        
-        if (noteData.length > 0) {
-          const noteSheet = XLSX.utils.json_to_sheet(noteData);
-          noteSheet['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }];
-          XLSX.utils.book_append_sheet(workbook, noteSheet, `Note ${noteNum} - ${h2}`.substring(0, 31));
-        }
-      });
-      
-      XLSX.writeFile(workbook, `Balance_Sheet_with_Notes_${companyName}_${financialYear}.xlsx`);
+      const workbook = exportBalanceSheetWithNotes(data, exportOptions);
+      downloadWorkbook(workbook, `Balance_Sheet_with_Notes_${companyName}_${financialYear}.xlsx`);
       
       toast({
         title: 'Downloaded',
-        description: 'Balance Sheet with Notes exported successfully'
+        description: 'Balance Sheet with Notes exported successfully with technical codes'
       });
     } catch (error) {
+      console.error('Export error:', error);
       toast({
         title: 'Export Failed',
         description: error instanceof Error ? error.message : 'Failed to export Balance Sheet',
         variant: 'destructive'
       });
     }
-  }, [data, companyName, financialYear, bsStartingNote, toast]);
+  }, [data, companyName, financialYear, constitution, bsStartingNote, toast]);
 
-  // Download P&L
+  // Download P&L (using enhanced export)
   const handleDownloadPL = useCallback(() => {
     try {
-      // Group data by H2 and H3 for proper note structure
-      const plData = data.filter(row => row.H1 === 'Profit & Loss' || row.H1 === 'P&L' || row.H1 === 'PL');
+      const exportOptions: ExportOptions = {
+        companyName,
+        financialYear,
+        constitution,
+        plStartingNote,
+        includeMetadata: true, // Include technical codes and metadata
+        includePreviousYear: false, // TODO: Add previous year support
+        previousYearData: []
+      };
       
-      // Create main P&L sheet with note references
-      const plSummary: any[] = [];
-      const noteCounter: { [key: string]: number } = {};
-      let currentNote = plStartingNote;
-      
-      // Group by H2 (main sections like Revenue, Expenses)
-      const h2Groups = plData.reduce((acc: any, row) => {
-        const h2 = row.H2 || 'Unmapped';
-        if (!acc[h2]) acc[h2] = [];
-        acc[h2].push(row);
-        return acc;
-      }, {});
-      
-      // Create summary with note references
-      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
-        const total = rows.reduce((sum: number, r: any) => sum + Math.abs(r['Closing Balance'] || 0), 0);
-        
-        // Assign note number if has H3 (notes)
-        const hasNotes = rows.some((r: any) => r.H3 && r.H3.trim());
-        const noteNum = hasNotes ? currentNote++ : '';
-        if (hasNotes) noteCounter[h2] = noteNum;
-        
-        plSummary.push({
-          'Particulars': h2,
-          'Note No.': noteNum ? `Note ${noteNum}` : '',
-          'Current Year (₹)': total,
-          'Previous Year (₹)': 0
-        });
-      });
-      
-      const workbook = XLSX.utils.book_new();
-      
-      // Main P&L sheet
-      const plSheet = XLSX.utils.json_to_sheet(plSummary);
-      plSheet['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 20 }];
-      XLSX.utils.book_append_sheet(workbook, plSheet, 'Profit & Loss');
-      
-      // Create detailed notes sheets
-      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
-        const noteNum = noteCounter[h2];
-        if (!noteNum) return;
-        
-        // Group by H3 within this H2
-        const h3Groups = rows.reduce((acc: any, row: any) => {
-          const h3 = row.H3 || 'Others';
-          if (!acc[h3]) acc[h3] = [];
-          acc[h3].push(row);
-          return acc;
-        }, {});
-        
-        const noteData: any[] = [];
-        Object.entries(h3Groups).forEach(([h3, items]: [string, any]) => {
-          items.forEach((item: any) => {
-            noteData.push({
-              'Particulars': item['Ledger Name'] || '',
-              'H3': h3,
-              'H4': item.H4 || '',
-              'H5': item.H5 || '',
-              'Current Year (₹)': Math.abs(item['Closing Balance'] || 0),
-              'Previous Year (₹)': 0
-            });
-          });
-        });
-        
-        if (noteData.length > 0) {
-          const noteSheet = XLSX.utils.json_to_sheet(noteData);
-          noteSheet['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }];
-          XLSX.utils.book_append_sheet(workbook, noteSheet, `Note ${noteNum} - ${h2}`.substring(0, 31));
-        }
-      });
-      
-      XLSX.writeFile(workbook, `Profit_Loss_with_Notes_${companyName}_${financialYear}.xlsx`);
+      const workbook = exportProfitLossWithNotes(data, exportOptions);
+      downloadWorkbook(workbook, `Profit_Loss_with_Notes_${companyName}_${financialYear}.xlsx`);
       
       toast({
         title: 'Downloaded',
-        description: 'Profit & Loss with Notes exported successfully'
+        description: 'P&L with Notes exported successfully with technical codes'
       });
     } catch (error) {
+      console.error('Export error:', error);
       toast({
         title: 'Export Failed',
-        description: error instanceof Error ? error.message : 'Failed to export Profit & Loss',
+        description: error instanceof Error ? error.message : 'Failed to export P&L',
         variant: 'destructive'
       });
     }
-  }, [data, companyName, financialYear, plStartingNote, toast]);
+  }, [data, companyName, financialYear, constitution, plStartingNote, toast]);
 
   if (data.length === 0) {
     return (
@@ -275,90 +172,80 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header Info Card */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <p className="text-xs text-muted-foreground uppercase">Company</p>
-            <p className="font-semibold text-gray-900">{companyName || 'Not Set'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground uppercase">Financial Year</p>
-            <p className="font-semibold text-gray-900">{financialYear || 'Not Set'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground uppercase">Entity Type</p>
-            <p className="font-semibold text-gray-900">{entityType || 'Not Set'}</p>
-          </div>
-        </div>
-      </div>
-      
-      {/* Format Selector and Note Settings */}
-      <div className="flex items-center justify-between flex-wrap gap-4 bg-white p-4 rounded-lg border">
-        <FormatSelector constitution={constitution} showDownload={true} />
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-700">Scale:</span>
-          <Select value={reportingScale} onValueChange={setReportingScale}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Auto</SelectItem>
-              <SelectItem value="rupees">Rupees</SelectItem>
-              <SelectItem value="thousands">Thousands</SelectItem>
-              <SelectItem value="lakhs">Lakhs</SelectItem>
-              <SelectItem value="crores">Crores</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {reportTab === 'balance-sheet' && (
-          <NoteNumberSettings 
-            startingNoteNumber={bsStartingNote} 
-            onStartingNoteNumberChange={setBsStartingNote} 
-          />
-        )}
-        {reportTab === 'profit-loss' && (
-          <NoteNumberSettings 
-            startingNoteNumber={plStartingNote} 
-            onStartingNoteNumberChange={setPlStartingNote} 
-          />
-        )}
-      </div>
-
-      {/* Report Sub-Tabs */}
+    <div className="space-y-4">
+      {/* Report Sub-Tabs and Controls in Single Row */}
       <Tabs value={reportTab} onValueChange={setReportTab} className="w-full">
-        <TabsList className="grid grid-cols-4 w-full max-w-3xl">
-          <TabsTrigger value="balance-sheet" className="flex items-center gap-2">
-            <BarChart3 className="w-4 h-4" />
-            <span className="hidden sm:inline">Balance Sheet</span>
-            <span className="sm:hidden">BS</span>
-          </TabsTrigger>
-          <TabsTrigger value="profit-loss" className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4" />
-            <span className="hidden sm:inline">Profit & Loss</span>
-            <span className="sm:hidden">P&L</span>
-          </TabsTrigger>
-          <TabsTrigger value="cash-flow" className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4" />
-            <span className="hidden sm:inline">Cash Flow</span>
-            <span className="sm:hidden">CF</span>
-          </TabsTrigger>
-          <TabsTrigger value="capital-notes" className="flex items-center gap-2">
-            <Building2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Capital Notes</span>
-            <span className="sm:hidden">Notes</span>
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between bg-white px-4 py-2.5 rounded-lg border shadow-sm">
+          <TabsList className="h-9 bg-gray-100">
+            <TabsTrigger value="balance-sheet" className="flex items-center gap-2 data-[state=active]:bg-white">
+              <BarChart3 className="w-4 h-4" />
+              Balance Sheet
+            </TabsTrigger>
+            <TabsTrigger value="profit-loss" className="flex items-center gap-2 data-[state=active]:bg-white">
+              <TrendingUp className="w-4 h-4" />
+              Profit & Loss
+            </TabsTrigger>
+            <TabsTrigger value="cash-flow" className="flex items-center gap-2 data-[state=active]:bg-white">
+              <TrendingUp className="w-4 h-4" />
+              Cash Flow
+            </TabsTrigger>
+            <TabsTrigger value="capital-notes" className="flex items-center gap-2 data-[state=active]:bg-white">
+              <Building2 className="w-4 h-4" />
+              Capital Notes
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="balance-sheet" className="mt-6">
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-gray-900">Balance Sheet</h2>
-              <Button onClick={handleDownloadBS} variant="default" size="sm" className="shadow-sm">
-                <Download className="w-4 h-4 mr-2" />
-                Download BS with Notes
-              </Button>
+          <div className="flex items-center gap-3">
+            <Select value={reportingScale} onValueChange={setReportingScale}>
+              <SelectTrigger className="h-8 w-[110px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto</SelectItem>
+                <SelectItem value="rupees">Rupees</SelectItem>
+                <SelectItem value="thousands">Thousands</SelectItem>
+                <SelectItem value="lakhs">Lakhs</SelectItem>
+                <SelectItem value="crores">Crores</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            {/* Download Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="default" size="sm" className="h-8">
+                  <Download className="w-4 h-4 mr-2" />
+                  Download
+                  <ChevronDown className="w-3 h-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleDownloadBS}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  Balance Sheet with Notes
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleDownloadPL}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  P&L with Notes
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem disabled>
+                  <Download className="w-4 h-4 mr-2" />
+                  Complete Financial Package
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        <TabsContent value="balance-sheet" className="mt-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-gray-900">Balance Sheet</h2>
+              {bsStartingNote !== 3 && (
+                <Badge variant="secondary" className="text-xs">
+                  Note starts: {bsStartingNote}
+                </Badge>
+              )}
             </div>
             <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
               <ScheduleIIIBalanceSheet 
@@ -372,15 +259,18 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
           </div>
         </TabsContent>
 
-        <TabsContent value="profit-loss" className="mt-6">
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-gray-900">Profit & Loss Account</h2>
-              <Button onClick={handleDownloadPL} variant="default" size="sm" className="shadow-sm">
-                <Download className="w-4 h-4 mr-2" />
-                Download P&L with Notes
-              </Button>
+        <TabsContent value="profit-loss" className="mt-4">
+          <div className="space-y-6">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-gray-900">Profit & Loss Account</h2>
+              {plStartingNote !== 19 && (
+                <Badge variant="secondary" className="text-xs">
+                  Note starts: {plStartingNote}
+                </Badge>
+              )}
             </div>
+            
+            {/* Profit & Loss Statement */}
             <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
               <ScheduleIIIProfitLoss 
                 currentLines={trialBalanceLines} 
@@ -388,8 +278,20 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
                 reportingScale={reportingScale}
                 constitution={constitution}
                 startingNoteNumber={plStartingNote}
+                stockData={stockData}
               />
             </div>
+
+            {/* Changes in Inventories Note */}
+            {stockData && stockData.length > 0 && (
+              <div className="bg-white rounded-lg shadow-sm border p-6">
+                <ChangesInInventoriesNote
+                  stockData={stockData}
+                  reportingScale={reportingScale}
+                  noteNumber={String(plStartingNote)}
+                />
+              </div>
+            )}
           </div>
         </TabsContent>
 

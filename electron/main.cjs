@@ -726,12 +726,12 @@ ipcMain.handle('odbc-fetch-stock-items', async () => {
     const query = `
       SELECT 
         $Name,
+        $Parent,
         $_PrimaryGroup,
-        $_StockGroup,
         $OpeningValue,
         $ClosingValue
       FROM StockItem
-      ORDER BY $Name
+      ORDER BY $Parent, $Name
     `;
     
     const result = await odbcConnection.query(query);
@@ -744,7 +744,7 @@ ipcMain.handle('odbc-fetch-stock-items', async () => {
     // Process stock items
     const items = result.map(row => ({
       'Item Name': row['$Name'] || '',
-      'Stock Group': row['$_StockGroup'] || '',
+      'Stock Group': row['$Parent'] || '',
       'Primary Group': row['$_PrimaryGroup'] || '',
       'Opening Value': parseFloat(row['$OpeningValue']) || 0,
       'Closing Value': parseFloat(row['$ClosingValue']) || 0,
