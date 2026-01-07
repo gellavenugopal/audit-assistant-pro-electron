@@ -1,5 +1,4 @@
 import { useState } from "react";
-import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,9 +11,39 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useToast } from "@/hooks/use-toast";
 import { useTabShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEngagement } from "@/contexts/EngagementContext";
-import { useTallyConnection } from "@/hooks/useTallyConnection";
 import { useTallyODBC } from "@/hooks/useTallyODBC";
-import { useTally, TallyTrialBalanceLine, TallyMonthWiseLine, TallyGSTNotFeedLine } from "@/contexts/TallyContext";
+
+// Type definitions (moved from TallyContext)
+export interface TallyTrialBalanceLine {
+  accountHead: string;
+  openingBalance: number;
+  totalDebit: number;
+  totalCredit: number;
+  closingBalance: number;
+  accountCode: string;
+  branch: string;
+  primaryGroup: string;
+  parent: string;
+  isRevenue: boolean;
+}
+
+export interface TallyMonthWiseLine {
+  accountName: string;
+  primaryGroup: string;
+  isRevenue: boolean;
+  openingBalance: number;
+  monthlyBalances: Record<string, number>;
+}
+
+export interface TallyGSTNotFeedLine {
+  ledgerName: string;
+  primaryGroup: string;
+  partyGSTIN: string | null;
+  registrationType: string;
+  gstRegistrationType?: string; // Alias for compatibility
+}
+
+import { useOpeningBalanceMatching } from "@/hooks/useOpeningBalanceMatching";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "lucide-react";
 import {
@@ -44,7 +73,9 @@ import {
   CheckCircle2,
   Loader2,
   Unplug,
-  Link2,
+  Scale,
+  FileDown,
+  FileX,
 } from "lucide-react";
 
 interface ToolCardProps {
@@ -84,14 +115,12 @@ const ToolCard = ({ title, description, icon, status = "available", onClick }: T
   );
 };
 
-type ConnectionMode = "bridge" | "odbc" | "excel";
+type ConnectionMode = "odbc" | "excel";
 
 const TallyTools = () => {
   const { toast } = useToast();
   const { currentEngagement } = useEngagement();
-  const [connectionMode, setConnectionMode] = useState<ConnectionMode>("bridge");
-  const [sessionCode, setSessionCode] = useState("");
-  const [tallyPort, setTallyPort] = useState("9000");
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>("odbc");
   
   // Trial Balance fetch state
   const [showTBDialog, setShowTBDialog] = useState(false);
@@ -116,64 +145,49 @@ const TallyTools = () => {
   const [showNegativeLedgersDialog, setShowNegativeLedgersDialog] = useState(false);
   const [negativeLedgersTab, setNegativeLedgersTab] = useState("debtors");
   
-  // Direct connection (kept for fallback reference, but won't work due to CORS)
-  const directConnection = useTallyConnection();
+  // No Transactions state
+  const [showNoTransactionsDialog, setShowNoTransactionsDialog] = useState(false);
   
-  // ODBC connection
+  // ODBC Info Dialog state
+  const [showODBCInfoDialog, setShowODBCInfoDialog] = useState(false);
+  
+  // Opening Balance Matching state
+  const [showOpeningBalanceDialog, setShowOpeningBalanceDialog] = useState(false);
+  const openingBalanceMatching = useOpeningBalanceMatching();
+  
+  // ODBC connection (only connection method)
   const odbcConnection = useTallyODBC();
   
-  // Bridge connection using global context (persists across navigation)
-  const tallyConnection = useTally();
-  
-  // Use the active connection based on mode
-  const isConnected = connectionMode === "bridge" ? tallyConnection.isConnected : 
-                     connectionMode === "odbc" ? odbcConnection.isConnected : 
-                     directConnection.isConnected;
-  const isConnecting = connectionMode === "bridge" ? tallyConnection.isConnecting : 
-                      connectionMode === "odbc" ? odbcConnection.isConnecting : 
-                      directConnection.isConnecting;
-  const companyInfo = connectionMode === "bridge" ? tallyConnection.companyInfo : 
-                     connectionMode === "odbc" ? odbcConnection.companyInfo : 
-                     directConnection.companyInfo;
+  // Use ODBC connection
+  const isConnected = odbcConnection.isConnected;
+  const isConnecting = odbcConnection.isConnecting;
+  const companyInfo = odbcConnection.companyInfo;
 
   const handleConnect = () => {
     if (isConnected) {
-      if (connectionMode === "bridge") {
-        tallyConnection.disconnect();
-      } else if (connectionMode === "odbc") {
-        odbcConnection.disconnect();
-      } else {
-        directConnection.disconnect();
-      }
+      odbcConnection.disconnect();
     } else {
-      if (connectionMode === "bridge") {
-        tallyConnection.connectWithSession(sessionCode);
-      } else if (connectionMode === "odbc") {
-        odbcConnection.testConnection();
-      } else {
-        directConnection.connectToTally(tallyPort);
-      }
+      odbcConnection.testConnection();
     }
   };
 
   const handleFetchTrialBalance = async () => {
     setIsFetchingTB(true);
     try {
-      let result;
-      if (connectionMode === "odbc") {
-        const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
-        result = { success: true, lines };
-      } else {
-        result = await tallyConnection.fetchTrialBalance(tbFromDate, tbToDate);
-      }
-      
-      if (result && result.success) {
-        setFetchedTBData(result.lines);
+      const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
+      if (lines && lines.length > 0) {
+        setFetchedTBData(lines);
         toast({
           title: "Trial Balance Fetched",
-          description: `Retrieved ${result.lines.length} ledger accounts from Tally`,
+          description: `Retrieved ${lines.length} ledger accounts from Tally`,
         });
       }
+    } catch (error) {
+      toast({
+        title: "Failed to Fetch Trial Balance",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
     } finally {
       setIsFetchingTB(false);
     }
@@ -297,50 +311,53 @@ const TallyTools = () => {
     const fileName = `Trial_Balance_${tbFromDate}_to_${tbToDate}.xlsx`;
     XLSX.writeFile(wb, fileName);
     
-    const plItems = fetchedTBData.filter(line => line.isRevenue);
-    const bsItems = fetchedTBData.filter(line => !line.isRevenue);
+    const plCount = fetchedTBData.filter(line => line.isRevenue).length;
+    const bsCount = fetchedTBData.filter(line => !line.isRevenue).length;
     
     toast({
       title: "Export Complete",
-      description: `Saved ${plItems.length} P&L and ${bsItems.length} Balance Sheet items to ${fileName}`,
+      description: `Saved ${plCount} P&L and ${bsCount} Balance Sheet items to ${fileName}`,
     });
   };
 
   const handleFetchMonthWiseData = async () => {
+    if (!isConnected) {
+      toast({
+        title: "Not Connected",
+        description: "Connect to Tally first using ODBC",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsFetchingMW(true);
     try {
-      let result;
-      if (connectionMode === "odbc") {
-        const data = await odbcConnection.fetchMonthWise(mwFyStartYear, mwTargetMonth);
-        if (data) {
-          result = { success: true, lines: data.lines, months: data.months };
-        } else {
-          result = { success: false };
-        }
-      } else {
-        result = await tallyConnection.fetchMonthWiseData(mwFyStartYear, mwTargetMonth);
-      }
+      const result = await odbcConnection.fetchMonthWise(mwFyStartYear, mwTargetMonth);
       
-      if (result && result.success) {
-        setFetchedMWData({ lines: result.lines, months: result.months });
+      if (result) {
+        setFetchedMWData(result);
         toast({
           title: "Month wise Data Fetched",
-          description: `Retrieved ${result.lines.length} ledger accounts for ${result.months.join(", ")}`,
+          description: `Retrieved ${result.plLines.length + result.bsLines.length} ledger accounts (${result.plLines.length} P&L, ${result.bsLines.length} BS) for ${result.months.join(", ")}`,
         });
+      } else {
+        throw new Error("Failed to fetch month wise data");
       }
+    } catch (error) {
+      toast({
+        title: "Failed to Fetch Month Wise Data",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
     } finally {
       setIsFetchingMW(false);
     }
   };
 
   const handleExportMonthWiseToExcel = () => {
-    if (!fetchedMWData || fetchedMWData.lines.length === 0) return;
+    if (!fetchedMWData || (fetchedMWData.plLines.length === 0 && fetchedMWData.bsLines.length === 0)) return;
     
-    const { lines, months } = fetchedMWData;
-    
-    // Separate P&L and Balance Sheet items
-    const plItems = lines.filter(line => line.isRevenue);
-    const bsItems = lines.filter(line => !line.isRevenue);
+    const { plLines: plItems, bsLines: bsItems, months } = fetchedMWData;
     
     // Sort items
     plItems.sort((a, b) => {
@@ -420,10 +437,10 @@ const TallyTools = () => {
   };
 
   const handleFetchGSTNotFeed = async () => {
-    if (connectionMode !== "bridge") {
+    if (!isConnected) {
       toast({
-        title: "Feature Not Available",
-        description: "GST not feeded data is currently only available with Tally Bridge connection",
+        title: "Not Connected",
+        description: "Connect to Tally first using ODBC",
         variant: "destructive",
       });
       return;
@@ -431,10 +448,34 @@ const TallyTools = () => {
     
     setIsFetchingGSTNotFeed(true);
     try {
-      const result = await tallyConnection.fetchGSTNotFeeded();
-      if (result && result.success) {
-        setFetchedGSTNotFeedData(result.lines);
+      if (!window.electronAPI || typeof window.electronAPI.odbcFetchGSTNotFeeded !== 'function') {
+        throw new Error('Electron API not available. Please restart the application.');
       }
+      
+      const result = await window.electronAPI.odbcFetchGSTNotFeeded();
+      
+      if (result && result.success) {
+        setFetchedGSTNotFeedData(result.lines || []);
+        if (result.lines && result.lines.length > 0) {
+          toast({
+            title: "GST Not Feeded Data Fetched",
+            description: `Found ${result.lines.length} ledgers with missing GSTIN`,
+          });
+        } else {
+          toast({
+            title: "GST Check Complete",
+            description: "All Regular GST ledgers have GSTIN entered. No issues found!",
+          });
+        }
+      } else {
+        throw new Error(result?.error || "Failed to fetch GST not feeded data");
+      }
+    } catch (error) {
+      toast({
+        title: "Failed to Fetch GST Not Feeded Data",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
     } finally {
       setIsFetchingGSTNotFeed(false);
     }
@@ -445,7 +486,7 @@ const TallyTools = () => {
     
     const data = fetchedGSTNotFeedData.map(line => ({
       "Ledger Name": line.ledgerName,
-      "GST Registration Type": line.gstRegistrationType,
+      "GST Registration Type": line.registrationType || line.gstRegistrationType || "Unknown",
       "Party GSTIN": line.partyGSTIN || "(Not Feeded)",
     }));
     
@@ -466,42 +507,76 @@ const TallyTools = () => {
   const getNegativeLedgers = () => {
     if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [] };
     
-    // Debtors should have Dr balance (positive), so Cr balance (negative/closingCr > 0) is opposite
+    // Debtors should have Dr balance (positive), so Cr balance (negative/closingBalance < 0) is opposite
     const debtors = fetchedTBData.filter(line => 
-      line.primaryGroup === "Sundry Debtors" && line.closingCr > 0
+      line.primaryGroup === "Sundry Debtors" && line.closingBalance < 0
     );
     
-    // Creditors should have Cr balance (negative), so Dr balance (positive/closingDr > 0) is opposite
+    // Creditors should have Cr balance (negative), so Dr balance (positive/closingBalance > 0) is opposite
     const creditors = fetchedTBData.filter(line => 
-      line.primaryGroup === "Sundry Creditors" && line.closingDr > 0
+      line.primaryGroup === "Sundry Creditors" && line.closingBalance > 0
     );
     
-    // Assets should have Dr balance, so Cr balance is opposite
+    // Assets should have Dr balance (positive), so Cr balance (negative) is opposite
     const assetGroups = ["Fixed Assets", "Current Assets", "Investments", "Bank Accounts", "Cash-in-Hand", "Deposits (Asset)", "Loans & Advances (Asset)", "Stock-in-Hand", "Bank OD Accounts"];
     const assets = fetchedTBData.filter(line => 
-      assetGroups.includes(line.primaryGroup) && line.closingCr > 0
+      assetGroups.includes(line.primaryGroup) && line.closingBalance < 0
     );
     
-    // Liabilities should have Cr balance, so Dr balance is opposite
+    // Liabilities should have Cr balance (negative), so Dr balance (positive) is opposite
     const liabilityGroups = ["Capital Account", "Reserves & Surplus", "Loans (Liability)", "Secured Loans", "Unsecured Loans", "Current Liabilities", "Provisions", "Duties & Taxes"];
     const liabilities = fetchedTBData.filter(line => 
-      liabilityGroups.includes(line.primaryGroup) && line.closingDr > 0
+      liabilityGroups.includes(line.primaryGroup) && line.closingBalance > 0
     );
     
     return { debtors, creditors, assets, liabilities };
   };
 
+  // Ledgers with No Transactions - only opening balance, no transactions during the year
+  const getNoTransactionLedgers = () => {
+    if (!fetchedTBData) return [];
+    
+    // A ledger has no transactions if:
+    // 1. Total Debit and Total Credit are zero (or very small, < 0.01 to account for rounding)
+    // 2. Opening Balance exists (non-zero, >= 0.01 to exclude negligible balances)
+    // 3. Closing Balance equals Opening Balance (no change during the year)
+    //    Formula: Closing Balance = Opening Balance + Total Debit - Total Credit
+    //    If Total Debit = 0 and Total Credit = 0, then Closing = Opening
+    const threshold = 0.01; // Small threshold for rounding differences
+    
+    return fetchedTBData.filter(line => {
+      // Check if there are no transactions (both debit and credit totals are effectively zero)
+      const hasNoTransactions = 
+        Math.abs(line.totalDebit) < threshold && 
+        Math.abs(line.totalCredit) < threshold;
+      
+      // Must have a meaningful opening balance (exclude zero-balance accounts)
+      const hasOpeningBalance = Math.abs(line.openingBalance) >= threshold;
+      
+      // Verify closing balance equals opening balance (safety check for data integrity)
+      // This ensures: Closing = Opening + Debit - Credit = Opening + 0 - 0 = Opening
+      const balanceUnchanged = Math.abs(line.closingBalance - line.openingBalance) < threshold;
+      
+      // All three conditions must be true
+      return hasNoTransactions && hasOpeningBalance && balanceUnchanged;
+    });
+  };
+
   const handleExportNegativeLedgersToExcel = () => {
     const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
     
-    const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => ({
-      "Account Name": line.accountName,
-      "Primary Group": line.primaryGroup,
-      "Parent": line.parentGroup,
-      "Expected Nature": expectedNature,
-      "Actual Balance": expectedNature === "Dr" ? `Cr ${formatCurrency(line.closingCr)}` : `Dr ${formatCurrency(line.closingDr)}`,
-      "Amount": expectedNature === "Dr" ? line.closingCr : line.closingDr,
-    });
+    const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => {
+      const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
+      const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
+      return {
+        "Account Name": line.accountHead,
+        "Primary Group": line.primaryGroup,
+        "Parent": line.parent,
+        "Expected Nature": expectedNature,
+        "Actual Balance": expectedNature === "Dr" ? `Cr ${formatCurrency(closingCr)}` : `Dr ${formatCurrency(closingDr)}`,
+        "Amount": expectedNature === "Dr" ? closingCr : closingDr,
+      };
+    };
     
     const wb = XLSX.utils.book_new();
     
@@ -534,6 +609,55 @@ const TallyTools = () => {
     });
   };
 
+  const handleExportNoTransactionLedgersToExcel = () => {
+    const noTransactionLedgers = getNoTransactionLedgers();
+    
+    if (noTransactionLedgers.length === 0) {
+      toast({
+        title: "No Data",
+        description: "No ledgers with zero transactions found",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const data = noTransactionLedgers.map(line => {
+      const openingDr = line.openingBalance > 0 ? line.openingBalance : 0;
+      const openingCr = line.openingBalance < 0 ? Math.abs(line.openingBalance) : 0;
+      const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
+      const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
+      
+      return {
+        "Account Name": line.accountHead,
+        "Primary Group": line.primaryGroup,
+        "Parent": line.parent,
+        "Account Code": line.accountCode,
+        "Branch": line.branch,
+        "Opening Balance": formatCurrency(line.openingBalance),
+        "Opening Dr": formatCurrency(openingDr),
+        "Opening Cr": formatCurrency(openingCr),
+        "Total Debit": formatCurrency(line.totalDebit),
+        "Total Credit": formatCurrency(line.totalCredit),
+        "Closing Balance": formatCurrency(line.closingBalance),
+        "Closing Dr": formatCurrency(closingDr),
+        "Closing Cr": formatCurrency(closingCr),
+        "Type": line.isRevenue ? "P&L" : "BS",
+      };
+    });
+    
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, "No_Transactions");
+    
+    const fileName = `No_Transaction_Ledgers_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    
+    toast({
+      title: "Export Complete",
+      description: `Saved ${noTransactionLedgers.length} ledgers with no transactions to ${fileName}`,
+    });
+  };
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', { 
       style: 'decimal',
@@ -544,444 +668,17 @@ const TallyTools = () => {
 
   const totalClosingBalance = fetchedTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
 
-  const handleDownloadBridgeApp = async () => {
-    const zip = new JSZip();
-    
-    // package.json - no more ws dependency needed
-    const packageJson = {
-      name: "tally-bridge",
-      version: "1.0.0",
-      description: "Tally Bridge Desktop App for AuditPro",
-      main: "main.js",
-      scripts: {
-        start: "electron ."
-      },
-      dependencies: {
-        electron: "^28.0.0"
-      }
-    };
-    zip.file("package.json", JSON.stringify(packageJson, null, 2));
-
-    // main.js - HTTP polling based with proper error handling
-    const mainJs = `const { app, BrowserWindow } = require('electron');
-
-let mainWindow;
-let sessionCode;
-let heartbeatInterval;
-let pollingInterval;
-let isRunning = true;
-let processingRequests = new Set(); // Track requests being processed
-
-const API_URL = 'https://jrwfgfdxhlvwhzwqvwkl.supabase.co/functions/v1/tally-bridge';
-const TALLY_URL = 'http://localhost:9000';
-const HEARTBEAT_INTERVAL = 20000; // 20 seconds
-const POLL_INTERVAL = 1000; // 1 second
-
-function generateSessionCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-function updateStatus(status, code) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('status-update', { status, sessionCode: code });
-  }
-}
-
-async function apiCall(action, data = {}) {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, sessionCode, ...data })
-  });
-  const result = await response.json();
-  if (!response.ok) {
-    console.error('API error:', action, result);
-  }
-  return result;
-}
-
-async function registerSession() {
-  sessionCode = generateSessionCode();
-  updateStatus('connecting', sessionCode);
-  
-  try {
-    const result = await apiCall('register-session');
-    if (result.success) {
-      console.log('Session registered:', sessionCode);
-      updateStatus('connected', sessionCode);
-      startHeartbeat();
-      startPolling();
-    } else {
-      console.error('Failed to register:', result.error);
-      updateStatus('error', sessionCode);
-      setTimeout(registerSession, 3000);
-    }
-  } catch (err) {
-    console.error('Registration error:', err.message);
-    updateStatus('error', sessionCode);
-    setTimeout(registerSession, 3000);
-  }
-}
-
-function startHeartbeat() {
-  if (heartbeatInterval) clearInterval(heartbeatInterval);
-  heartbeatInterval = setInterval(async () => {
-    try {
-      await apiCall('heartbeat');
-      console.log('Heartbeat sent');
-    } catch (err) {
-      console.error('Heartbeat failed:', err.message);
-      updateStatus('disconnected', sessionCode);
-      stopPolling();
-      stopHeartbeat();
-      setTimeout(registerSession, 3000);
-    }
-  }, HEARTBEAT_INTERVAL);
-}
-
-function stopHeartbeat() {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = null;
-  }
-}
-
-async function completeRequest(requestId, responseData, errorMessage) {
-  try {
-    const payload = {
-      action: 'complete-request',
-      requestId: requestId
-    };
-    if (responseData) payload.responseData = responseData;
-    if (errorMessage) payload.errorMessage = errorMessage;
-    
-    console.log('Completing request:', requestId);
-    
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    const result = await response.json();
-    
-    if (result.success) {
-      console.log('Request completed successfully:', requestId);
-      processingRequests.delete(requestId);
-      return true;
-    } else {
-      console.error('Failed to complete request:', requestId, result.error);
-      return false;
-    }
-  } catch (err) {
-    console.error('Error completing request:', requestId, err.message);
-    return false;
-  }
-}
-
-function startPolling() {
-  if (pollingInterval) clearInterval(pollingInterval);
-  pollingInterval = setInterval(async () => {
-    if (!isRunning) return;
-    
-    try {
-      const result = await apiCall('get-pending-requests');
-      
-      if (result.requests && result.requests.length > 0) {
-        const request = result.requests[0];
-        
-        // Skip if already processing this request
-        if (processingRequests.has(request.id)) {
-          return;
-        }
-        
-        // Mark as processing
-        processingRequests.add(request.id);
-        console.log('Processing request:', request.id);
-        updateStatus('processing', sessionCode);
-        
-        try {
-          const tallyResponse = await fetch(TALLY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/xml' },
-            body: request.xml_request
-          });
-          
-          const responseData = await tallyResponse.text();
-          console.log('Tally response received, length:', responseData.length);
-          
-          const completed = await completeRequest(request.id, responseData, null);
-          if (completed) {
-            updateStatus('connected', sessionCode);
-          }
-        } catch (err) {
-          console.error('Tally error:', err.message);
-          await completeRequest(request.id, null, 'Tally connection failed: ' + err.message);
-          updateStatus('tally-error', sessionCode);
-        }
-      }
-    } catch (err) {
-      console.error('Polling error:', err.message);
-    }
-  }, POLL_INTERVAL);
-}
-
-function stopPolling() {
-  if (pollingInterval) {
-    clearInterval(pollingInterval);
-    pollingInterval = null;
-  }
-}
-
-async function unregisterSession() {
-  try {
-    await apiCall('unregister-session');
-  } catch (err) {
-    console.error('Unregister error:', err.message);
-  }
-}
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 450,
-    height: 350,
-    resizable: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-  
-  mainWindow.loadFile('index.html');
-  mainWindow.setMenuBarVisibility(false);
-}
-
-app.whenReady().then(() => {
-  createWindow();
-  registerSession();
-  
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
-
-app.on('before-quit', async () => {
-  isRunning = false;
-  stopHeartbeat();
-  stopPolling();
-  await unregisterSession();
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-`;
-    zip.file("main.js", mainJs);
-
-    // index.html
-    const indexHtml = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Tally Bridge - AuditPro</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-      color: white;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .container { text-align: center; max-width: 400px; }
-    h1 { font-size: 24px; margin-bottom: 8px; }
-    .subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 30px; }
-    .status-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 14px;
-      margin-bottom: 20px;
-    }
-    .status-connected { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
-    .status-connecting { background: rgba(234, 179, 8, 0.2); color: #eab308; }
-    .status-disconnected { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
-    .status-processing { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-    .dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      animation: pulse 2s infinite;
-    }
-    .status-connected .dot { background: #22c55e; }
-    .status-connecting .dot { background: #eab308; }
-    .status-disconnected .dot { background: #ef4444; }
-    .status-processing .dot { background: #3b82f6; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .session-code {
-      font-family: 'SF Mono', 'Consolas', monospace;
-      font-size: 48px;
-      font-weight: bold;
-      letter-spacing: 12px;
-      margin: 20px 0;
-      padding: 20px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 12px;
-      user-select: all;
-    }
-    .instructions {
-      color: #94a3b8;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-    .footer {
-      margin-top: 30px;
-      font-size: 12px;
-      color: #64748b;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>🔗 Tally Bridge</h1>
-    <p class="subtitle">Connect AuditPro to Tally ERP</p>
-    
-    <div id="status" class="status-indicator status-connecting">
-      <span class="dot"></span>
-      <span id="statusText">Connecting...</span>
-    </div>
-    
-    <div id="sessionCode" class="session-code">------</div>
-    
-    <p class="instructions">
-      Enter this code in AuditPro web app<br>
-      under Audit Tools → Tally Bridge
-    </p>
-    
-    <p class="footer">
-      Make sure Tally ERP is running on port 9000
-    </p>
-  </div>
-  
-  <script>
-    const { ipcRenderer } = require('electron');
-    
-    ipcRenderer.on('status-update', (event, data) => {
-      const statusEl = document.getElementById('status');
-      const statusText = document.getElementById('statusText');
-      const codeEl = document.getElementById('sessionCode');
-      
-      codeEl.textContent = data.sessionCode || '------';
-      
-      statusEl.className = 'status-indicator';
-      switch(data.status) {
-        case 'connected':
-          statusEl.classList.add('status-connected');
-          statusText.textContent = 'Connected to Server';
-          break;
-        case 'connecting':
-          statusEl.classList.add('status-connecting');
-          statusText.textContent = 'Connecting...';
-          break;
-        case 'processing':
-          statusEl.classList.add('status-processing');
-          statusText.textContent = 'Processing Request...';
-          break;
-        case 'tally-error':
-          statusEl.classList.add('status-disconnected');
-          statusText.textContent = 'Tally Not Responding';
-          break;
-        default:
-          statusEl.classList.add('status-disconnected');
-          statusText.textContent = 'Disconnected';
-      }
-    });
-  </script>
-</body>
-</html>
-`;
-    zip.file("index.html", indexHtml);
-
-    // README.md
-    const readme = `# Tally Bridge Desktop App
-
-This app connects AuditPro web application to your local Tally ERP installation.
-
-## Prerequisites
-
-1. **Node.js** - Download from https://nodejs.org (v18 or higher)
-2. **Tally ERP** - Must be running with ODBC/XML server enabled on port 9000
-
-## Setup Instructions
-
-1. Open a terminal/command prompt in this folder
-2. Run: \`npm install\`
-3. Run: \`npm start\`
-
-## How It Works
-
-1. The app connects to AuditPro's cloud server
-2. A unique session code is displayed
-3. Enter this code in AuditPro (Audit Tools → Tally Bridge)
-4. AuditPro can now fetch data directly from your Tally
-
-## Tally Configuration
-
-Make sure Tally is configured to accept XML requests:
-1. Open Tally Gateway of India > Configure
-2. Set "Enable ODBC Server" to Yes
-3. Set Port to 9000
-
-## Troubleshooting
-
-- **"Tally Not Responding"**: Check if Tally is running and ODBC server is enabled
-- **"Disconnected"**: Check your internet connection
-- **Session code changes**: This is normal after reconnection
-
-## Support
-
-For issues, contact your AuditPro administrator.
-`;
-    zip.file("README.md", readme);
-
-    // Generate and download
-    const content = await zip.generateAsync({ type: "blob" });
-    const url = URL.createObjectURL(content);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'tally-bridge-app.zip';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    toast({
-      title: "Download Started",
-      description: "Extract the zip, run 'npm install' then 'npm start'",
-    });
-  };
 
   return (
     <div className="space-y-6">
       {/* Connection Mode Toggle */}
       <div className="flex gap-2">
         <Button
-          variant={connectionMode === "bridge" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setConnectionMode("bridge")}
-          disabled={isConnected}
-        >
-          <Link2 className="h-4 w-4 mr-2" />
-          Tally Bridge (Recommended)
-        </Button>
-        <Button
           variant={connectionMode === "odbc" ? "default" : "outline"}
           size="sm"
-          onClick={() => setConnectionMode("odbc")}
+          onClick={() => {
+            setShowODBCInfoDialog(true);
+          }}
           disabled={isConnected}
         >
           <Database className="h-4 w-4 mr-2" />
@@ -998,82 +695,6 @@ For issues, contact your AuditPro administrator.
         </Button>
       </div>
 
-      {/* Bridge Mode UI */}
-      {connectionMode === "bridge" && (
-        <div className="bg-muted/50 rounded-lg p-4 border space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-blue-500 mt-0.5" />
-              <div className="text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">Using Tally Bridge Desktop App</p>
-                <p>Download and run the Tally Bridge app on your machine where Tally is running. Enter the session code shown in the app below.</p>
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={handleDownloadBridgeApp}>
-              <Download className="h-4 w-4 mr-2" />
-              Download Bridge App
-            </Button>
-          </div>
-          
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="sessionCode">Session Code:</Label>
-              <Input 
-                id="sessionCode" 
-                value={sessionCode} 
-                onChange={(e) => setSessionCode(e.target.value.toUpperCase())}
-                placeholder="ABC123"
-                className="w-28 uppercase font-mono text-center tracking-widest"
-                maxLength={8}
-                disabled={isConnected || isConnecting}
-              />
-            </div>
-            
-            {isConnected ? (
-              <Button onClick={handleConnect} size="sm" variant="outline" className="border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950">
-                <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
-                Tally Connected
-              </Button>
-            ) : (
-              <Button onClick={handleConnect} size="sm" disabled={isConnecting || !sessionCode}>
-                {isConnecting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Connecting...
-                  </>
-                ) : (
-                  <>
-                    <Link2 className="h-4 w-4 mr-2" />
-                    Connect via Bridge
-                  </>
-                )}
-              </Button>
-            )}
-
-            {/* Show company info when connected */}
-            {isConnected && companyInfo && (
-              <div className="flex items-center gap-4 ml-2 pl-4 border-l">
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium text-sm">{companyInfo.companyName}</span>
-                </div>
-                <Badge variant="secondary" className="text-xs">
-                  {companyInfo.financialYear}
-                </Badge>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={handleConnect}
-                  className="h-7 px-2 text-muted-foreground hover:text-destructive"
-                >
-                  <Unplug className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ODBC Mode UI */}
       {connectionMode === "odbc" && (
         <div className="bg-muted/50 rounded-lg p-4 border space-y-4">
@@ -1081,7 +702,7 @@ For issues, contact your AuditPro administrator.
             <Database className="h-5 w-5 text-green-500 mt-0.5" />
             <div className="text-sm text-muted-foreground">
               <p className="font-medium text-foreground">Direct ODBC Connection to Tally</p>
-              <p>Connect directly to Tally using ODBC. Ensure Tally is running with ODBC enabled and Python is installed on your system.</p>
+              <p>Connect directly to Tally using ODBC. Ensure Tally is running with ODBC enabled.</p>
             </div>
           </div>
           
@@ -1154,7 +775,7 @@ For issues, contact your AuditPro administrator.
           status={isConnected ? "available" : "beta"}
           onClick={() => {
             if (!isConnected) {
-              const modeName = connectionMode === "bridge" ? "Bridge app" : connectionMode === "odbc" ? "ODBC" : "selected method";
+              const modeName = connectionMode === "odbc" ? "ODBC" : "selected method";
               toast({ title: "Not Connected", description: `Connect to Tally first using the ${modeName}` });
             } else {
               setShowTBDialog(true);
@@ -1187,7 +808,7 @@ For issues, contact your AuditPro administrator.
           status={isConnected ? "available" : "beta"}
           onClick={() => {
             if (!isConnected) {
-              toast({ title: "Not Connected", description: "Connect to Tally first using the Bridge app" });
+              toast({ title: "Not Connected", description: "Connect to Tally first using ODBC" });
             } else {
               setShowMonthWiseDialog(true);
             }
@@ -1200,7 +821,7 @@ For issues, contact your AuditPro administrator.
           status={isConnected ? "available" : "beta"}
           onClick={() => {
             if (!isConnected) {
-              toast({ title: "Not Connected", description: "Connect to Tally first using the Bridge app" });
+              toast({ title: "Not Connected", description: "Connect to Tally first using ODBC" });
             } else {
               setShowGSTNotFeedDialog(true);
             }
@@ -1216,6 +837,33 @@ For issues, contact your AuditPro administrator.
               toast({ title: "Fetch Trial Balance First", description: "Use 'Get Trial Balance from Tally' to fetch data first" });
             } else {
               setShowNegativeLedgersDialog(true);
+            }
+          }}
+        />
+        <ToolCard
+          title="Opening Balance Matching"
+          description="Compare opening balances between Old and New Tally instances. Generate XML to import old balances into new Tally."
+          icon={<Scale className="h-5 w-5 text-primary" />}
+          status={isConnected ? "available" : "beta"}
+          onClick={() => {
+            if (!isConnected) {
+              const modeName = connectionMode === "odbc" ? "ODBC" : "selected method";
+              toast({ title: "Not Connected", description: `Connect to Tally first using the ${modeName}` });
+            } else {
+              setShowOpeningBalanceDialog(true);
+            }
+          }}
+        />
+        <ToolCard
+          title="No Transactions Ledgers"
+          description="Identify ledgers with no transactions during the year - only opening balances exist. Useful for identifying dormant accounts."
+          icon={<FileX className="h-5 w-5 text-primary" />}
+          status={fetchedTBData ? "available" : "beta"}
+          onClick={() => {
+            if (!fetchedTBData) {
+              toast({ title: "Fetch Trial Balance First", description: "Use 'Get Trial Balance from Tally' to fetch data first" });
+            } else {
+              setShowNoTransactionsDialog(true);
             }
           }}
         />
@@ -1428,7 +1076,7 @@ For issues, contact your AuditPro administrator.
             </div>
 
             {/* Results Table */}
-            {fetchedMWData && fetchedMWData.lines.length > 0 && (
+            {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (
               <div className="border rounded-lg overflow-hidden">
                 <div className="max-h-[400px] overflow-auto">
                   <table className="w-full text-sm">
@@ -1443,7 +1091,7 @@ For issues, contact your AuditPro administrator.
                       </tr>
                     </thead>
                     <tbody>
-                      {fetchedMWData.lines.slice(0, 100).map((line, idx) => (
+                      {[...fetchedMWData.plLines, ...fetchedMWData.bsLines].slice(0, 100).map((line, idx) => (
                         <tr key={idx} className="border-t hover:bg-muted/50">
                           <td className="p-2">{line.accountName}</td>
                           <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
@@ -1452,13 +1100,33 @@ For issues, contact your AuditPro administrator.
                               {line.isRevenue ? "P&L" : "BS"}
                             </Badge>
                           </td>
-                          {fetchedMWData.months.map(month => (
-                            <td key={month} className="p-2 text-right font-mono text-xs">
-                              {line.monthlyBalances[month] !== 0 
-                                ? formatCurrency(line.monthlyBalances[month] || 0) 
-                                : '-'}
-                            </td>
-                          ))}
+                          {fetchedMWData.months.map((month, monthIdx) => {
+                            // For P&L items, show movement (current - previous)
+                            // For BS items, show absolute closing balance
+                            let displayValue = 0;
+                            if (line.isRevenue) {
+                              // P&L: Calculate movement
+                              if (monthIdx === 0) {
+                                // First month: closing - opening
+                                displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
+                              } else {
+                                // Subsequent months: current closing - previous closing
+                                const prevMonth = fetchedMWData.months[monthIdx - 1];
+                                displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
+                              }
+                            } else {
+                              // BS: Show absolute closing balance
+                              displayValue = line.monthlyBalances[month] || 0;
+                            }
+                            
+                            return (
+                              <td key={month} className="p-2 text-right font-mono text-xs">
+                                {displayValue !== 0 
+                                  ? formatCurrency(displayValue) 
+                                  : '-'}
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                     </tbody>
@@ -1468,8 +1136,8 @@ For issues, contact your AuditPro administrator.
                 {/* Summary & Export */}
                 <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
                   <div className="text-sm text-muted-foreground">
-                    {fetchedMWData.lines.length} accounts ({fetchedMWData.lines.filter(l => l.isRevenue).length} P&L, {fetchedMWData.lines.filter(l => !l.isRevenue).length} BS)
-                    {fetchedMWData.lines.length > 100 && (
+                    {fetchedMWData.plLines.length + fetchedMWData.bsLines.length} accounts ({fetchedMWData.plLines.length} P&L, {fetchedMWData.bsLines.length} BS)
+                    {(fetchedMWData.plLines.length + fetchedMWData.bsLines.length) > 100 && (
                       <span className="ml-2 text-amber-600">(showing first 100)</span>
                     )}
                   </div>
@@ -1486,7 +1154,7 @@ For issues, contact your AuditPro administrator.
               </div>
             )}
 
-            {fetchedMWData && fetchedMWData.lines.length === 0 && (
+            {fetchedMWData && fetchedMWData.plLines.length === 0 && fetchedMWData.bsLines.length === 0 && (
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
@@ -1551,7 +1219,7 @@ For issues, contact your AuditPro administrator.
                           <td className="p-3 text-muted-foreground">{idx + 1}</td>
                           <td className="p-3 font-medium">{line.ledgerName}</td>
                           <td className="p-3">
-                            <Badge variant="secondary">{line.gstRegistrationType}</Badge>
+                            <Badge variant="secondary">{line.registrationType || line.gstRegistrationType || "Unknown"}</Badge>
                           </td>
                           <td className="p-3">
                             <Badge variant="destructive">Not Feeded</Badge>
@@ -1627,11 +1295,15 @@ For issues, contact your AuditPro administrator.
                         {data.map((line, idx) => (
                           <tr key={idx} className="border-t hover:bg-muted/50">
                             <td className="p-3 text-muted-foreground">{idx + 1}</td>
-                            <td className="p-3 font-medium">{line.accountName}</td>
+                            <td className="p-3 font-medium">{line.accountHead}</td>
                             <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                            <td className="p-3 text-muted-foreground text-xs">{line.parentGroup}</td>
+                            <td className="p-3 text-muted-foreground text-xs">{line.parent}</td>
                             <td className="p-3 text-right font-mono text-destructive">
-                              {formatCurrency(expectedNature === "Dr" ? line.closingCr : line.closingDr)}
+                              {(() => {
+                                const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
+                                const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
+                                return formatCurrency(expectedNature === "Dr" ? closingCr : closingDr);
+                              })()}
                             </td>
                           </tr>
                         ))}
@@ -1717,6 +1389,389 @@ For issues, contact your AuditPro administrator.
                 </>
               );
             })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* No Transactions Ledgers Dialog */}
+      <Dialog open={showNoTransactionsDialog} onOpenChange={setShowNoTransactionsDialog}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileX className="h-5 w-5" />
+              Ledgers with No Transactions
+            </DialogTitle>
+            <DialogDescription>
+              Ledgers that have opening balances but no transactions during the year. Closing balance equals opening balance.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {(() => {
+              const noTransactionLedgers = getNoTransactionLedgers();
+              
+              if (noTransactionLedgers.length === 0) {
+                return (
+                  <Alert>
+                    <CheckCircle2 className="h-4 w-4" />
+                    <AlertDescription>
+                      No ledgers found with zero transactions. All ledgers have activity during the year.
+                    </AlertDescription>
+                  </Alert>
+                );
+              }
+
+              return (
+                <>
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="max-h-[500px] overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted sticky top-0">
+                          <tr>
+                            <th className="text-left p-3 font-medium">#</th>
+                            <th className="text-left p-3 font-medium">Account Name</th>
+                            <th className="text-left p-3 font-medium">Primary Group</th>
+                            <th className="text-left p-3 font-medium">Parent</th>
+                            <th className="text-right p-3 font-medium">Opening Balance</th>
+                            <th className="text-right p-3 font-medium">Total Debit</th>
+                            <th className="text-right p-3 font-medium">Total Credit</th>
+                            <th className="text-right p-3 font-medium">Closing Balance</th>
+                            <th className="text-center p-3 font-medium">Type</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {noTransactionLedgers.map((line, idx) => {
+                            return (
+                              <tr key={idx} className="border-t hover:bg-muted/50">
+                                <td className="p-3 text-muted-foreground">{idx + 1}</td>
+                                <td className="p-3 font-medium">{line.accountHead}</td>
+                                <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                                <td className="p-3 text-muted-foreground text-xs">{line.parent || '-'}</td>
+                                <td className="p-3 text-right font-mono text-xs">
+                                  {line.openingBalance !== 0 ? (
+                                    <span className={line.openingBalance > 0 ? "text-blue-600" : "text-red-600"}>
+                                      {line.openingBalance > 0 ? "Dr " : "Cr "}
+                                      {formatCurrency(Math.abs(line.openingBalance))}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-right font-mono text-xs text-muted-foreground">
+                                  {formatCurrency(line.totalDebit)}
+                                </td>
+                                <td className="p-3 text-right font-mono text-xs text-muted-foreground">
+                                  {formatCurrency(line.totalCredit)}
+                                </td>
+                                <td className="p-3 text-right font-mono text-xs">
+                                  {line.closingBalance !== 0 ? (
+                                    <span className={line.closingBalance > 0 ? "text-blue-600" : "text-red-600"}>
+                                      {line.closingBalance > 0 ? "Dr " : "Cr "}
+                                      {formatCurrency(Math.abs(line.closingBalance))}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-center">
+                                  <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
+                                    {line.isRevenue ? "P&L" : "BS"}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Summary & Export */}
+                  <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
+                    <div className="text-sm text-muted-foreground">
+                      Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions during the year
+                      <span className="ml-2 text-xs">
+                        ({noTransactionLedgers.filter(l => l.isRevenue).length} P&L, {noTransactionLedgers.filter(l => !l.isRevenue).length} BS)
+                      </span>
+                    </div>
+                    <Button variant="outline" onClick={handleExportNoTransactionLedgersToExcel}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export to Excel
+                    </Button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ODBC Info Dialog */}
+      <Dialog open={showODBCInfoDialog} onOpenChange={setShowODBCInfoDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-500" />
+              ODBC Direct Connection Requirements
+            </DialogTitle>
+            <DialogDescription>
+              Please ensure the following requirements are met before using ODBC Direct connection.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <div className="flex items-start gap-3">
+                <Shield className="h-5 w-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-sm">Run Tally as Administrator</p>
+                  <p className="text-sm text-muted-foreground">
+                    Tally must be running with administrator privileges for ODBC connections to work properly.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-start gap-3">
+                <Database className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-sm">Configure Tally ODBC</p>
+                  <p className="text-sm text-muted-foreground">
+                    Ensure Tally ODBC is properly configured in your system settings before attempting to connect.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowODBCInfoDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => {
+              setShowODBCInfoDialog(false);
+              setConnectionMode("odbc");
+            }}>
+              Continue
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Opening Balance Matching Dialog */}
+      <Dialog open={showOpeningBalanceDialog} onOpenChange={setShowOpeningBalanceDialog}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Scale className="h-5 w-5 text-primary" />
+              Opening Balance Matching
+            </DialogTitle>
+            <DialogDescription>
+              Compare opening balances between Old and New Tally instances. Generate XML to import old balances into new Tally.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            {/* Step 1: Fetch Old Tally Data */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-sm">Step 1: Fetch Old Tally Data</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Load the Old Tally instance in TallyPrime, then click to fetch closing balances.
+                  </p>
+                </div>
+                <Button
+                  onClick={openingBalanceMatching.fetchOldTallyLedgers}
+                  disabled={openingBalanceMatching.isLoading || !!openingBalanceMatching.oldTallyData}
+                  size="sm"
+                >
+                  {openingBalanceMatching.isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Fetching...
+                    </>
+                  ) : openingBalanceMatching.oldTallyData ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                      Fetched ({openingBalanceMatching.oldTallyData.length} ledgers)
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Fetch Old Tally Data
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Step 2: Fetch New Tally Data */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-sm">Step 2: Fetch New Tally Data</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Load the New Tally instance in TallyPrime, then click to fetch opening balances.
+                  </p>
+                </div>
+                <Button
+                  onClick={openingBalanceMatching.fetchNewTallyLedgers}
+                  disabled={openingBalanceMatching.isLoading || !!openingBalanceMatching.newTallyData || !openingBalanceMatching.oldTallyData}
+                  size="sm"
+                >
+                  {openingBalanceMatching.isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Fetching...
+                    </>
+                  ) : openingBalanceMatching.newTallyData ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" />
+                      Fetched ({openingBalanceMatching.newTallyData.length} ledgers)
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Fetch New Tally Data
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Step 3: Compare Balances */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-sm">Step 3: Compare Balances</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Compare the balances and generate comparison report with XML for import.
+                  </p>
+                </div>
+                <Button
+                  onClick={openingBalanceMatching.compareBalances}
+                  disabled={openingBalanceMatching.isLoading || !openingBalanceMatching.oldTallyData || !openingBalanceMatching.newTallyData}
+                  size="sm"
+                >
+                  {openingBalanceMatching.isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Comparing...
+                    </>
+                  ) : (
+                    <>
+                      <Scale className="h-4 w-4 mr-2" />
+                      Compare Balances
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Comparison Results */}
+            {openingBalanceMatching.comparisonResult && (
+              <div className="space-y-4 border-t pt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Balance Mismatches</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{openingBalanceMatching.comparisonResult.balanceMismatches.length}</div>
+                      <p className="text-xs text-muted-foreground">Ledgers with different balances</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm">Name Mismatches</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{openingBalanceMatching.comparisonResult.nameMismatches.length}</div>
+                      <p className="text-xs text-muted-foreground">Ledgers not found in one instance</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Balance Mismatches Table */}
+                {openingBalanceMatching.comparisonResult.balanceMismatches.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-sm">Balance Mismatches</h4>
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="max-h-60 overflow-y-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted">
+                            <tr>
+                              <th className="p-2 text-left">Ledger Name</th>
+                              <th className="p-2 text-right">Old Dr</th>
+                              <th className="p-2 text-right">Old Cr</th>
+                              <th className="p-2 text-right">New Dr</th>
+                              <th className="p-2 text-right">New Cr</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {openingBalanceMatching.comparisonResult.balanceMismatches.slice(0, 10).map((mismatch, idx) => (
+                              <tr key={idx} className="border-t">
+                                <td className="p-2">{mismatch.$Name}</td>
+                                <td className="p-2 text-right">{mismatch.Old_Dr_Balance.toFixed(2)}</td>
+                                <td className="p-2 text-right">{mismatch.Old_Cr_Balance.toFixed(2)}</td>
+                                <td className="p-2 text-right">{mismatch.New_Dr_Balance.toFixed(2)}</td>
+                                <td className="p-2 text-right">{mismatch.New_Cr_Balance.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {openingBalanceMatching.comparisonResult.balanceMismatches.length > 10 && (
+                        <div className="p-2 text-xs text-muted-foreground text-center border-t">
+                          Showing first 10 of {openingBalanceMatching.comparisonResult.balanceMismatches.length} mismatches
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Download XML Button */}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    onClick={openingBalanceMatching.downloadXML}
+                    className="gap-2"
+                  >
+                    <FileDown className="h-4 w-4" />
+                    Download XML for Import
+                  </Button>
+                </div>
+
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-xs">
+                    To import the XML to Tally: Go to Gateway of Tally &gt; Import &gt; Masters &gt; Select the downloaded XML file &gt; Choose "Modify with new data" &gt; Press Enter. Backup your Tally data before importing!
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
+
+            {/* Reset Button */}
+            {(openingBalanceMatching.oldTallyData || openingBalanceMatching.newTallyData || openingBalanceMatching.comparisonResult) && (
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    openingBalanceMatching.reset();
+                  }}
+                  size="sm"
+                >
+                  Reset
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => {
+              setShowOpeningBalanceDialog(false);
+              openingBalanceMatching.reset();
+            }}>
+              Close
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

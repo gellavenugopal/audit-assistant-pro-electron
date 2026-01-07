@@ -1,15 +1,40 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { TallyMonthWiseLine } from "@/contexts/TallyContext";
 
-// Extend the Window interface to include electronAPI
+      // Extend the Window interface to include electronAPI
 declare global {
   interface Window {
     electronAPI: {
+      odbcCheckConnection: () => Promise<{ success: boolean; isConnected?: boolean; error?: string }>;
       odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
       odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
       odbcFetchMonthWise: (fyStartYear: number, targetMonth: string) => Promise<{ success: boolean; error?: string; data?: { plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[]; fyStartYear: number; targetMonth: string } }>;
       odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
+      // Opening Balance Matching methods
+      odbcFetchOldTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcFetchNewTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcCompareOpeningBalances: (data: { oldData: any[]; newData: any[] }) => Promise<{
+        success: boolean;
+        error?: string;
+        comparison?: {
+          balanceMismatches: any[];
+          nameMismatches: any[];
+        };
+        xml?: string;
+      }>;
+      // Month wise and GST methods
+      odbcFetchMonthWiseData: (data: { fyStartYear: number; targetMonth: string }) => Promise<{
+        success: boolean;
+        error?: string;
+        lines?: any[];
+        months?: string[];
+      }>;
+      odbcFetchGSTNotFeeded: () => Promise<{
+        success: boolean;
+        error?: string;
+        lines?: any[];
+      }>;
     };
   }
 }
@@ -42,6 +67,8 @@ interface TallyODBCState {
   error: string | null;
 }
 
+const STORAGE_KEY = 'auditpro_odbc_connection';
+
 export const useTallyODBC = () => {
   const { toast } = useToast();
   const [state, setState] = useState<TallyODBCState>({
@@ -51,6 +78,50 @@ export const useTallyODBC = () => {
     error: null,
   });
 
+  // Restore connection state on mount and verify it's still active
+  useEffect(() => {
+    const checkConnectionStatus = async () => {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.isConnected) {
+            // Verify connection is still active without creating a new one
+            try {
+              if (window.electronAPI && typeof window.electronAPI.odbcCheckConnection === 'function') {
+                const result = await window.electronAPI.odbcCheckConnection();
+                if (result.success && result.isConnected) {
+                  // Connection is still active, restore state
+                  setState({
+                    isConnected: true,
+                    isConnecting: false,
+                    companyInfo: parsed.companyInfo || null,
+                    error: null,
+                  });
+                  return;
+                }
+              }
+            } catch {
+              // Check failed, connection is not active
+            }
+            // Connection lost, clear saved state
+            localStorage.removeItem(STORAGE_KEY);
+            setState({
+              isConnected: false,
+              isConnecting: false,
+              companyInfo: null,
+              error: null,
+            });
+          }
+        } catch {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      }
+    };
+
+    checkConnectionStatus();
+  }, []);
+
   const testConnection = useCallback(async (): Promise<boolean> => {
     try {
       setState(prev => ({ ...prev, isConnecting: true, error: null }));
@@ -58,12 +129,20 @@ export const useTallyODBC = () => {
       const result = await window.electronAPI.odbcTestConnection();
 
       if (result.success) {
-        setState(prev => ({
-          ...prev,
+        const newState = {
           isConnected: true,
           isConnecting: false,
+          companyInfo: null, // Can be populated later if needed
           error: null
+        };
+        setState(newState);
+        
+        // Persist connection state to localStorage
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          isConnected: true,
+          companyInfo: null,
         }));
+        
         toast({
           title: "ODBC Connected",
           description: `Successfully connected using ${result.driver}`,
@@ -142,6 +221,9 @@ export const useTallyODBC = () => {
       companyInfo: null,
       error: null,
     });
+    
+    // Remove persisted connection state
+    localStorage.removeItem(STORAGE_KEY);
   }, []);
 
   return {
