@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Calculator, AlertCircle, Trash2, Plus, FileDown, Building2 } from 'lucide-react';
 import { format } from 'date-fns';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useTeamMembers } from '@/hooks/useTeamMembers';
 
@@ -305,7 +305,7 @@ export default function Materiality() {
     setCurrentView('risk');
   };
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (!isRiskFinalized || !finalRisk) {
       const result = window.confirm('Risk assessment is not finalized. Do you want to skip and proceed with export?');
       if (!result) {
@@ -313,66 +313,87 @@ export default function Materiality() {
       }
     }
 
-    const data = [];
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Materiality & Risk');
+    
+    // Define heading style
+    const headingStyle = {
+      font: { bold: true, color: { argb: 'FF0000FF' } } // Blue color
+    };
     
     // Header
-    data.push(['DETERMINING MATERIALITY']);
-    data.push(['Name of Entity', entityName]);
-    data.push(['Financial Year', financialYear]);
-    data.push(['Materiality Stage', materialityStage]);
-    data.push(['Type of Engagement', engagementType]);
-    data.push(['Prepared By', preparedBy]);
-    data.push(['Reviewed By', reviewedBy]);
-    data.push(['Date', date]);
-    data.push([]);
+    worksheet.addRow(['DETERMINING MATERIALITY']).getCell(1).font = headingStyle.font;
+    worksheet.addRow(['Name of Entity', entityName]);
+    worksheet.addRow(['Financial Year', financialYear]);
+    worksheet.addRow(['Materiality Stage', materialityStage]);
+    worksheet.addRow(['Type of Engagement', engagementType]);
+    worksheet.addRow(['Prepared By', preparedBy]);
+    worksheet.addRow(['Reviewed By', reviewedBy]);
+    worksheet.addRow(['Date', date]);
+    worksheet.addRow([]);
     
     // Financial Base
-    data.push(['FINANCIAL BASE']);
-    data.push(['Profit Before Tax', profitBeforeTax]);
-    data.push(['Revenue / Gross Receipts', revenue]);
-    data.push(['Total Assets', totalAssets]);
-    data.push(['Net Worth', netWorth]);
-    data.push([othersName || 'Others', othersAmount]);
-    data.push([]);
+    worksheet.addRow(['FINANCIAL BASE']).getCell(1).font = headingStyle.font;
+    worksheet.addRow(['Profit Before Tax', profitBeforeTax]);
+    worksheet.addRow(['Revenue / Gross Receipts', revenue]);
+    worksheet.addRow(['Total Assets', totalAssets]);
+    worksheet.addRow(['Net Worth', netWorth]);
+    worksheet.addRow([othersName || 'Others', othersAmount]);
+    worksheet.addRow([]);
     
     // Materiality
-    data.push(['MATERIALITY']);
-    data.push(['Benchmark Selected', benchmark]);
-    data.push(['Overall Materiality', omAmount]);
-    data.push(['Performance Materiality', pmAmount]);
-    data.push(['Clearly Trivial Threshold', ctAmount]);
-    data.push([]);
+    worksheet.addRow(['MATERIALITY']).getCell(1).font = headingStyle.font;
+    worksheet.addRow(['Benchmark Selected', benchmark]);
+    worksheet.addRow(['Overall Materiality', omAmount]);
+    worksheet.addRow(['Performance Materiality', pmAmount]);
+    worksheet.addRow(['Clearly Trivial Threshold', ctAmount]);
+    worksheet.addRow([]);
     
     // Risk Assessment
-    data.push(['RISK ASSESSMENT QUESTIONNAIRE']);
-    data.push(['Question', 'Risk Level', 'Score', 'Included']);
+    worksheet.addRow(['RISK ASSESSMENT QUESTIONNAIRE']).getCell(1).font = headingStyle.font;
+    worksheet.addRow(['Question', 'Risk Level', 'Score', 'Included']);
     riskFactors.forEach((factor, index) => {
       const item = riskItems[index];
-      data.push([
+      worksheet.addRow([
         factor,
         item?.level || 'NA',
         item?.score || 0,
         item?.level !== 'NA' ? 'Yes' : 'No'
       ]);
     });
-    data.push([]);
+    worksheet.addRow([]);
     
     // Risk Summary
-    data.push(['RISK SUMMARY']);
-    data.push(['Total Risk Score', totalRiskScore]);
-    data.push(['Risk %', `${riskPercentage}%`]);
-    data.push(['System Risk', systemRisk]);
-    data.push(['Auditor Override', finalRisk]);
-    data.push([]);
+    worksheet.addRow(['RISK SUMMARY']).getCell(1).font = headingStyle.font;
+    worksheet.addRow(['Total Risk Score', totalRiskScore]);
+    worksheet.addRow(['Risk %', `${riskPercentage}%`]);
+    worksheet.addRow(['System Risk', systemRisk]);
+    worksheet.addRow(['Auditor Override', finalRisk]);
+    worksheet.addRow([]);
     
     // Remarks
-    data.push(['REMARKS/RATIONALE']);
-    data.push([remarks]);
-
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Materiality & Risk');
-    XLSX.writeFile(wb, `Materiality_Risk_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    worksheet.addRow(['REMARKS/RATIONALE']).getCell(1).font = headingStyle.font;
+    worksheet.addRow([remarks]);
+    
+    // Auto-resize columns
+    worksheet.columns.forEach(column => {
+      let maxLength = 10;
+      column.eachCell?.({ includeEmpty: false }, cell => {
+        const cellValue = cell.value ? String(cell.value) : '';
+        maxLength = Math.max(maxLength, cellValue.length);
+      });
+      column.width = Math.min(maxLength + 2, 50);
+    });
+    
+    // Generate and download file
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Materiality_Risk_${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+    link.click();
+    window.URL.revokeObjectURL(url);
   };
 
   const getRiskColor = (risk: string) => {
