@@ -1,6 +1,14 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import { TrialBalanceLine } from '@/hooks/useTrialBalance';
 import { convertLedgerRowsToTrialBalanceLines } from '@/utils/trialBalanceNewAdapter';
@@ -13,7 +21,7 @@ import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSetting
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useToast } from '@/hooks/use-toast';
-import { FileText, BarChart3, TrendingUp, Building2, Download } from 'lucide-react';
+import { FileText, BarChart3, TrendingUp, Building2, Download, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
   exportBalanceSheetWithNotes,
@@ -35,9 +43,15 @@ interface ReportsTabProps {
   companyName: string;
   toDate: string;
   entityType: string;
+  signingDetails?: {
+    date: string;
+    place: string;
+    partnerName: string;
+    firmName: string;
+  };
 }
 
-export function ReportsTab({ data, stockData, companyName, toDate, entityType }: ReportsTabProps) {
+export function ReportsTab({ data, stockData, companyName, toDate, entityType, signingDetails }: ReportsTabProps) {
   const { user } = useAuth();
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
@@ -157,90 +171,80 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header Info Card */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <p className="text-xs text-muted-foreground uppercase">Company</p>
-            <p className="font-semibold text-gray-900">{companyName || 'Not Set'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground uppercase">Financial Year</p>
-            <p className="font-semibold text-gray-900">{financialYear || 'Not Set'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground uppercase">Entity Type</p>
-            <p className="font-semibold text-gray-900">{entityType || 'Not Set'}</p>
-          </div>
-        </div>
-      </div>
-      
-      {/* Format Selector and Note Settings */}
-      <div className="flex items-center justify-between flex-wrap gap-4 bg-white p-4 rounded-lg border">
-        <FormatSelector constitution={constitution} showDownload={true} />
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-700">Scale:</span>
-          <Select value={reportingScale} onValueChange={setReportingScale}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Auto</SelectItem>
-              <SelectItem value="rupees">Rupees</SelectItem>
-              <SelectItem value="thousands">Thousands</SelectItem>
-              <SelectItem value="lakhs">Lakhs</SelectItem>
-              <SelectItem value="crores">Crores</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {reportTab === 'balance-sheet' && (
-          <NoteNumberSettings 
-            startingNoteNumber={bsStartingNote} 
-            onStartingNoteNumberChange={setBsStartingNote} 
-          />
-        )}
-        {reportTab === 'profit-loss' && (
-          <NoteNumberSettings 
-            startingNoteNumber={plStartingNote} 
-            onStartingNoteNumberChange={setPlStartingNote} 
-          />
-        )}
-      </div>
-
-      {/* Report Sub-Tabs */}
+    <div className="space-y-4">
+      {/* Report Sub-Tabs and Controls in Single Row */}
       <Tabs value={reportTab} onValueChange={setReportTab} className="w-full">
-        <TabsList className="grid grid-cols-4 w-full max-w-3xl">
-          <TabsTrigger value="balance-sheet" className="flex items-center gap-2">
-            <BarChart3 className="w-4 h-4" />
-            <span className="hidden sm:inline">Balance Sheet</span>
-            <span className="sm:hidden">BS</span>
-          </TabsTrigger>
-          <TabsTrigger value="profit-loss" className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4" />
-            <span className="hidden sm:inline">Profit & Loss</span>
-            <span className="sm:hidden">P&L</span>
-          </TabsTrigger>
-          <TabsTrigger value="cash-flow" className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4" />
-            <span className="hidden sm:inline">Cash Flow</span>
-            <span className="sm:hidden">CF</span>
-          </TabsTrigger>
-          <TabsTrigger value="capital-notes" className="flex items-center gap-2">
-            <Building2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Capital Notes</span>
-            <span className="sm:hidden">Notes</span>
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between bg-white px-4 py-2.5 rounded-lg border shadow-sm">
+          <TabsList className="h-9 bg-gray-100">
+            <TabsTrigger value="balance-sheet" className="flex items-center gap-2 data-[state=active]:bg-white">
+              <BarChart3 className="w-4 h-4" />
+              Balance Sheet
+            </TabsTrigger>
+            <TabsTrigger value="profit-loss" className="flex items-center gap-2 data-[state=active]:bg-white">
+              <TrendingUp className="w-4 h-4" />
+              Profit & Loss
+            </TabsTrigger>
+            <TabsTrigger value="cash-flow" className="flex items-center gap-2 data-[state=active]:bg-white">
+              <TrendingUp className="w-4 h-4" />
+              Cash Flow
+            </TabsTrigger>
+            <TabsTrigger value="capital-notes" className="flex items-center gap-2 data-[state=active]:bg-white">
+              <Building2 className="w-4 h-4" />
+              Capital Notes
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="balance-sheet" className="mt-6">
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-gray-900">Balance Sheet</h2>
-              <Button onClick={handleDownloadBS} variant="default" size="sm" className="shadow-sm">
-                <Download className="w-4 h-4 mr-2" />
-                Download BS with Notes
-              </Button>
+          <div className="flex items-center gap-3">
+            <Select value={reportingScale} onValueChange={setReportingScale}>
+              <SelectTrigger className="h-8 w-[110px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto</SelectItem>
+                <SelectItem value="rupees">Rupees</SelectItem>
+                <SelectItem value="thousands">Thousands</SelectItem>
+                <SelectItem value="lakhs">Lakhs</SelectItem>
+                <SelectItem value="crores">Crores</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            {/* Download Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="default" size="sm" className="h-8">
+                  <Download className="w-4 h-4 mr-2" />
+                  Download
+                  <ChevronDown className="w-3 h-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleDownloadBS}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  Balance Sheet with Notes
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleDownloadPL}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  P&L with Notes
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem disabled>
+                  <Download className="w-4 h-4 mr-2" />
+                  Complete Financial Package
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        <TabsContent value="balance-sheet" className="mt-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-gray-900">Balance Sheet</h2>
+              {bsStartingNote !== 3 && (
+                <Badge variant="secondary" className="text-xs">
+                  Note starts: {bsStartingNote}
+                </Badge>
+              )}
             </div>
             <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
               <ScheduleIIIBalanceSheet 
@@ -254,14 +258,15 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
           </div>
         </TabsContent>
 
-        <TabsContent value="profit-loss" className="mt-6">
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-gray-900">Profit & Loss Account</h2>
-              <Button onClick={handleDownloadPL} variant="default" size="sm" className="shadow-sm">
-                <Download className="w-4 h-4 mr-2" />
-                Download P&L with Notes
-              </Button>
+        <TabsContent value="profit-loss" className="mt-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-bold text-gray-900">Profit & Loss Account</h2>
+              {plStartingNote !== 19 && (
+                <Badge variant="secondary" className="text-xs">
+                  Note starts: {plStartingNote}
+                </Badge>
+              )}
             </div>
             <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
               <ScheduleIIIProfitLoss 
