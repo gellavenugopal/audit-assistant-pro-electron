@@ -1,0 +1,93 @@
+=== GROUP RULES ===
+RuleID,TallyGroupName,TallyParentGroup,MapsToCode,MapsToDescription,Notes
+GM001,"Capital Account","Primary",EL-SHF-SC-EQ,"Equity Share Capital","For proprietorship/partnership, use Partners Capital"
+GM002,"Share Capital","Capital Account",EL-SHF-SC-EQ,"Equity Share Capital",""
+GM003,"Reserves & Surplus","Capital Account",EL-SHF-RS-PL,"Surplus (Profit & Loss Account)","Default to P&L unless specific reserve"
+GM004,"Retained Earnings","Reserves & Surplus",EL-SHF-RS-PL,"Surplus (Profit & Loss Account)",""
+GM005,"Secured Loans","Loans (Liability)",EL-NCL-LTB-TL,"Term Loans from Banks","Verify current/non-current split"
+GM006,"Unsecured Loans","Loans (Liability)",EL-NCL-LTB-OT,"Other Long-term Borrowings","Verify current/non-current split"
+GM007,"Bank OD A/c","Loans (Liability)",EL-CL-STB-CC,"Cash Credit/Overdraft from Banks","Current liability by nature"
+GM008,"Bank OCC A/c","Loans (Liability)",EL-CL-STB-CC,"Cash Credit/Overdraft from Banks","Current liability by nature"
+GM009,"Sundry Creditors","Current Liabilities",EL-CL-TP-OTH,"Trade Payables - Due to Others","Check for MSME creditors"
+GM010,"Duties & Taxes","Current Liabilities",EL-CL-OCL-SD,"Statutory Dues Payable",""
+GM011,"Provisions","Current Liabilities",EL-CL-STP-OT,"Other Provisions","Verify short-term vs long-term"
+GM012,"Fixed Assets","Primary",AS-NCA-PPE,"Property, Plant and Equipment","Map to specific asset types"
+GM013,"Land","Fixed Assets",AS-NCA-PPE-LA,"Land",""
+GM014,"Buildings","Fixed Assets",AS-NCA-PPE-BU,"Buildings",""
+GM015,"Plant & Machinery","Fixed Assets",AS-NCA-PPE-PM,"Plant and Machinery",""
+GM016,"Furniture & Fixtures","Fixed Assets",AS-NCA-PPE-FU,"Furniture and Fixtures",""
+GM017,"Vehicles","Fixed Assets",AS-NCA-PPE-VE,"Vehicles",""
+GM018,"Office Equipment","Fixed Assets",AS-NCA-PPE-OF,"Office Equipment",""
+GM019,"Computer Equipment","Fixed Assets",AS-NCA-PPE-CO,"Computers",""
+GM020,"Computers","Fixed Assets",AS-NCA-PPE-CO,"Computers",""
+GM021,"Investments","Primary",AS-NCA-NCI,"Non-Current Investments","Verify current vs non-current"
+GM022,"Stock-in-Hand","Current Assets",AS-CA-INV,"Inventories",""
+GM023,"Raw Materials","Stock-in-Hand",AS-CA-INV-RM,"Raw Materials",""
+GM024,"Work-in-Progress","Stock-in-Hand",AS-CA-INV-WIP,"Work-in-Progress",""
+GM025,"Finished Goods","Stock-in-Hand",AS-CA-INV-FG,"Finished Goods",""
+GM026,"Stores & Spares","Stock-in-Hand",AS-CA-INV-SP,"Stores and Spares",""
+GM027,"Sundry Debtors","Current Assets",AS-CA-TR-USEC,"Trade Receivables - Unsecured",""
+GM028,"Cash-in-Hand","Current Assets",AS-CA-CCE-COH,"Cash on Hand",""
+GM029,"Bank Accounts","Current Assets",AS-CA-CCE-BB,"Balances with Banks",""
+GM030,"Bank OD A/c","Current Assets",AS-CA-CCE-BB,"Balances with Banks","Net off with OD if same bank"
+GM031,"Loans & Advances (Asset)","Current Assets",AS-CA-STLA,"Short-term Loans and Advances","Verify current vs non-current"
+GM032,"Deposits (Asset)","Current Assets",AS-NCA-LTLA-SD,"Security Deposits","Usually non-current"
+GM033,"Sales Accounts","Primary",INC-RFO-SG,"Sale of Goods",""
+GM034,"Direct Incomes","Primary",INC-RFO-OOR,"Other Operating Revenue",""
+GM035,"Indirect Incomes","Primary",INC-OI-OT,"Other Non-Operating Income",""
+GM036,"Purchase Accounts","Primary",EXP-CMC-RM,"Raw Materials Consumed","For manufacturing companies"
+GM037,"Direct Expenses","Primary",EXP-OE-MFG,"Manufacturing Expenses",""
+GM038,"Indirect Expenses","Primary",EXP-OE-MISC,"Miscellaneous Expenses","Map to specific expense types"
+GM039,"Salary","Indirect Expenses",EXP-EBE-SAL,"Salaries and Wages",""
+GM040,"Rent","Indirect Expenses",EXP-OE-RENT,"Rent",""
+GM041,"Depreciation","Indirect Expenses",EXP-DA-DEP,"Depreciation on PPE",""
+GM042,"Interest Paid","Indirect Expenses",EXP-FC-INT,"Interest Expense",""
+
+=== KEYWORD RULES ===
+RuleID,KeywordPattern,MatchType,MapsToCode,MapsToDescription,Priority
+KW001,"MSME","Contains",EL-CL-TP-MSME,"Trade Payables - Due to MSME",95
+KW002,"Micro","Contains",EL-CL-TP-MSME,"Trade Payables - Due to MSME",90
+KW003,"Small Enterprise","Contains",EL-CL-TP-MSME,"Trade Payables - Due to MSME",90
+KW004,"Director","Contains",EL-NCL-LTB-LO,"Loans from Related Parties",85
+KW005,"Promoter","Contains",EL-NCL-LTB-LO,"Loans from Related Parties",85
+KW006,"Subsidiary","Contains",AS-NCA-NCI-EQ,"Investment in Equity Instruments",85
+KW007,"Associate","Contains",AS-NCA-NCI-EQ,"Investment in Equity Instruments",85
+KW008,"Holding Company","Contains",EL-NCL-LTB-LO,"Loans from Related Parties",85
+KW009,"Securities Premium","Contains",EL-SHF-RS-SPR,"Securities Premium Reserve",75
+KW010,"Capital Reserve","Contains",EL-SHF-RS-CR,"Capital Reserves",75
+KW011,"General Reserve","Contains",EL-SHF-RS-GR,"General Reserve",75
+KW012,"Revaluation Reserve","Contains",EL-SHF-RS-RVR,"Revaluation Reserve",75
+KW013,"Profit & Loss","Contains",EL-SHF-RS-PL,"Surplus (Profit & Loss Account)",70
+KW014,"P&L","Contains",EL-SHF-RS-PL,"Surplus (Profit & Loss Account)",70
+KW015,"GST","Contains",EL-CL-OCL-SD,"Statutory Dues Payable",70
+KW016,"TDS","Contains",EL-CL-OCL-SD,"Statutory Dues Payable",70
+KW017,"TCS","Contains",EL-CL-OCL-SD,"Statutory Dues Payable",70
+KW018,"PF Payable","Contains",EL-CL-OCL-SD,"Statutory Dues Payable",70
+KW019,"ESI Payable","Contains",EL-CL-OCL-SD,"Statutory Dues Payable",70
+KW020,"PT Payable","Contains",EL-CL-OCL-SD,"Statutory Dues Payable",70
+KW021,"Provision for Gratuity","Contains",EL-NCL-LTP-EB,"Provision for Employee Benefits",70
+KW022,"Provision for Leave","Contains",EL-CL-STP-EB,"Provision for Employee Benefits",70
+KW023,"Provision for Tax","Contains",EL-CL-STP-TAX,"Provision for Tax",70
+KW024,"Provision for Bad Debts","Contains",AS-CA-TR-PROV,"Less: Provision for Doubtful Debts",70
+KW025,"Fixed Deposit","Contains",AS-CA-CCE-FD,"Fixed Deposits (Short-term)",65
+KW026,"FD","Starts With",AS-CA-CCE-FD,"Fixed Deposits (Short-term)",60
+KW027,"Current Account","Contains",AS-CA-CCE-BB,"Balances with Banks",60
+KW028,"Savings Account","Contains",AS-CA-CCE-BB,"Balances with Banks",60
+KW029,"Salary","Contains",EXP-EBE-SAL,"Salaries and Wages",65
+KW030,"Wages","Contains",EXP-EBE-SAL,"Salaries and Wages",65
+KW031,"Bonus","Contains",EXP-EBE-BON,"Bonus",65
+KW032,"Staff Welfare","Contains",EXP-EBE-WEL,"Staff Welfare Expenses",65
+KW033,"Audit Fee","Contains",EXP-OE-AUD,"Audit Fees",60
+KW034,"Legal Fee","Contains",EXP-OE-LEG,"Legal and Professional Fees",60
+KW035,"Professional Fee","Contains",EXP-OE-LEG,"Legal and Professional Fees",60
+KW036,"Consulting","Contains",EXP-OE-LEG,"Legal and Professional Fees",55
+KW037,"Travelling","Contains",EXP-OE-TRV,"Travelling and Conveyance",55
+KW038,"Conveyance","Contains",EXP-OE-TRV,"Travelling and Conveyance",55
+KW039,"Telephone","Contains",EXP-OE-TEL,"Telephone and Communication",55
+KW040,"Insurance","Contains",EXP-OE-INS,"Insurance",55
+KW041,"Bank Charges","Contains",EXP-FC-BC,"Bank Charges",55
+
+=== OVERRIDE RULES ===
+RuleID,ExactLedgerName,CurrentTallyGroup,OverrideToCode,OverrideToDescription,ReasonForOverride,EffectiveDate
+OV001,"Building - Leasehold","Fixed Assets",AS-NCA-PPE-BU,"Buildings","Leasehold building to be disclosed under Buildings",""
+OV002,"Goodwill (Acquired)","Fixed Assets",AS-NCA-IA-GW,"Goodwill","Reclassify from Fixed Assets to Intangible Assets",""
