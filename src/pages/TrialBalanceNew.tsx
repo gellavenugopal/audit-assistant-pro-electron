@@ -181,8 +181,8 @@ export default function TrialBalanceNew() {
       return;
     }
     
-    // Proceed with fetch
-    await handleFetchFromTally();
+    // If all checks passed, entity dialog should trigger the fetch
+    setIsEntityDialogOpen(true);
   }, [odbcConnection, entityType, businessType]);
   
   // Fetch data from Tally after entity selection
