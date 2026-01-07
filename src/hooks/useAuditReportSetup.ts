@@ -28,6 +28,21 @@ export interface AuditReportSetup {
   has_branch_auditors: boolean | null;
   branch_locations: string | null;
   has_predecessor_auditor: boolean | null;
+  
+  // IFC Applicability Criteria
+  is_public_unlisted_company: boolean | null;
+  private_turnover_above_50cr: boolean | null;
+  private_borrowing_above_25cr: boolean | null;
+  
+  // IFC Exemptions
+  is_small_company: boolean | null;
+  is_opc: boolean | null;
+  
+  // Company Type Classification
+  is_public_company: boolean | null;
+  is_private_exceeding_threshold: boolean | null;
+  is_private_non_exceeding_threshold: boolean | null;
+  
   predecessor_auditor_name: string | null;
   predecessor_report_date: string | null;
   ifc_applicable: boolean | null;
@@ -76,7 +91,7 @@ export function useAuditReportSetup(engagementId: string | undefined) {
         .maybeSingle();
 
       if (error) throw error;
-      setSetup(data);
+      setSetup(data as AuditReportSetup | null);
     } catch (error) {
       console.error('Error fetching audit report setup:', error);
     } finally {
@@ -99,9 +114,9 @@ export function useAuditReportSetup(engagementId: string | undefined) {
         .single();
 
       if (error) throw error;
-      setSetup(newSetup);
+      setSetup(newSetup as AuditReportSetup);
       toast.success('Audit report setup created');
-      return newSetup;
+      return newSetup as AuditReportSetup;
     } catch (error: any) {
       console.error('Error creating audit report setup:', error);
       toast.error(error.message || 'Failed to create setup');
@@ -121,9 +136,9 @@ export function useAuditReportSetup(engagementId: string | undefined) {
         .single();
 
       if (error) throw error;
-      setSetup(updatedSetup);
+      setSetup(updatedSetup as AuditReportSetup);
       toast.success('Setup updated');
-      return updatedSetup;
+      return updatedSetup as AuditReportSetup;
     } catch (error: any) {
       console.error('Error updating audit report setup:', error);
       toast.error(error.message || 'Failed to update setup');

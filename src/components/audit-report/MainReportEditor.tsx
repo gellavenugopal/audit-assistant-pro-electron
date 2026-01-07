@@ -69,6 +69,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const [activeTab, setActiveTab] = useState('configuration');
   const [previewMode, setPreviewMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [ifcManualOverride, setIfcManualOverride] = useState(false);
 
   const { setup, saveSetup } = useAuditReportSetup(engagementId);
   const { content, loading: contentLoading, saveContent } = useAuditReportContent(engagementId);
@@ -82,6 +83,33 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
   const [editorBasis, setEditorBasis] = useState<string>('');
   const [savedExampleForDraftId, setSavedExampleForDraftId] = useState<string | null>(null);
+
+  // Auto-calculate IFC applicability
+  useEffect(() => {
+    if (!setup || ifcManualOverride) return;
+
+    // IFC Applicability: If ANY of these criteria are checked, IFC is applicable
+    const computedApplicability =
+      Boolean(setup.is_public_company) ||
+      Boolean(setup.is_private_exceeding_threshold) ||
+      Boolean(setup.is_private_non_exceeding_threshold) ||
+      Boolean(setup.is_listed_company) ||
+      Boolean(setup.is_subsidiary) ||
+      Boolean(setup.is_holding_company);
+
+    // Only update if the computed value differs from current value
+    if (setup.ifc_applicable !== computedApplicability) {
+      saveSetupPatch({ ifc_applicable: computedApplicability });
+    }
+  }, [
+    setup?.is_public_company,
+    setup?.is_private_exceeding_threshold,
+    setup?.is_private_non_exceeding_threshold,
+    setup?.is_listed_company,
+    setup?.is_subsidiary,
+    setup?.is_holding_company,
+    ifcManualOverride,
+  ]);
 
   useEffect(() => {
     if (content?.id) setDraft(content);
@@ -184,6 +212,12 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     const saved = await saveSetup(patch);
     setSaving(false);
     if (saved) toast.success('Configuration saved');
+  };
+
+  // Helper function to update IFC criteria checkboxes and reset manual override
+  const updateIfcCriteria = (patch: Record<string, any>) => {
+    setIfcManualOverride(false); // Reset manual override when criteria change
+    saveSetupPatch(patch);
   };
 
   const addEomItem = () => {
@@ -344,34 +378,113 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-center gap-2">
                     <Checkbox
+                      checked={Boolean(setup.is_small_company)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_small_company: !!v })}
+                    />
+                    <Label className="font-normal">Small Company</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_opc)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_opc: !!v })}
+                    />
+                    <Label className="font-normal">One Person Company (OPC)</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_public_company)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_public_company: !!v })}
+                    />
+                    <Label className="font-normal">Public Company</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_private_exceeding_threshold)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_private_exceeding_threshold: !!v })}
+                    />
+                    <Label className="font-normal">Private limited company with Previous year turnover is  Rs 50 Crores or more</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_private_non_exceeding_threshold)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_private_non_exceeding_threshold: !!v })}
+                    />
+                    <Label className="font-normal">Private limited company with Current year during at any point of time exceeding Rs 25Crores</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
                       checked={Boolean(setup.cash_flow_required)}
                       onCheckedChange={(v) => saveSetupPatch({ cash_flow_required: !!v })}
                     />
                     <Label className="font-normal">Cash Flow Statement included</Label>
                   </div>
 
+                  <div className="space-y-2">
+                    <Label className="font-normal">Company Result for the Year</Label>
+                    <RadioGroup
+                      value={setup.company_profit_or_loss || ''}
+                      onValueChange={(v) => saveSetupPatch({ company_profit_or_loss: v || null })}
+                    >
+                      <div className="flex items-center gap-2">
+                        <RadioGroupItem value="profit" id="profit" />
+                        <Label htmlFor="profit" className="font-normal cursor-pointer">Profit</Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <RadioGroupItem value="loss" id="loss" />
+                        <Label htmlFor="loss" className="font-normal cursor-pointer">Loss</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.ifc_applicable)}
-                      onCheckedChange={(v) => saveSetupPatch({ ifc_applicable: !!v })}
+                      onCheckedChange={(v) => {
+                        setIfcManualOverride(true);
+                        saveSetupPatch({ ifc_applicable: !!v });
+                      }}
                     />
                     <Label className="font-normal">IFC reporting applicable</Label>
+                    {ifcManualOverride && (
+                      <span className="text-xs text-amber-600 font-medium">manual override</span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.is_listed_company)}
-                      onCheckedChange={(v) => saveSetupPatch({ is_listed_company: !!v })}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_listed_company: !!v })}
                     />
                     <Label className="font-normal">Listed company (KAMs typically required)</Label>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      checked={Boolean(setup.has_subsidiaries)}
-                      onCheckedChange={(v) => saveSetupPatch({ has_subsidiaries: !!v })}
+                      checked={Boolean(setup.is_subsidiary)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_subsidiary: !!v })}
                     />
-                    <Label className="font-normal">Has subsidiaries / associates</Label>
+                    <Label className="font-normal">is a subsidiary</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_holding_company)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_holding_company: !!v })}
+                    />
+                    <Label className="font-normal">is a holding company</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.has_associates)}
+                      onCheckedChange={(v) => saveSetupPatch({ has_associates: !!v })}
+                    />
+                    <Label className="font-normal">has associates</Label>
                   </div>
 
                   <div className="flex items-center gap-2">
