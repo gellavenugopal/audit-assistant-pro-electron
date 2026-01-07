@@ -249,7 +249,7 @@ export default function TrialBalanceNew() {
         }));
       
       // Auto-classify
-      const classified = classifyDataframeBatch(processedData, savedMappings);
+      const classified = classifyDataframeBatch(processedData, savedMappings, businessType);
       setCurrentData(classified);
       
       // Save to database
@@ -329,7 +329,7 @@ export default function TrialBalanceNew() {
       return;
     }
     
-    const classified = classifyDataframeBatch(currentData, savedMappings);
+    const classified = classifyDataframeBatch(currentData, savedMappings, businessType);
     setCurrentData(classified);
     
     const mappedCount = classified.filter(row => row['Status'] === 'Mapped').length;
@@ -699,7 +699,7 @@ export default function TrialBalanceNew() {
             return row['Opening Balance'] !== 0 || row['Closing Balance'] !== 0;
           });
         
-        const classified = classifyDataframeBatch(processedData, savedMappings);
+        const classified = classifyDataframeBatch(processedData, savedMappings, businessType);
         setCurrentData(classified);
         
         // Save to database
@@ -1302,6 +1302,7 @@ export default function TrialBalanceNew() {
               <StockItemsTab 
                 stockData={currentStockData} 
                 onUpdateStockData={setCurrentStockData}
+                businessType={businessType}
               />
             </TabsContent>
             

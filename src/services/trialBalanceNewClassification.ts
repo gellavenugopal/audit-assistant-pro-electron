@@ -109,8 +109,18 @@ const SCHEDULE_III_MAPPING: Record<string, {
   },
   'Stock-in-Hand': {
     face: 'Assets',
-    note: 'Other Current Assets',
+    note: 'Inventories',
     subnote: 'Stock-in-Hand'
+  },
+  'Closing Stock': {
+    face: 'Assets',
+    note: 'Inventories',
+    subnote: 'Closing Stock'
+  },
+  'Opening Stock': {
+    face: 'Expenses',
+    note: 'Changes in inventories of FG, WIP and stock-in-trade',
+    subnote: 'Opening Stock'
   },
   'Capital Account': {
     face: 'Equity',
@@ -172,7 +182,8 @@ export function classifyLedgerWithPriority(
   ledgerName: string,
   tallyGroup: string,
   closingBalance: number,
-  savedMappingsDict: Record<string, ClassificationResult> | null = null
+  savedMappingsDict: Record<string, ClassificationResult> | null = null,
+  businessType: string = ''
 ): ClassificationResult {
   // Generate composite key for lookup
   const compositeKey = generateLedgerKey(ledgerName, tallyGroup);
@@ -182,7 +193,31 @@ export function classifyLedgerWithPriority(
     return savedMappingsDict[compositeKey];
   }
   
-  // PRIORITY 2: Default Mappings with Special Rules
+  // PRIORITY 2: Business Type Specific Rules
+  
+  // Trading Business: Purchase Accounts → Purchase of Stock-in-Trade
+  if (businessType === 'Trading' && tallyGroup === 'Purchase Accounts') {
+    return {
+      h1: 'P&L Account',
+      h2: 'Expenses',
+      h3: 'Purchases of stock-in-trade',
+      h4: '',
+      h5: ''
+    };
+  }
+  
+  // Manufacturing Business: Purchase Accounts → Cost of materials consumed
+  if (businessType === 'Manufacturing' && tallyGroup === 'Purchase Accounts') {
+    return {
+      h1: 'P&L Account',
+      h2: 'Expenses',
+      h3: 'Cost of materials consumed',
+      h4: 'Purchases of raw materials',
+      h5: ''
+    };
+  }
+  
+  // PRIORITY 3: Default Mappings with Special Rules
   
   // RULE 1: Trade Receivables always go to "Unsecured Considered Good"
   if (['Sundry Debtors', 'Debtors', 'Trade Receivables'].includes(tallyGroup)) {
@@ -195,7 +230,28 @@ export function classifyLedgerWithPriority(
     };
   }
   
-  // RULE 2: Indirect Expenses - Special handling
+  // RULE 2: Stock-in-Hand mapping based on business type
+  if (tallyGroup === 'Stock-in-Hand') {
+    if (businessType === 'Trading') {
+      return {
+        h1: 'Balance Sheet',
+        h2: 'Assets',
+        h3: 'Inventories',
+        h4: 'Stock-in-Trade',
+        h5: ''
+      };
+    }
+    // For Manufacturing, default to general stock mapping
+    return {
+      h1: 'Balance Sheet',
+      h2: 'Assets',
+      h3: 'Inventories',
+      h4: '', // Will be classified based on stock items
+      h5: ''
+    };
+  }
+  
+  // RULE 3: Indirect Expenses - Special handling
   if (tallyGroup === 'Indirect Expenses') {
     if (ledgerName && ledgerName.toLowerCase().includes('depreciation')) {
       return {
@@ -218,7 +274,29 @@ export function classifyLedgerWithPriority(
     };
   }
   
-  // PRIORITY 3: Default Mappings from config
+  // RULE 4: Opening/Closing Stock - Changes in Inventories
+  const ledgerLower = ledgerName.toLowerCase();
+  if (ledgerLower.includes('opening stock') || ledgerLower.includes('opening balance stock')) {
+    return {
+      h1: 'P&L Account',
+      h2: 'Expenses',
+      h3: 'Changes in inventories of FG, WIP and stock-in-trade',
+      h4: 'Opening Stock',
+      h5: ''
+    };
+  }
+  
+  if (ledgerLower.includes('closing stock') || ledgerLower.includes('closing balance stock')) {
+    return {
+      h1: 'P&L Account',
+      h2: 'Expenses',
+      h3: 'Changes in inventories of FG, WIP and stock-in-trade',
+      h4: 'Less: Closing Stock',
+      h5: ''
+    };
+  }
+  
+  // PRIORITY 4: Default Mappings from config
   const defaultMapping = SCHEDULE_III_MAPPING[tallyGroup];
   if (defaultMapping) {
     let result: ClassificationResult = {
@@ -266,14 +344,16 @@ export function classifyLedgerWithPriority(
 
 export function classifyDataframeBatch(
   dataframe: LedgerRow[],
-  savedMappingsDict: Record<string, ClassificationResult> | null = null
+  savedMappingsDict: Record<string, ClassificationResult> | null = null,
+  businessType: string = ''
 ): LedgerRow[] {
   return dataframe.map(row => {
     const classification = classifyLedgerWithPriority(
       row['Ledger Name'] || '',
       row['Primary Group'] || '',
       row['Closing Balance'] || 0,
-      savedMappingsDict
+      savedMappingsDict,
+      businessType
     );
     
     // Determine status

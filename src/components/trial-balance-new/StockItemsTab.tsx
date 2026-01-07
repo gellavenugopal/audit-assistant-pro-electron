@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -22,8 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Package, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Package, Plus, Pencil, Trash2, Wand2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { classifyStockItem } from '@/utils/fuzzyMatch';
+import { useToast } from '@/hooks/use-toast';
 
 interface StockItem {
   'Item Name': string;
@@ -50,11 +52,43 @@ const STOCK_CATEGORIES = [
 interface StockItemsTabProps {
   stockData: StockItem[];
   onUpdateStockData: (data: StockItem[]) => void;
+  businessType?: string;
 }
 
-export function StockItemsTab({ stockData, onUpdateStockData }: StockItemsTabProps) {
+export function StockItemsTab({ stockData, onUpdateStockData, businessType = '' }: StockItemsTabProps) {
+  const { toast } = useToast();
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editCategory, setEditCategory] = useState<string>('');
+  
+  // Auto-classify stock items when businessType changes or new items are added
+  useEffect(() => {
+    if (!businessType || stockData.length === 0) return;
+    
+    let updated = false;
+    const newData = stockData.map(item => {
+      // Only auto-classify if not already classified
+      if (!item['Stock Category'] || item['Stock Category'] === 'Unclassified') {
+        const category = classifyStockItem(
+          item['Item Name'],
+          item['Stock Group'],
+          businessType
+        );
+        if (category && category !== 'Unclassified') {
+          updated = true;
+          return { ...item, 'Stock Category': category };
+        }
+      }
+      return item;
+    });
+    
+    if (updated) {
+      onUpdateStockData(newData);
+      toast({
+        title: 'Auto-Classification Complete',
+        description: `Stock items classified based on ${businessType} business rules`,
+      });
+    }
+  }, [businessType, stockData.length]);
 
   const formatNumber = (num: number): string => {
     return new Intl.NumberFormat('en-IN', {
@@ -86,15 +120,51 @@ export function StockItemsTab({ stockData, onUpdateStockData }: StockItemsTabPro
       onUpdateStockData(newData);
     }
   };
+  
+  const handleAutoClassifyAll = () => {
+    if (!businessType) {
+      toast({
+        title: 'Business Type Required',
+        description: 'Please select a business type first',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    const newData = stockData.map(item => ({
+      ...item,
+      'Stock Category': classifyStockItem(
+        item['Item Name'],
+        item['Stock Group'],
+        businessType
+      )
+    }));
+    
+    onUpdateStockData(newData);
+    
+    const classified = newData.filter(item => item['Stock Category'] !== 'Unclassified').length;
+    toast({
+      title: 'Auto-Classification Complete',
+      description: `${classified} of ${stockData.length} items classified`,
+    });
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold">Stock Items</h3>
-        <Button size="sm" variant="outline">
-          <Plus className="w-4 h-4 mr-2" />
-          Add Item
-        </Button>
+        <div className="flex gap-2">
+          {businessType && stockData.length > 0 && (
+            <Button size="sm" variant="outline" onClick={handleAutoClassifyAll}>
+              <Wand2 className="w-4 h-4 mr-2" />
+              Auto-Classify
+            </Button>
+          )}
+          <Button size="sm" variant="outline">
+            <Plus className="w-4 h-4 mr-2" />
+            Add Item
+          </Button>
+        </div>
       </div>
 
       {stockData.length === 0 ? (

@@ -275,12 +275,30 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Header Info Card */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <p className="text-xs text-muted-foreground uppercase">Company</p>
+            <p className="font-semibold text-gray-900">{companyName || 'Not Set'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase">Financial Year</p>
+            <p className="font-semibold text-gray-900">{financialYear || 'Not Set'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase">Entity Type</p>
+            <p className="font-semibold text-gray-900">{entityType || 'Not Set'}</p>
+          </div>
+        </div>
+      </div>
+      
       {/* Format Selector and Note Settings */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-4 bg-white p-4 rounded-lg border">
         <FormatSelector constitution={constitution} showDownload={true} />
         <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Scale:</span>
+          <span className="text-sm font-medium text-gray-700">Scale:</span>
           <Select value={reportingScale} onValueChange={setReportingScale}>
             <SelectTrigger className="w-[150px]">
               <SelectValue />
@@ -309,73 +327,87 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
       </div>
 
       {/* Report Sub-Tabs */}
-      <Tabs value={reportTab} onValueChange={setReportTab}>
-        <TabsList>
-          <TabsTrigger value="balance-sheet">
-            <BarChart3 className="w-4 h-4 mr-2" />
-            Balance Sheet
+      <Tabs value={reportTab} onValueChange={setReportTab} className="w-full">
+        <TabsList className="grid grid-cols-4 w-full max-w-3xl">
+          <TabsTrigger value="balance-sheet" className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" />
+            <span className="hidden sm:inline">Balance Sheet</span>
+            <span className="sm:hidden">BS</span>
           </TabsTrigger>
-          <TabsTrigger value="profit-loss">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Profit & Loss
+          <TabsTrigger value="profit-loss" className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" />
+            <span className="hidden sm:inline">Profit & Loss</span>
+            <span className="sm:hidden">P&L</span>
           </TabsTrigger>
-          <TabsTrigger value="cash-flow">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Cash Flow
+          <TabsTrigger value="cash-flow" className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" />
+            <span className="hidden sm:inline">Cash Flow</span>
+            <span className="sm:hidden">CF</span>
           </TabsTrigger>
-          <TabsTrigger value="capital-notes">
-            <Building2 className="w-4 h-4 mr-2" />
-            Capital Notes
+          <TabsTrigger value="capital-notes" className="flex items-center gap-2">
+            <Building2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Capital Notes</span>
+            <span className="sm:hidden">Notes</span>
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="balance-sheet" className="mt-4">
+        <TabsContent value="balance-sheet" className="mt-6">
           <div className="space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={handleDownloadBS} variant="outline" size="sm">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">Balance Sheet</h2>
+              <Button onClick={handleDownloadBS} variant="default" size="sm" className="shadow-sm">
                 <Download className="w-4 h-4 mr-2" />
-                Download Balance Sheet
+                Download BS with Notes
               </Button>
             </div>
-            <ScheduleIIIBalanceSheet 
-              currentLines={trialBalanceLines} 
-              previousLines={[]}
-              reportingScale={reportingScale}
-              constitution={constitution}
-              startingNoteNumber={bsStartingNote}
-            />
+            <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+              <ScheduleIIIBalanceSheet 
+                currentLines={trialBalanceLines} 
+                previousLines={[]}
+                reportingScale={reportingScale}
+                constitution={constitution}
+                startingNoteNumber={bsStartingNote}
+              />
+            </div>
           </div>
         </TabsContent>
 
-        <TabsContent value="profit-loss" className="mt-4">
+        <TabsContent value="profit-loss" className="mt-6">
           <div className="space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={handleDownloadPL} variant="outline" size="sm">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">Profit & Loss Account</h2>
+              <Button onClick={handleDownloadPL} variant="default" size="sm" className="shadow-sm">
                 <Download className="w-4 h-4 mr-2" />
-                Download Profit & Loss
+                Download P&L with Notes
               </Button>
             </div>
-            <ScheduleIIIProfitLoss 
-              currentLines={trialBalanceLines} 
-              previousLines={[]}
-              reportingScale={reportingScale}
-              constitution={constitution}
-              startingNoteNumber={plStartingNote}
-            />
+            <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+              <ScheduleIIIProfitLoss 
+                currentLines={trialBalanceLines} 
+                previousLines={[]}
+                reportingScale={reportingScale}
+                constitution={constitution}
+                startingNoteNumber={plStartingNote}
+              />
+            </div>
           </div>
         </TabsContent>
 
-        <TabsContent value="cash-flow" className="mt-4">
-          <CashFlowStatement lines={trialBalanceLines} reportingScale={reportingScale} />
+        <TabsContent value="cash-flow" className="mt-6">
+          <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+            <CashFlowStatement lines={trialBalanceLines} reportingScale={reportingScale} />
+          </div>
         </TabsContent>
 
-        <TabsContent value="capital-notes" className="mt-4">
-          <NotesManagementTab 
-            lines={trialBalanceLines}
-            constitution={constitution}
-            financialYear={financialYear}
-            clientName={companyName}
-          />
+        <TabsContent value="capital-notes" className="mt-6">
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <NotesManagementTab 
+              lines={trialBalanceLines}
+              constitution={constitution}
+              financialYear={financialYear}
+              clientName={companyName}
+            />
+          </div>
         </TabsContent>
       </Tabs>
     </div>
