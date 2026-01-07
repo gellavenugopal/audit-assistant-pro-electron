@@ -16,6 +16,7 @@ export type EmphasisOfMatterItem = {
   title: string;
   paragraph: string;
   note_ref?: string;
+  is_example?: boolean;
 };
 
 export type OtherMatterItem = {
@@ -38,6 +39,7 @@ export interface AuditReportMainContent {
   // Opinion / Basis
   opinion_type: OpinionType;
   basis_for_opinion: string | null;
+  basis_for_opinion_is_example?: boolean | null;
   qualification_details: string | null;
 
   // Optional paragraphs
@@ -58,6 +60,9 @@ export interface AuditReportMainContent {
   board_report_misstatement_details: string | null;
 
   // Section 143(3)
+  clause_143_3_a_information_status: StatusValue | null;
+  clause_143_3_a_information_details: string | null;
+
   clause_143_3_a_status: StatusValue | null;
   clause_143_3_a_details: string | null;
 
@@ -89,15 +94,13 @@ export interface AuditReportMainContent {
   rule_11_c_delay_amount: number | null;
   rule_11_c_delay_details: string | null;
 
-  rule_11_d_audit_procedures_status: StatusValue | null;
-  rule_11_d_receiving_fund_representations: boolean | null;
-  rule_11_d_loan_fund_representations: boolean | null;
-  rule_11_d_modification_details: string | null;
-
   rule_11_e_dividend_status: StatusValue | null;
-  rule_11_e_interim_dividend_amount: number | null;
-  rule_11_e_final_dividend_amount: number | null;
   rule_11_e_dividend_note_ref: string | null;
+  rule_11_e_dividend_details: string | null;
+  rule_11_e_interim_dividend_paid: boolean | null;
+  rule_11_e_interim_dividend_declared_not_paid: boolean | null;
+  rule_11_e_final_dividend_previous_year: boolean | null;
+  rule_11_e_final_dividend_proposed: boolean | null;
 
   rule_11_f_audit_trail_status: StatusValue | null;
   rule_11_f_audit_trail_details: string | null;
@@ -121,16 +124,17 @@ const DEFAULT_INSERT: Partial<AuditReportMainContent> = {
   other_matter_items: [],
   has_going_concern_uncertainty: false,
   board_report_status: 'received_no_misstatement',
+  basis_for_opinion_is_example: false,
 
+  clause_143_3_a_information_status: 'standard' as any,
   clause_143_3_a_status: 'yes',
   clause_143_3_b_audit_trail_status: 'yes',
   clause_143_3_h_remuneration_status: 'yes',
 
   rule_11_c_iepf_status: 'na',
-  rule_11_d_audit_procedures_status: 'yes',
   rule_11_e_dividend_status: 'na',
   rule_11_f_audit_trail_status: 'yes',
-  rule_11_g_funds_advanced_status: 'na',
+  rule_11_g_funds_advanced_status: 'yes',
 };
 
 const OPINION_TYPES: readonly OpinionType[] = ['unqualified', 'qualified', 'adverse', 'disclaimer'];
