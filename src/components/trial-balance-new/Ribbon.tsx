@@ -261,39 +261,10 @@ export function Ribbon({
               </div>
             </div>
 
-            {/* Reports Group */}
-            <div className="flex flex-col border-r pr-4">
-              <Label className="text-xs text-gray-500 mb-1 px-2">Reports</Label>
-              <div className="flex gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onFinancialStatements}
-                  disabled={!hasData}
-                  className="h-8 px-3"
-                  title="Financial Statements (Ctrl+F)"
-                >
-                  <BarChart3 className="w-4 h-4 mr-1" />
-                  Fin. Statements
-                </Button>
-              </div>
-            </div>
-
             {/* File Group */}
             <div className="flex flex-col">
               <Label className="text-xs text-gray-500 mb-1 px-2">File</Label>
               <div className="flex gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onSave}
-                  disabled={!hasData}
-                  className="h-8 px-3"
-                  title="Save (Ctrl+S)"
-                >
-                  <Save className="w-4 h-4 mr-1" />
-                  Save
-                </Button>
                 <Button
                   variant="ghost"
                   size="sm"

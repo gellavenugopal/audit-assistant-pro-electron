@@ -240,7 +240,7 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
                 <SelectTrigger>
                   <SelectValue placeholder="Select H1" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[9999]" sideOffset={4}>
                   {H1_OPTIONS.map(opt => (
                     <SelectItem key={opt} value={opt}>{opt}</SelectItem>
                   ))}
@@ -268,7 +268,7 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
                 <SelectTrigger>
                   <SelectValue placeholder={!h1 && updateH1 ? "Select H1 first" : "Select H2"} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[9999]" sideOffset={4}>
                   {availableH2Options.map(opt => (
                     <SelectItem key={opt} value={opt}>{opt}</SelectItem>
                   ))}
@@ -296,7 +296,7 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
                 <SelectTrigger>
                   <SelectValue placeholder={!h2 && updateH2 ? "Select H2 first" : "Select H3"} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[9999] max-h-[200px] overflow-y-auto" sideOffset={4}>
                   {availableH3Options.map(opt => (
                     <SelectItem key={opt} value={opt}>{opt}</SelectItem>
                   ))}
@@ -324,13 +324,13 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
                 <SelectTrigger>
                   <SelectValue placeholder={!h3 && updateH3 ? "Select H3 first" : availableH4Options.length > 0 ? "Select H4" : "No H4 options available"} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className="z-[9999] max-h-[200px] overflow-y-auto" sideOffset={4}>
                   {availableH4Options.length > 0 ? (
                     availableH4Options.map(opt => (
                       <SelectItem key={opt} value={opt}>{opt}</SelectItem>
                     ))
                   ) : (
-                    <SelectItem value="" disabled>No options available for selected H3</SelectItem>
+                    <SelectItem value="__none__" disabled>No options available for selected H3</SelectItem>
                   )}
                 </SelectContent>
               </Select>
