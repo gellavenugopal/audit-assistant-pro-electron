@@ -278,6 +278,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 reportingScale={reportingScale}
                 constitution={constitution}
                 startingNoteNumber={plStartingNote}
+                stockData={stockData}
               />
             </div>
 
