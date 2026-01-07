@@ -8,7 +8,7 @@ declare global {
     electronAPI: {
       odbcCheckConnection: () => Promise<{ success: boolean; isConnected?: boolean; error?: string }>;
       odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
-      odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[]; companyName?: string }>;
       odbcFetchMonthWise: (fyStartYear: number, targetMonth: string) => Promise<{ success: boolean; error?: string; data?: { plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[]; fyStartYear: number; targetMonth: string } }>;
       odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
       // Opening Balance Matching methods
@@ -34,6 +34,12 @@ declare global {
         success: boolean;
         error?: string;
         lines?: any[];
+      }>;
+      // Stock Items methods
+      odbcFetchStockItems: () => Promise<{
+        success: boolean;
+        error?: string;
+        items?: any[];
       }>;
     };
   }
@@ -168,12 +174,12 @@ export const useTallyODBC = () => {
     }
   }, [toast]);
 
-  const fetchTrialBalance = useCallback(async (fromDate: string, toDate: string): Promise<TallyTrialBalanceLine[]> => {
+  const fetchTrialBalance = useCallback(async (): Promise<{ data: any[]; companyName: string }> => {
     try {
       const result = await window.electronAPI.odbcFetchTrialBalance();
 
       if (result.success && result.data) {
-        return result.data;
+        return { data: result.data, companyName: result.companyName || '' };
       } else {
         throw new Error(result.error || "Failed to fetch trial balance");
       }
@@ -184,7 +190,7 @@ export const useTallyODBC = () => {
         description: errorMessage,
         variant: "destructive",
       });
-      return [];
+      return { data: [], companyName: '' };
     }
   }, [toast]);
 
@@ -205,6 +211,30 @@ export const useTallyODBC = () => {
         variant: "destructive",
       });
       return null;
+    }
+  }, [toast]);
+
+  const fetchStockItems = useCallback(async (): Promise<any[]> => {
+    try {
+      const result = await window.electronAPI.odbcFetchStockItems();
+
+      if (result.success && result.items) {
+        toast({
+          title: "Stock Items Fetched",
+          description: `Successfully fetched ${result.items.length} stock items from Tally`,
+        });
+        return result.items;
+      } else {
+        throw new Error(result.error || "Failed to fetch stock items");
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      toast({
+        title: "Failed to Fetch Stock Items",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      return [];
     }
   }, [toast]);
 
@@ -231,6 +261,7 @@ export const useTallyODBC = () => {
     testConnection,
     fetchTrialBalance,
     fetchMonthWise,
+    fetchStockItems,
     disconnect,
   };
 };
