@@ -35,6 +35,12 @@ declare global {
         error?: string;
         lines?: any[];
       }>;
+      // Stock Items methods
+      odbcFetchStockItems: () => Promise<{
+        success: boolean;
+        error?: string;
+        items?: any[];
+      }>;
     };
   }
 }
@@ -208,6 +214,30 @@ export const useTallyODBC = () => {
     }
   }, [toast]);
 
+  const fetchStockItems = useCallback(async (): Promise<any[]> => {
+    try {
+      const result = await window.electronAPI.odbcFetchStockItems();
+
+      if (result.success && result.items) {
+        toast({
+          title: "Stock Items Fetched",
+          description: `Successfully fetched ${result.items.length} stock items from Tally`,
+        });
+        return result.items;
+      } else {
+        throw new Error(result.error || "Failed to fetch stock items");
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      toast({
+        title: "Failed to Fetch Stock Items",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      return [];
+    }
+  }, [toast]);
+
   const disconnect = useCallback(async () => {
     try {
       await window.electronAPI.odbcDisconnect();
@@ -231,6 +261,7 @@ export const useTallyODBC = () => {
     testConnection,
     fetchTrialBalance,
     fetchMonthWise,
+    fetchStockItems,
     disconnect,
   };
 };

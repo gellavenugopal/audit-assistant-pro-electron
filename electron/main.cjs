@@ -702,6 +702,50 @@ ipcMain.handle('odbc-fetch-gst-not-feeded', async () => {
     return { success: false, error: error.message };
   }
 });
+
+ipcMain.handle('odbc-fetch-stock-items', async () => {
+  try {
+    if (!odbcConnection) {
+      return { success: false, error: 'Not connected to Tally ODBC' };
+    }
+    
+    // Query stock items from Tally
+    const query = `
+      SELECT 
+        $Name,
+        $_PrimaryGroup,
+        $_StockGroup,
+        $OpeningValue,
+        $ClosingValue
+      FROM StockItem
+      ORDER BY $Name
+    `;
+    
+    const result = await odbcConnection.query(query);
+    console.log(`Stock Items: Fetched ${result.length} stock items`);
+    
+    if (!result || result.length === 0) {
+      return { success: true, items: [] };
+    }
+    
+    // Process stock items
+    const items = result.map(row => ({
+      'Item Name': row['$Name'] || '',
+      'Stock Group': row['$_StockGroup'] || '',
+      'Primary Group': row['$_PrimaryGroup'] || '',
+      'Opening Value': parseFloat(row['$OpeningValue']) || 0,
+      'Closing Value': parseFloat(row['$ClosingValue']) || 0,
+      'Stock Category': '', // Will be classified by user
+      'Composite Key': `STOCK|${row['$Name'] || ''}`
+    }));
+    
+    console.log(`Stock Items: Processed ${items.length} items`);
+    return { success: true, items };
+  } catch (error) {
+    console.error('Error fetching stock items:', error);
+    return { success: false, error: error.message };
+  }
+});
 }
 
 function createWindow() {

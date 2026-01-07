@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
@@ -12,7 +12,9 @@ import { FormatSelector } from '@/components/trial-balance/FormatSelector';
 import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
-import { FileText, BarChart3, TrendingUp, Building2 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { FileText, BarChart3, TrendingUp, Building2, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import {
   Select,
   SelectContent,
@@ -32,6 +34,7 @@ interface ReportsTabProps {
 export function ReportsTab({ data, stockData, companyName, toDate, entityType }: ReportsTabProps) {
   const { user } = useAuth();
   const { currentEngagement } = useEngagement();
+  const { toast } = useToast();
   const [reportTab, setReportTab] = useState('balance-sheet');
   const [reportingScale, setReportingScale] = useState<string>('auto');
   const [bsStartingNote, setBsStartingNote] = useState<number>(3);
@@ -78,6 +81,92 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
     const prevYear = year - 1;
     return `${prevYear}-${year.toString().slice(-2)}`;
   }, [toDate]);
+
+  // Download Balance Sheet
+  const handleDownloadBS = useCallback(() => {
+    try {
+      // Group data by H2 (Balance Sheet sections)
+      const bsData = data.filter(row => row.H1 === 'Balance Sheet' || row.H1 === 'BS');
+      
+      const grouped = bsData.reduce((acc: any, row) => {
+        const section = row.H2 || 'Unmapped';
+        if (!acc[section]) acc[section] = [];
+        acc[section].push({
+          'Ledger Name': row['Ledger Name'] || '',
+          'H2': row.H2 || '',
+          'H3': row.H3 || '',
+          'H4': row.H4 || '',
+          'H5': row.H5 || '',
+          'Closing Balance': row['Closing Balance'] || 0
+        });
+        return acc;
+      }, {});
+      
+      const workbook = XLSX.utils.book_new();
+      
+      // Create separate sheets for each section
+      Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+      });
+      
+      XLSX.writeFile(workbook, `Balance_Sheet_${companyName}_${financialYear}.xlsx`);
+      
+      toast({
+        title: 'Downloaded',
+        description: 'Balance Sheet exported successfully'
+      });
+    } catch (error) {
+      toast({
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export Balance Sheet',
+        variant: 'destructive'
+      });
+    }
+  }, [data, companyName, financialYear, toast]);
+
+  // Download P&L
+  const handleDownloadPL = useCallback(() => {
+    try {
+      // Group data by H2 (P&L sections)
+      const plData = data.filter(row => row.H1 === 'Profit & Loss' || row.H1 === 'P&L' || row.H1 === 'PL');
+      
+      const grouped = plData.reduce((acc: any, row) => {
+        const section = row.H2 || 'Unmapped';
+        if (!acc[section]) acc[section] = [];
+        acc[section].push({
+          'Ledger Name': row['Ledger Name'] || '',
+          'H2': row.H2 || '',
+          'H3': row.H3 || '',
+          'H4': row.H4 || '',
+          'H5': row.H5 || '',
+          'Closing Balance': row['Closing Balance'] || 0
+        });
+        return acc;
+      }, {});
+      
+      const workbook = XLSX.utils.book_new();
+      
+      // Create separate sheets for each section
+      Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+      });
+      
+      XLSX.writeFile(workbook, `Profit_Loss_${companyName}_${financialYear}.xlsx`);
+      
+      toast({
+        title: 'Downloaded',
+        description: 'Profit & Loss exported successfully'
+      });
+    } catch (error) {
+      toast({
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export Profit & Loss',
+        variant: 'destructive'
+      });
+    }
+  }, [data, companyName, financialYear, toast]);
 
   if (data.length === 0) {
     return (
@@ -143,23 +232,39 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
         </TabsList>
 
         <TabsContent value="balance-sheet" className="mt-4">
-          <ScheduleIIIBalanceSheet 
-            currentLines={trialBalanceLines} 
-            previousLines={[]}
-            reportingScale={reportingScale}
-            constitution={constitution}
-            startingNoteNumber={bsStartingNote}
-          />
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <Button onClick={handleDownloadBS} variant="outline" size="sm">
+                <Download className="w-4 h-4 mr-2" />
+                Download Balance Sheet
+              </Button>
+            </div>
+            <ScheduleIIIBalanceSheet 
+              currentLines={trialBalanceLines} 
+              previousLines={[]}
+              reportingScale={reportingScale}
+              constitution={constitution}
+              startingNoteNumber={bsStartingNote}
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="profit-loss" className="mt-4">
-          <ScheduleIIIProfitLoss 
-            currentLines={trialBalanceLines} 
-            previousLines={[]}
-            reportingScale={reportingScale}
-            constitution={constitution}
-            startingNoteNumber={plStartingNote}
-          />
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <Button onClick={handleDownloadPL} variant="outline" size="sm">
+                <Download className="w-4 h-4 mr-2" />
+                Download Profit & Loss
+              </Button>
+            </div>
+            <ScheduleIIIProfitLoss 
+              currentLines={trialBalanceLines} 
+              previousLines={[]}
+              reportingScale={reportingScale}
+              constitution={constitution}
+              startingNoteNumber={plStartingNote}
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="cash-flow" className="mt-4">
