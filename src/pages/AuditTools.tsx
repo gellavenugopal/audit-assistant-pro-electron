@@ -143,7 +143,7 @@ const TallyTools = () => {
   
   // Negative Ledgers state
   const [showNegativeLedgersDialog, setShowNegativeLedgersDialog] = useState(false);
-  const [negativeLedgersTab, setNegativeLedgersTab] = useState("debtors");
+  const [negativeLedgersTab, setNegativeLedgersTab] = useState("assetsExpenses");
   
   // No Transactions state
   const [showNoTransactionsDialog, setShowNoTransactionsDialog] = useState(false);
@@ -504,32 +504,56 @@ const TallyTools = () => {
   };
 
   // Negative Ledgers - accounts with opposite balances
+  // Logic: Dr balance = negative, Cr balance = positive
+  // Assets & Expenses should have Dr balance (negative), so Cr balance (positive) is wrong
+  // Liabilities & Income should have Cr balance (positive), so Dr balance (negative) is wrong
   const getNegativeLedgers = () => {
-    if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [] };
+    if (!fetchedTBData) return { assetsAndExpenses: [], liabilitiesAndIncome: [] };
     
-    // Debtors should have Dr balance (positive), so Cr balance (negative/closingBalance < 0) is opposite
-    const debtors = fetchedTBData.filter(line => 
-      line.primaryGroup === "Sundry Debtors" && line.closingBalance < 0
+    // Helper function for flexible group matching (case-insensitive, partial match)
+    const matchesGroup = (primaryGroup: string, groupList: string[]): boolean => {
+      if (!primaryGroup) return false;
+      const pgLower = primaryGroup.toLowerCase();
+      return groupList.some(g => {
+        const gLower = g.toLowerCase();
+        return pgLower.includes(gLower) || gLower.includes(pgLower);
+      });
+    };
+    
+    // Assets & Expenses groups - should have Dr balance (negative), flag if Cr balance (positive)
+    const assetGroups = [
+      "Fixed Assets", "Current Assets", "Investments", "Bank Accounts", "Cash-in-Hand", "Cash in Hand",
+      "Deposits (Asset)", "Loans & Advances (Asset)", "Loans & Advances", "Stock-in-Hand", "Stock in Hand",
+      "Bank OD Accounts", "Sundry Debtors", "Miscellaneous Expenses (Asset)", "Advance Tax"
+    ];
+    const expenseGroups = [
+      "Direct Expenses", "Indirect Expenses", "Administrative Expenses", 
+      "Selling Expenses", "Miscellaneous Expenses", "Purchase Accounts"
+    ];
+    
+    // Liabilities & Income groups - should have Cr balance (positive), flag if Dr balance (negative)
+    const liabilityGroups = [
+      "Capital Account", "Reserves & Surplus", "Loans (Liability)", "Secured Loans", 
+      "Unsecured Loans", "Current Liabilities", "Provisions", "Duties & Taxes",
+      "Sundry Creditors", "Branch / Divisions"
+    ];
+    const incomeGroups = [
+      "Sales Accounts", "Direct Income", "Indirect Income", "Service Income"
+    ];
+    
+    // Assets & Expenses with Cr balance (positive) - wrong nature
+    const assetsAndExpenses = fetchedTBData.filter(line => 
+      (matchesGroup(line.primaryGroup, assetGroups) || matchesGroup(line.primaryGroup, expenseGroups)) && 
+      line.closingBalance > 0
     );
     
-    // Creditors should have Cr balance (negative), so Dr balance (positive/closingBalance > 0) is opposite
-    const creditors = fetchedTBData.filter(line => 
-      line.primaryGroup === "Sundry Creditors" && line.closingBalance > 0
+    // Liabilities & Income with Dr balance (negative) - wrong nature
+    const liabilitiesAndIncome = fetchedTBData.filter(line => 
+      (matchesGroup(line.primaryGroup, liabilityGroups) || matchesGroup(line.primaryGroup, incomeGroups)) && 
+      line.closingBalance < 0
     );
     
-    // Assets should have Dr balance (positive), so Cr balance (negative) is opposite
-    const assetGroups = ["Fixed Assets", "Current Assets", "Investments", "Bank Accounts", "Cash-in-Hand", "Deposits (Asset)", "Loans & Advances (Asset)", "Stock-in-Hand", "Bank OD Accounts"];
-    const assets = fetchedTBData.filter(line => 
-      assetGroups.includes(line.primaryGroup) && line.closingBalance < 0
-    );
-    
-    // Liabilities should have Cr balance (negative), so Dr balance (positive) is opposite
-    const liabilityGroups = ["Capital Account", "Reserves & Surplus", "Loans (Liability)", "Secured Loans", "Unsecured Loans", "Current Liabilities", "Provisions", "Duties & Taxes"];
-    const liabilities = fetchedTBData.filter(line => 
-      liabilityGroups.includes(line.primaryGroup) && line.closingBalance > 0
-    );
-    
-    return { debtors, creditors, assets, liabilities };
+    return { assetsAndExpenses, liabilitiesAndIncome };
   };
 
   // Ledgers with No Transactions - only opening balance, no transactions during the year
@@ -563,7 +587,7 @@ const TallyTools = () => {
   };
 
   const handleExportNegativeLedgersToExcel = () => {
-    const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
+    const { assetsAndExpenses, liabilitiesAndIncome } = getNegativeLedgers();
     
     const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => {
       const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
@@ -580,24 +604,14 @@ const TallyTools = () => {
     
     const wb = XLSX.utils.book_new();
     
-    if (debtors.length > 0) {
-      const ws = XLSX.utils.json_to_sheet(debtors.map(l => formatRow(l, "Dr")));
-      XLSX.utils.book_append_sheet(wb, ws, "Debtors_Cr_Bal");
+    if (assetsAndExpenses.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(assetsAndExpenses.map(l => formatRow(l, "Dr")));
+      XLSX.utils.book_append_sheet(wb, ws, "Assets_Expenses_Cr_Bal");
     }
     
-    if (creditors.length > 0) {
-      const ws = XLSX.utils.json_to_sheet(creditors.map(l => formatRow(l, "Cr")));
-      XLSX.utils.book_append_sheet(wb, ws, "Creditors_Dr_Bal");
-    }
-    
-    if (assets.length > 0) {
-      const ws = XLSX.utils.json_to_sheet(assets.map(l => formatRow(l, "Dr")));
-      XLSX.utils.book_append_sheet(wb, ws, "Assets_Cr_Bal");
-    }
-    
-    if (liabilities.length > 0) {
-      const ws = XLSX.utils.json_to_sheet(liabilities.map(l => formatRow(l, "Cr")));
-      XLSX.utils.book_append_sheet(wb, ws, "Liabilities_Dr_Bal");
+    if (liabilitiesAndIncome.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(liabilitiesAndIncome.map(l => formatRow(l, "Cr")));
+      XLSX.utils.book_append_sheet(wb, ws, "Liab_Income_Dr_Bal");
     }
     
     const fileName = `Negative_Ledgers_${new Date().toISOString().split('T')[0]}.xlsx`;
@@ -1275,8 +1289,8 @@ const TallyTools = () => {
 
           <div className="space-y-4">
             {(() => {
-              const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
-              const totalCount = debtors.length + creditors.length + assets.length + liabilities.length;
+              const { assetsAndExpenses, liabilitiesAndIncome } = getNegativeLedgers();
+              const totalCount = assetsAndExpenses.length + liabilitiesAndIncome.length;
               
               const renderTable = (data: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
                 <div className="border rounded-lg overflow-hidden">
@@ -1325,50 +1339,28 @@ const TallyTools = () => {
                   ) : (
                     <>
                       <Tabs value={negativeLedgersTab} onValueChange={setNegativeLedgersTab}>
-                        <TabsList className="grid w-full grid-cols-4">
-                          <TabsTrigger value="debtors" className="text-xs">
-                            Debtors (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">{debtors.length}</Badge>
+                        <TabsList className="grid w-full grid-cols-2">
+                          <TabsTrigger value="assetsExpenses" className="text-xs">
+                            Assets & Expenses (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">{assetsAndExpenses.length}</Badge>
                           </TabsTrigger>
-                          <TabsTrigger value="creditors" className="text-xs">
-                            Creditors (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">{creditors.length}</Badge>
-                          </TabsTrigger>
-                          <TabsTrigger value="assets" className="text-xs">
-                            Assets (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">{assets.length}</Badge>
-                          </TabsTrigger>
-                          <TabsTrigger value="liabilities" className="text-xs">
-                            Liabilities (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">{liabilities.length}</Badge>
+                          <TabsTrigger value="liabilitiesIncome" className="text-xs">
+                            Liabilities & Income (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">{liabilitiesAndIncome.length}</Badge>
                           </TabsTrigger>
                         </TabsList>
 
-                        <TabsContent value="debtors" className="mt-4">
-                          {debtors.length > 0 ? (
-                            renderTable(debtors, "Dr", "Cr")
+                        <TabsContent value="assetsExpenses" className="mt-4">
+                          {assetsAndExpenses.length > 0 ? (
+                            renderTable(assetsAndExpenses, "Dr", "Cr")
                           ) : (
-                            <Alert><AlertDescription>No Debtors with Credit balance found.</AlertDescription></Alert>
+                            <Alert><AlertDescription>No Assets or Expenses with Credit balance found.</AlertDescription></Alert>
                           )}
                         </TabsContent>
 
-                        <TabsContent value="creditors" className="mt-4">
-                          {creditors.length > 0 ? (
-                            renderTable(creditors, "Cr", "Dr")
+                        <TabsContent value="liabilitiesIncome" className="mt-4">
+                          {liabilitiesAndIncome.length > 0 ? (
+                            renderTable(liabilitiesAndIncome, "Cr", "Dr")
                           ) : (
-                            <Alert><AlertDescription>No Creditors with Debit balance found.</AlertDescription></Alert>
-                          )}
-                        </TabsContent>
-
-                        <TabsContent value="assets" className="mt-4">
-                          {assets.length > 0 ? (
-                            renderTable(assets, "Dr", "Cr")
-                          ) : (
-                            <Alert><AlertDescription>No Assets with Credit balance found.</AlertDescription></Alert>
-                          )}
-                        </TabsContent>
-
-                        <TabsContent value="liabilities" className="mt-4">
-                          {liabilities.length > 0 ? (
-                            renderTable(liabilities, "Cr", "Dr")
-                          ) : (
-                            <Alert><AlertDescription>No Liabilities with Debit balance found.</AlertDescription></Alert>
+                            <Alert><AlertDescription>No Liabilities or Income with Debit balance found.</AlertDescription></Alert>
                           )}
                         </TabsContent>
                       </Tabs>
@@ -1377,7 +1369,7 @@ const TallyTools = () => {
                       <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
                         <div className="text-sm text-muted-foreground">
                           Total: {totalCount} accounts with opposite balances
-                          (Debtors: {debtors.length}, Creditors: {creditors.length}, Assets: {assets.length}, Liabilities: {liabilities.length})
+                          (Assets & Expenses with Cr: {assetsAndExpenses.length}, Liabilities & Income with Dr: {liabilitiesAndIncome.length})
                         </div>
                         <Button variant="outline" onClick={handleExportNegativeLedgersToExcel}>
                           <FileSpreadsheet className="h-4 w-4 mr-2" />
@@ -1732,18 +1724,63 @@ const TallyTools = () => {
                 {/* Download XML Button */}
                 <div className="flex justify-end gap-2">
                   <Button
-                    onClick={openingBalanceMatching.downloadXML}
+                    onClick={() => {
+                      // Export to Excel instead of XML
+                      if (!openingBalanceMatching.comparisonResult) return;
+                      
+                      const wb = XLSX.utils.book_new();
+                      
+                      // Balance Mismatches Sheet
+                      if (openingBalanceMatching.comparisonResult.balanceMismatches.length > 0) {
+                        const balanceData = openingBalanceMatching.comparisonResult.balanceMismatches.map((row, idx) => ({
+                          'Sl No': idx + 1,
+                          '$Name': row.$Name,
+                          '$_PrimaryGroup': row.$_PrimaryGroup,
+                          '$Parent': row.$Parent,
+                          'New_Dr_Balance': row.New_Dr_Balance,
+                          'New_Cr_Balance': row.New_Cr_Balance,
+                          'Old_Dr_Balance': row.Old_Dr_Balance,
+                          'Old_Cr_Balance': row.Old_Cr_Balance,
+                          'Dr_Difference': row.Dr_Difference,
+                          'Cr_Difference': row.Cr_Difference,
+                        }));
+                        const wsBalance = XLSX.utils.json_to_sheet(balanceData);
+                        XLSX.utils.book_append_sheet(wb, wsBalance, "Balance Mismatches");
+                      }
+                      
+                      // Name Mismatches Sheet
+                      if (openingBalanceMatching.comparisonResult.nameMismatches.length > 0) {
+                        const nameData = openingBalanceMatching.comparisonResult.nameMismatches.map((row, idx) => ({
+                          'Sl No': idx + 1,
+                          'Name as per OLD Tally': row['Name as per OLD Tally'],
+                          'Name as per NEW Tally': row['Name as per NEW Tally'],
+                          'Balance as per OLD Tally': row['Balance as per OLD Tally'],
+                          'Balance as per NEW Tally': row['Balance as per NEW Tally'],
+                          'Remarks': row['Remarks'],
+                        }));
+                        const wsName = XLSX.utils.json_to_sheet(nameData);
+                        XLSX.utils.book_append_sheet(wb, wsName, "Ledger Name Mismatches");
+                      }
+                      
+                      const fileName = `Balance_Comparison_${new Date().toISOString().split('T')[0]}.xlsx`;
+                      XLSX.writeFile(wb, fileName);
+                      
+                      toast({
+                        title: "Excel Downloaded",
+                        description: `${fileName} has been downloaded`,
+                      });
+                    }}
                     className="gap-2"
                   >
-                    <FileDown className="h-4 w-4" />
-                    Download XML for Import
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Download Excel Report
                   </Button>
                 </div>
 
                 <Alert>
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription className="text-xs">
-                    To import the XML to Tally: Go to Gateway of Tally &gt; Import &gt; Masters &gt; Select the downloaded XML file &gt; Choose "Modify with new data" &gt; Press Enter. Backup your Tally data before importing!
+                    The comparison report shows balance mismatches (ledgers with different balances between old and new Tally) and name mismatches (ledgers present in only one instance).
                   </AlertDescription>
                 </Alert>
               </div>

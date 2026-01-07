@@ -295,7 +295,15 @@ console.log('Registering IPC handler: odbc-fetch-old-tally-ledgers');
 ipcMain.handle('odbc-fetch-old-tally-ledgers', async () => {
   try {
     if (!odbcConnection) {
-      return { success: false, error: 'Not connected to Tally ODBC' };
+      return { success: false, error: 'Not connected to Tally ODBC. Please test connection first.' };
+    }
+    
+    // Test if connection is still alive
+    try {
+      await odbcConnection.query('SELECT TOP 1 $Name FROM Ledger');
+    } catch (err) {
+      odbcConnection = null;
+      return { success: false, error: 'Connection lost. Please reconnect to Tally ODBC and ensure OLD Tally instance is loaded.' };
     }
     
     const query = `
@@ -311,16 +319,20 @@ ipcMain.handle('odbc-fetch-old-tally-ledgers', async () => {
     
     const result = await odbcConnection.query(query);
     
+    if (!result || result.length === 0) {
+      return { success: false, error: 'No data returned from Old Tally. Ensure OLD Tally instance is loaded in TallyPrime.' };
+    }
+    
     // Process and clean data
     const processedData = result.map(row => {
       const closingBalance = parseFloat(row['$_ClosingBalance'] || 0) || 0;
       const isRevenue = row['$IsRevenue'] === 1 || row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true;
       
       // Convert closing balance to Dr/Cr format
-      // Tally convention: Positive = Debit, Negative = Credit
-      // Reference: trial_balance.py line 37-59
-      const drBalance = closingBalance > 0 ? closingBalance : 0;
-      const crBalance = closingBalance < 0 ? Math.abs(closingBalance) : 0;
+      // Tally convention: NEGATIVE = Debit, POSITIVE = Credit
+      // Reference: trial_balance.py line 52-54 and run.py line 82-84
+      const drBalance = closingBalance < 0 ? Math.abs(closingBalance) : 0;
+      const crBalance = closingBalance > 0 ? closingBalance : 0;
       
       return {
         $Name: row['$Name'] || '',
@@ -333,12 +345,13 @@ ipcMain.handle('odbc-fetch-old-tally-ledgers', async () => {
         Cr_Balance: crBalance,
       };
     }).filter(row => 
-      row.$IsRevenue !== 'Yes' && row.$_ClosingBalance !== 0
+      row.$IsRevenue !== 'Yes' && (row.Dr_Balance !== 0 || row.Cr_Balance !== 0)
     );
     
     return { success: true, data: processedData };
   } catch (error) {
-    return { success: false, error: error.message };
+    console.error('Error fetching Old Tally ledgers:', error);
+    return { success: false, error: `SQL Error: ${error.message}. Ensure OLD Tally instance is loaded in TallyPrime with ODBC enabled.` };
   }
 });
 
@@ -347,7 +360,15 @@ console.log('Registering IPC handler: odbc-fetch-new-tally-ledgers');
 ipcMain.handle('odbc-fetch-new-tally-ledgers', async () => {
   try {
     if (!odbcConnection) {
-      return { success: false, error: 'Not connected to Tally ODBC' };
+      return { success: false, error: 'Not connected to Tally ODBC. Please test connection first.' };
+    }
+    
+    // Test if connection is still alive
+    try {
+      await odbcConnection.query('SELECT TOP 1 $Name FROM Ledger');
+    } catch (err) {
+      odbcConnection = null;
+      return { success: false, error: 'Connection lost. Please reconnect to Tally ODBC and ensure NEW Tally instance is loaded.' };
     }
     
     const query = `
@@ -362,16 +383,20 @@ ipcMain.handle('odbc-fetch-new-tally-ledgers', async () => {
     
     const result = await odbcConnection.query(query);
     
+    if (!result || result.length === 0) {
+      return { success: false, error: 'No data returned from New Tally. Ensure NEW Tally instance is loaded in TallyPrime.' };
+    }
+    
     // Process and clean data
     const processedData = result.map(row => {
       const openingBalance = parseFloat(row['$OpeningBalance'] || 0) || 0;
       const isRevenue = row['$IsRevenue'] === 1 || row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true;
       
       // Convert opening balance to Dr/Cr format
-      // Tally convention: Positive = Debit, Negative = Credit
-      // Reference: trial_balance.py line 37-59
-      const drBalance = openingBalance > 0 ? openingBalance : 0;
-      const crBalance = openingBalance < 0 ? Math.abs(openingBalance) : 0;
+      // Tally convention: NEGATIVE = Debit, POSITIVE = Credit
+      // Reference: trial_balance.py line 52-54 and run.py line 160-162
+      const drBalance = openingBalance < 0 ? Math.abs(openingBalance) : 0;
+      const crBalance = openingBalance > 0 ? openingBalance : 0;
       
       return {
         $Name: row['$Name'] || '',
@@ -383,12 +408,13 @@ ipcMain.handle('odbc-fetch-new-tally-ledgers', async () => {
         Cr_Balance: crBalance,
       };
     }).filter(row => 
-      row.$IsRevenue !== 'Yes' && row.$OpeningBalance !== 0
+      row.$IsRevenue !== 'Yes' && (row.Dr_Balance !== 0 || row.Cr_Balance !== 0)
     );
     
     return { success: true, data: processedData };
   } catch (error) {
-    return { success: false, error: error.message };
+    console.error('Error fetching New Tally ledgers:', error);
+    return { success: false, error: `SQL Error: ${error.message}. Ensure NEW Tally instance is loaded in TallyPrime with ODBC enabled.` };
   }
 });
 
@@ -424,20 +450,27 @@ ipcMain.handle('odbc-compare-opening-balances', async (event, { oldData, newData
       const oldLedger = oldMap.get(key);
       
       if (oldLedger && newLedger.$Name !== 'Profit & Loss A/c') {
-        const drDiff = Math.abs((newLedger.Dr_Balance || 0) - (oldLedger.Dr_Balance || 0));
-        const crDiff = Math.abs((newLedger.Cr_Balance || 0) - (oldLedger.Cr_Balance || 0));
+        const newDr = parseFloat(newLedger.Dr_Balance || 0);
+        const newCr = parseFloat(newLedger.Cr_Balance || 0);
+        const oldDr = parseFloat(oldLedger.Dr_Balance || 0);
+        const oldCr = parseFloat(oldLedger.Cr_Balance || 0);
         
-        if (drDiff > 0.01 || crDiff > 0.01) {
+        const drDiff = newDr - oldDr;
+        const crDiff = newCr - oldCr;
+        
+        // Check for ANY difference (reference: Merge.py line 58)
+        // Match exactly: if either Dr or Cr difference is non-zero
+        if (Math.abs(drDiff) > 0 || Math.abs(crDiff) > 0) {
           comparison.balanceMismatches.push({
             $Name: newLedger.$Name,
             $_PrimaryGroup: newLedger.$_PrimaryGroup,
             $Parent: newLedger.$Parent,
-            New_Dr_Balance: newLedger.Dr_Balance,
-            New_Cr_Balance: newLedger.Cr_Balance,
-            Old_Dr_Balance: oldLedger.Dr_Balance,
-            Old_Cr_Balance: oldLedger.Cr_Balance,
-            Dr_Difference: (newLedger.Dr_Balance || 0) - (oldLedger.Dr_Balance || 0),
-            Cr_Difference: (newLedger.Cr_Balance || 0) - (oldLedger.Cr_Balance || 0),
+            New_Dr_Balance: newDr,
+            New_Cr_Balance: newCr,
+            Old_Dr_Balance: oldDr,
+            Old_Cr_Balance: oldCr,
+            Dr_Difference: drDiff,
+            Cr_Difference: crDiff,
           });
         }
       }
@@ -500,11 +533,13 @@ ipcMain.handle('odbc-compare-opening-balances', async (event, { oldData, newData
       const oldDr = ledger.Old_Dr_Balance || 0;
       const oldCr = ledger.Old_Cr_Balance || 0;
       
+      // Tally XML format: NEGATIVE for Debit, POSITIVE for Credit
+      // Reference: Merge.py lines 215-234
       let openingBalance = 0;
       if (oldDr > 0) {
-        openingBalance = -oldDr; // Negative for debit
+        openingBalance = -oldDr; // Negative for debit in Tally XML
       } else if (oldCr > 0) {
-        openingBalance = oldCr; // Positive for credit
+        openingBalance = oldCr; // Positive for credit in Tally XML
       }
       
       if (openingBalance !== 0) {
