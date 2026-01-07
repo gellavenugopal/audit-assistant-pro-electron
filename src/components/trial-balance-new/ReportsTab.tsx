@@ -85,36 +85,85 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
   // Download Balance Sheet
   const handleDownloadBS = useCallback(() => {
     try {
-      // Group data by H2 (Balance Sheet sections)
+      // Group data by H2 and H3 for proper note structure
       const bsData = data.filter(row => row.H1 === 'Balance Sheet' || row.H1 === 'BS');
       
-      const grouped = bsData.reduce((acc: any, row) => {
-        const section = row.H2 || 'Unmapped';
-        if (!acc[section]) acc[section] = [];
-        acc[section].push({
-          'Ledger Name': row['Ledger Name'] || '',
-          'H2': row.H2 || '',
-          'H3': row.H3 || '',
-          'H4': row.H4 || '',
-          'H5': row.H5 || '',
-          'Closing Balance': row['Closing Balance'] || 0
-        });
+      // Create main Balance Sheet sheet with note references
+      const bsSummary: any[] = [];
+      const noteCounter: { [key: string]: number } = {};
+      let currentNote = bsStartingNote;
+      
+      // Group by H2 (main sections)
+      const h2Groups = bsData.reduce((acc: any, row) => {
+        const h2 = row.H2 || 'Unmapped';
+        if (!acc[h2]) acc[h2] = [];
+        acc[h2].push(row);
         return acc;
       }, {});
       
-      const workbook = XLSX.utils.book_new();
-      
-      // Create separate sheets for each section
-      Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
-        const worksheet = XLSX.utils.json_to_sheet(rows);
-        XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+      // Create summary with note references
+      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
+        const total = rows.reduce((sum: number, r: any) => sum + (r['Closing Balance'] || 0), 0);
+        
+        // Assign note number if has H3 (notes)
+        const hasNotes = rows.some((r: any) => r.H3 && r.H3.trim());
+        const noteNum = hasNotes ? currentNote++ : '';
+        if (hasNotes) noteCounter[h2] = noteNum;
+        
+        bsSummary.push({
+          'Particulars': h2,
+          'Note No.': noteNum ? `Note ${noteNum}` : '',
+          'Current Year (₹)': total,
+          'Previous Year (₹)': 0  // Add previous year column
+        });
       });
       
-      XLSX.writeFile(workbook, `Balance_Sheet_${companyName}_${financialYear}.xlsx`);
+      const workbook = XLSX.utils.book_new();
+      
+      // Main Balance Sheet sheet
+      const bsSheet = XLSX.utils.json_to_sheet(bsSummary);
+      bsSheet['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(workbook, bsSheet, 'Balance Sheet');
+      
+      // Create detailed notes sheets
+      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
+        const noteNum = noteCounter[h2];
+        if (!noteNum) return;  // Skip if no note number assigned
+        
+        // Group by H3 within this H2
+        const h3Groups = rows.reduce((acc: any, row: any) => {
+          const h3 = row.H3 || 'Others';
+          if (!acc[h3]) acc[h3] = [];
+          acc[h3].push(row);
+          return acc;
+        }, {});
+        
+        const noteData: any[] = [];
+        Object.entries(h3Groups).forEach(([h3, items]: [string, any]) => {
+          items.forEach((item: any) => {
+            noteData.push({
+              'Particulars': item['Ledger Name'] || '',
+              'H3': h3,
+              'H4': item.H4 || '',
+              'H5': item.H5 || '',
+              'Current Year (₹)': item['Closing Balance'] || 0,
+              'Previous Year (₹)': 0
+            });
+          });
+        });
+        
+        if (noteData.length > 0) {
+          const noteSheet = XLSX.utils.json_to_sheet(noteData);
+          noteSheet['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }];
+          XLSX.utils.book_append_sheet(workbook, noteSheet, `Note ${noteNum} - ${h2}`.substring(0, 31));
+        }
+      });
+      
+      XLSX.writeFile(workbook, `Balance_Sheet_with_Notes_${companyName}_${financialYear}.xlsx`);
       
       toast({
         title: 'Downloaded',
-        description: 'Balance Sheet exported successfully'
+        description: 'Balance Sheet with Notes exported successfully'
       });
     } catch (error) {
       toast({
@@ -123,41 +172,90 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
         variant: 'destructive'
       });
     }
-  }, [data, companyName, financialYear, toast]);
+  }, [data, companyName, financialYear, bsStartingNote, toast]);
 
   // Download P&L
   const handleDownloadPL = useCallback(() => {
     try {
-      // Group data by H2 (P&L sections)
+      // Group data by H2 and H3 for proper note structure
       const plData = data.filter(row => row.H1 === 'Profit & Loss' || row.H1 === 'P&L' || row.H1 === 'PL');
       
-      const grouped = plData.reduce((acc: any, row) => {
-        const section = row.H2 || 'Unmapped';
-        if (!acc[section]) acc[section] = [];
-        acc[section].push({
-          'Ledger Name': row['Ledger Name'] || '',
-          'H2': row.H2 || '',
-          'H3': row.H3 || '',
-          'H4': row.H4 || '',
-          'H5': row.H5 || '',
-          'Closing Balance': row['Closing Balance'] || 0
-        });
+      // Create main P&L sheet with note references
+      const plSummary: any[] = [];
+      const noteCounter: { [key: string]: number } = {};
+      let currentNote = plStartingNote;
+      
+      // Group by H2 (main sections like Revenue, Expenses)
+      const h2Groups = plData.reduce((acc: any, row) => {
+        const h2 = row.H2 || 'Unmapped';
+        if (!acc[h2]) acc[h2] = [];
+        acc[h2].push(row);
         return acc;
       }, {});
       
-      const workbook = XLSX.utils.book_new();
-      
-      // Create separate sheets for each section
-      Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
-        const worksheet = XLSX.utils.json_to_sheet(rows);
-        XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+      // Create summary with note references
+      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
+        const total = rows.reduce((sum: number, r: any) => sum + Math.abs(r['Closing Balance'] || 0), 0);
+        
+        // Assign note number if has H3 (notes)
+        const hasNotes = rows.some((r: any) => r.H3 && r.H3.trim());
+        const noteNum = hasNotes ? currentNote++ : '';
+        if (hasNotes) noteCounter[h2] = noteNum;
+        
+        plSummary.push({
+          'Particulars': h2,
+          'Note No.': noteNum ? `Note ${noteNum}` : '',
+          'Current Year (₹)': total,
+          'Previous Year (₹)': 0
+        });
       });
       
-      XLSX.writeFile(workbook, `Profit_Loss_${companyName}_${financialYear}.xlsx`);
+      const workbook = XLSX.utils.book_new();
+      
+      // Main P&L sheet
+      const plSheet = XLSX.utils.json_to_sheet(plSummary);
+      plSheet['!cols'] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(workbook, plSheet, 'Profit & Loss');
+      
+      // Create detailed notes sheets
+      Object.entries(h2Groups).forEach(([h2, rows]: [string, any]) => {
+        const noteNum = noteCounter[h2];
+        if (!noteNum) return;
+        
+        // Group by H3 within this H2
+        const h3Groups = rows.reduce((acc: any, row: any) => {
+          const h3 = row.H3 || 'Others';
+          if (!acc[h3]) acc[h3] = [];
+          acc[h3].push(row);
+          return acc;
+        }, {});
+        
+        const noteData: any[] = [];
+        Object.entries(h3Groups).forEach(([h3, items]: [string, any]) => {
+          items.forEach((item: any) => {
+            noteData.push({
+              'Particulars': item['Ledger Name'] || '',
+              'H3': h3,
+              'H4': item.H4 || '',
+              'H5': item.H5 || '',
+              'Current Year (₹)': Math.abs(item['Closing Balance'] || 0),
+              'Previous Year (₹)': 0
+            });
+          });
+        });
+        
+        if (noteData.length > 0) {
+          const noteSheet = XLSX.utils.json_to_sheet(noteData);
+          noteSheet['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }];
+          XLSX.utils.book_append_sheet(workbook, noteSheet, `Note ${noteNum} - ${h2}`.substring(0, 31));
+        }
+      });
+      
+      XLSX.writeFile(workbook, `Profit_Loss_with_Notes_${companyName}_${financialYear}.xlsx`);
       
       toast({
         title: 'Downloaded',
-        description: 'Profit & Loss exported successfully'
+        description: 'Profit & Loss with Notes exported successfully'
       });
     } catch (error) {
       toast({
@@ -166,7 +264,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
         variant: 'destructive'
       });
     }
-  }, [data, companyName, financialYear, toast]);
+  }, [data, companyName, financialYear, plStartingNote, toast]);
 
   if (data.length === 0) {
     return (
@@ -177,12 +275,30 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Header Info Card */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <p className="text-xs text-muted-foreground uppercase">Company</p>
+            <p className="font-semibold text-gray-900">{companyName || 'Not Set'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase">Financial Year</p>
+            <p className="font-semibold text-gray-900">{financialYear || 'Not Set'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground uppercase">Entity Type</p>
+            <p className="font-semibold text-gray-900">{entityType || 'Not Set'}</p>
+          </div>
+        </div>
+      </div>
+      
       {/* Format Selector and Note Settings */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-4 bg-white p-4 rounded-lg border">
         <FormatSelector constitution={constitution} showDownload={true} />
         <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Scale:</span>
+          <span className="text-sm font-medium text-gray-700">Scale:</span>
           <Select value={reportingScale} onValueChange={setReportingScale}>
             <SelectTrigger className="w-[150px]">
               <SelectValue />
@@ -211,73 +327,87 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType }:
       </div>
 
       {/* Report Sub-Tabs */}
-      <Tabs value={reportTab} onValueChange={setReportTab}>
-        <TabsList>
-          <TabsTrigger value="balance-sheet">
-            <BarChart3 className="w-4 h-4 mr-2" />
-            Balance Sheet
+      <Tabs value={reportTab} onValueChange={setReportTab} className="w-full">
+        <TabsList className="grid grid-cols-4 w-full max-w-3xl">
+          <TabsTrigger value="balance-sheet" className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" />
+            <span className="hidden sm:inline">Balance Sheet</span>
+            <span className="sm:hidden">BS</span>
           </TabsTrigger>
-          <TabsTrigger value="profit-loss">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Profit & Loss
+          <TabsTrigger value="profit-loss" className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" />
+            <span className="hidden sm:inline">Profit & Loss</span>
+            <span className="sm:hidden">P&L</span>
           </TabsTrigger>
-          <TabsTrigger value="cash-flow">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Cash Flow
+          <TabsTrigger value="cash-flow" className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" />
+            <span className="hidden sm:inline">Cash Flow</span>
+            <span className="sm:hidden">CF</span>
           </TabsTrigger>
-          <TabsTrigger value="capital-notes">
-            <Building2 className="w-4 h-4 mr-2" />
-            Capital Notes
+          <TabsTrigger value="capital-notes" className="flex items-center gap-2">
+            <Building2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Capital Notes</span>
+            <span className="sm:hidden">Notes</span>
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="balance-sheet" className="mt-4">
+        <TabsContent value="balance-sheet" className="mt-6">
           <div className="space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={handleDownloadBS} variant="outline" size="sm">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">Balance Sheet</h2>
+              <Button onClick={handleDownloadBS} variant="default" size="sm" className="shadow-sm">
                 <Download className="w-4 h-4 mr-2" />
-                Download Balance Sheet
+                Download BS with Notes
               </Button>
             </div>
-            <ScheduleIIIBalanceSheet 
-              currentLines={trialBalanceLines} 
-              previousLines={[]}
-              reportingScale={reportingScale}
-              constitution={constitution}
-              startingNoteNumber={bsStartingNote}
-            />
+            <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+              <ScheduleIIIBalanceSheet 
+                currentLines={trialBalanceLines} 
+                previousLines={[]}
+                reportingScale={reportingScale}
+                constitution={constitution}
+                startingNoteNumber={bsStartingNote}
+              />
+            </div>
           </div>
         </TabsContent>
 
-        <TabsContent value="profit-loss" className="mt-4">
+        <TabsContent value="profit-loss" className="mt-6">
           <div className="space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={handleDownloadPL} variant="outline" size="sm">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">Profit & Loss Account</h2>
+              <Button onClick={handleDownloadPL} variant="default" size="sm" className="shadow-sm">
                 <Download className="w-4 h-4 mr-2" />
-                Download Profit & Loss
+                Download P&L with Notes
               </Button>
             </div>
-            <ScheduleIIIProfitLoss 
-              currentLines={trialBalanceLines} 
-              previousLines={[]}
-              reportingScale={reportingScale}
-              constitution={constitution}
-              startingNoteNumber={plStartingNote}
-            />
+            <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+              <ScheduleIIIProfitLoss 
+                currentLines={trialBalanceLines} 
+                previousLines={[]}
+                reportingScale={reportingScale}
+                constitution={constitution}
+                startingNoteNumber={plStartingNote}
+              />
+            </div>
           </div>
         </TabsContent>
 
-        <TabsContent value="cash-flow" className="mt-4">
-          <CashFlowStatement lines={trialBalanceLines} reportingScale={reportingScale} />
+        <TabsContent value="cash-flow" className="mt-6">
+          <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+            <CashFlowStatement lines={trialBalanceLines} reportingScale={reportingScale} />
+          </div>
         </TabsContent>
 
-        <TabsContent value="capital-notes" className="mt-4">
-          <NotesManagementTab 
-            lines={trialBalanceLines}
-            constitution={constitution}
-            financialYear={financialYear}
-            clientName={companyName}
-          />
+        <TabsContent value="capital-notes" className="mt-6">
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <NotesManagementTab 
+              lines={trialBalanceLines}
+              constitution={constitution}
+              financialYear={financialYear}
+              clientName={companyName}
+            />
+          </div>
         </TabsContent>
       </Tabs>
     </div>

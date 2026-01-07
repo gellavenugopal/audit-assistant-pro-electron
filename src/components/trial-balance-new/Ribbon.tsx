@@ -31,6 +31,7 @@ interface RibbonProps {
   onToDateChange: (date: string) => void;
   onTallyImport: () => void;
   onExcelImport: () => void;
+  onExportTemplate: () => void;
   isConnecting: boolean;
   isConnected: boolean;
   
@@ -57,6 +58,7 @@ export function Ribbon({
   onToDateChange,
   onTallyImport,
   onExcelImport,
+  onExportTemplate,
   isConnecting,
   isConnected,
   onAutoClassify,
@@ -133,7 +135,7 @@ export function Ribbon({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [hasData, selectedCount, onExcelImport, onSave, onExcelExport, onAutoClassify, onBulkUpdate, onClassificationManager, onFinancialStatements]);
+  }, [hasData, selectedCount, onExcelImport, onExportTemplate, onSave, onExcelExport, onAutoClassify, onBulkUpdate, onClassificationManager, onFinancialStatements]);
 
   return (
     <div className="border-b bg-white shadow-sm">
@@ -191,6 +193,16 @@ export function Ribbon({
                 >
                   <Upload className="w-4 h-4 mr-1" />
                   Import
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onExportTemplate}
+                  className="h-8 px-3"
+                  title="Download Import Template"
+                >
+                  <Download className="w-4 h-4 mr-1" />
+                  Template
                 </Button>
                 <Button
                   variant="ghost"
@@ -379,6 +391,16 @@ export function Ribbon({
                 >
                   <Upload className="w-3 h-3 mr-1" />
                   Excel
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onExportTemplate}
+                  className="h-7 px-3"
+                  title="Download Import Template"
+                >
+                  <Download className="w-3 h-3 mr-1" />
+                  Template
                 </Button>
               </div>
             </div>
