@@ -75,6 +75,7 @@ import {
   Unplug,
   Scale,
   FileDown,
+  FileX,
 } from "lucide-react";
 
 interface ToolCardProps {
@@ -143,6 +144,9 @@ const TallyTools = () => {
   // Negative Ledgers state
   const [showNegativeLedgersDialog, setShowNegativeLedgersDialog] = useState(false);
   const [negativeLedgersTab, setNegativeLedgersTab] = useState("debtors");
+  
+  // No Transactions state
+  const [showNoTransactionsDialog, setShowNoTransactionsDialog] = useState(false);
   
   // ODBC Info Dialog state
   const [showODBCInfoDialog, setShowODBCInfoDialog] = useState(false);
@@ -451,11 +455,18 @@ const TallyTools = () => {
       const result = await window.electronAPI.odbcFetchGSTNotFeeded();
       
       if (result && result.success) {
-        setFetchedGSTNotFeedData(result.lines);
-        toast({
-          title: "GST Not Feeded Data Fetched",
-          description: `Found ${result.lines.length} ledgers with missing GSTIN`,
-        });
+        setFetchedGSTNotFeedData(result.lines || []);
+        if (result.lines && result.lines.length > 0) {
+          toast({
+            title: "GST Not Feeded Data Fetched",
+            description: `Found ${result.lines.length} ledgers with missing GSTIN`,
+          });
+        } else {
+          toast({
+            title: "GST Check Complete",
+            description: "All Regular GST ledgers have GSTIN entered. No issues found!",
+          });
+        }
       } else {
         throw new Error(result?.error || "Failed to fetch GST not feeded data");
       }
@@ -521,6 +532,36 @@ const TallyTools = () => {
     return { debtors, creditors, assets, liabilities };
   };
 
+  // Ledgers with No Transactions - only opening balance, no transactions during the year
+  const getNoTransactionLedgers = () => {
+    if (!fetchedTBData) return [];
+    
+    // A ledger has no transactions if:
+    // 1. Total Debit and Total Credit are zero (or very small, < 0.01 to account for rounding)
+    // 2. Opening Balance exists (non-zero, >= 0.01 to exclude negligible balances)
+    // 3. Closing Balance equals Opening Balance (no change during the year)
+    //    Formula: Closing Balance = Opening Balance + Total Debit - Total Credit
+    //    If Total Debit = 0 and Total Credit = 0, then Closing = Opening
+    const threshold = 0.01; // Small threshold for rounding differences
+    
+    return fetchedTBData.filter(line => {
+      // Check if there are no transactions (both debit and credit totals are effectively zero)
+      const hasNoTransactions = 
+        Math.abs(line.totalDebit) < threshold && 
+        Math.abs(line.totalCredit) < threshold;
+      
+      // Must have a meaningful opening balance (exclude zero-balance accounts)
+      const hasOpeningBalance = Math.abs(line.openingBalance) >= threshold;
+      
+      // Verify closing balance equals opening balance (safety check for data integrity)
+      // This ensures: Closing = Opening + Debit - Credit = Opening + 0 - 0 = Opening
+      const balanceUnchanged = Math.abs(line.closingBalance - line.openingBalance) < threshold;
+      
+      // All three conditions must be true
+      return hasNoTransactions && hasOpeningBalance && balanceUnchanged;
+    });
+  };
+
   const handleExportNegativeLedgersToExcel = () => {
     const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
     
@@ -565,6 +606,55 @@ const TallyTools = () => {
     toast({
       title: "Export Complete",
       description: `Saved negative ledgers to ${fileName}`,
+    });
+  };
+
+  const handleExportNoTransactionLedgersToExcel = () => {
+    const noTransactionLedgers = getNoTransactionLedgers();
+    
+    if (noTransactionLedgers.length === 0) {
+      toast({
+        title: "No Data",
+        description: "No ledgers with zero transactions found",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const data = noTransactionLedgers.map(line => {
+      const openingDr = line.openingBalance > 0 ? line.openingBalance : 0;
+      const openingCr = line.openingBalance < 0 ? Math.abs(line.openingBalance) : 0;
+      const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
+      const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
+      
+      return {
+        "Account Name": line.accountHead,
+        "Primary Group": line.primaryGroup,
+        "Parent": line.parent,
+        "Account Code": line.accountCode,
+        "Branch": line.branch,
+        "Opening Balance": formatCurrency(line.openingBalance),
+        "Opening Dr": formatCurrency(openingDr),
+        "Opening Cr": formatCurrency(openingCr),
+        "Total Debit": formatCurrency(line.totalDebit),
+        "Total Credit": formatCurrency(line.totalCredit),
+        "Closing Balance": formatCurrency(line.closingBalance),
+        "Closing Dr": formatCurrency(closingDr),
+        "Closing Cr": formatCurrency(closingCr),
+        "Type": line.isRevenue ? "P&L" : "BS",
+      };
+    });
+    
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, "No_Transactions");
+    
+    const fileName = `No_Transaction_Ledgers_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    
+    toast({
+      title: "Export Complete",
+      description: `Saved ${noTransactionLedgers.length} ledgers with no transactions to ${fileName}`,
     });
   };
 
@@ -761,6 +851,19 @@ const TallyTools = () => {
               toast({ title: "Not Connected", description: `Connect to Tally first using the ${modeName}` });
             } else {
               setShowOpeningBalanceDialog(true);
+            }
+          }}
+        />
+        <ToolCard
+          title="No Transactions Ledgers"
+          description="Identify ledgers with no transactions during the year - only opening balances exist. Useful for identifying dormant accounts."
+          icon={<FileX className="h-5 w-5 text-primary" />}
+          status={fetchedTBData ? "available" : "beta"}
+          onClick={() => {
+            if (!fetchedTBData) {
+              toast({ title: "Fetch Trial Balance First", description: "Use 'Get Trial Balance from Tally' to fetch data first" });
+            } else {
+              setShowNoTransactionsDialog(true);
             }
           }}
         />
@@ -997,13 +1100,33 @@ const TallyTools = () => {
                               {line.isRevenue ? "P&L" : "BS"}
                             </Badge>
                           </td>
-                          {fetchedMWData.months.map(month => (
-                            <td key={month} className="p-2 text-right font-mono text-xs">
-                              {line.monthlyBalances[month] !== 0 
-                                ? formatCurrency(line.monthlyBalances[month] || 0) 
-                                : '-'}
-                            </td>
-                          ))}
+                          {fetchedMWData.months.map((month, monthIdx) => {
+                            // For P&L items, show movement (current - previous)
+                            // For BS items, show absolute closing balance
+                            let displayValue = 0;
+                            if (line.isRevenue) {
+                              // P&L: Calculate movement
+                              if (monthIdx === 0) {
+                                // First month: closing - opening
+                                displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
+                              } else {
+                                // Subsequent months: current closing - previous closing
+                                const prevMonth = fetchedMWData.months[monthIdx - 1];
+                                displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
+                              }
+                            } else {
+                              // BS: Show absolute closing balance
+                              displayValue = line.monthlyBalances[month] || 0;
+                            }
+                            
+                            return (
+                              <td key={month} className="p-2 text-right font-mono text-xs">
+                                {displayValue !== 0 
+                                  ? formatCurrency(displayValue) 
+                                  : '-'}
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                     </tbody>
@@ -1263,6 +1386,119 @@ const TallyTools = () => {
                       </div>
                     </>
                   )}
+                </>
+              );
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* No Transactions Ledgers Dialog */}
+      <Dialog open={showNoTransactionsDialog} onOpenChange={setShowNoTransactionsDialog}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileX className="h-5 w-5" />
+              Ledgers with No Transactions
+            </DialogTitle>
+            <DialogDescription>
+              Ledgers that have opening balances but no transactions during the year. Closing balance equals opening balance.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {(() => {
+              const noTransactionLedgers = getNoTransactionLedgers();
+              
+              if (noTransactionLedgers.length === 0) {
+                return (
+                  <Alert>
+                    <CheckCircle2 className="h-4 w-4" />
+                    <AlertDescription>
+                      No ledgers found with zero transactions. All ledgers have activity during the year.
+                    </AlertDescription>
+                  </Alert>
+                );
+              }
+
+              return (
+                <>
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="max-h-[500px] overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted sticky top-0">
+                          <tr>
+                            <th className="text-left p-3 font-medium">#</th>
+                            <th className="text-left p-3 font-medium">Account Name</th>
+                            <th className="text-left p-3 font-medium">Primary Group</th>
+                            <th className="text-left p-3 font-medium">Parent</th>
+                            <th className="text-right p-3 font-medium">Opening Balance</th>
+                            <th className="text-right p-3 font-medium">Total Debit</th>
+                            <th className="text-right p-3 font-medium">Total Credit</th>
+                            <th className="text-right p-3 font-medium">Closing Balance</th>
+                            <th className="text-center p-3 font-medium">Type</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {noTransactionLedgers.map((line, idx) => {
+                            return (
+                              <tr key={idx} className="border-t hover:bg-muted/50">
+                                <td className="p-3 text-muted-foreground">{idx + 1}</td>
+                                <td className="p-3 font-medium">{line.accountHead}</td>
+                                <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                                <td className="p-3 text-muted-foreground text-xs">{line.parent || '-'}</td>
+                                <td className="p-3 text-right font-mono text-xs">
+                                  {line.openingBalance !== 0 ? (
+                                    <span className={line.openingBalance > 0 ? "text-blue-600" : "text-red-600"}>
+                                      {line.openingBalance > 0 ? "Dr " : "Cr "}
+                                      {formatCurrency(Math.abs(line.openingBalance))}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-right font-mono text-xs text-muted-foreground">
+                                  {formatCurrency(line.totalDebit)}
+                                </td>
+                                <td className="p-3 text-right font-mono text-xs text-muted-foreground">
+                                  {formatCurrency(line.totalCredit)}
+                                </td>
+                                <td className="p-3 text-right font-mono text-xs">
+                                  {line.closingBalance !== 0 ? (
+                                    <span className={line.closingBalance > 0 ? "text-blue-600" : "text-red-600"}>
+                                      {line.closingBalance > 0 ? "Dr " : "Cr "}
+                                      {formatCurrency(Math.abs(line.closingBalance))}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-center">
+                                  <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
+                                    {line.isRevenue ? "P&L" : "BS"}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Summary & Export */}
+                  <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
+                    <div className="text-sm text-muted-foreground">
+                      Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions during the year
+                      <span className="ml-2 text-xs">
+                        ({noTransactionLedgers.filter(l => l.isRevenue).length} P&L, {noTransactionLedgers.filter(l => !l.isRevenue).length} BS)
+                      </span>
+                    </div>
+                    <Button variant="outline" onClick={handleExportNoTransactionLedgersToExcel}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export to Excel
+                    </Button>
+                  </div>
                 </>
               );
             })()}

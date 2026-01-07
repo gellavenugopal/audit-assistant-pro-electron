@@ -70,11 +70,31 @@ ipcMain.handle('odbc-test-connection', async () => {
   }
 });
 
-ipcMain.handle('odbc-fetch-trial-balance', async () => {
+ipcMain.handle('odbc-fetch-trial-balance', async (event, fromDate, toDate) => {
   try {
     if (!odbcConnection) {
       return { success: false, error: 'Not connected to Tally ODBC' };
     }
+    
+    // Note: Tally ODBC doesn't directly support date filtering in SELECT queries
+    // The balances returned are as of the current Tally date setting
+    // To get period-specific balances, Tally's date should be set before querying
+    // For now, we fetch all ledgers - the balances reflect Tally's current date context
+    
+    // Convert dates to Tally format (DD-MMM-YYYY) for potential future use
+    const formatDateForTally = (dateStr) => {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = months[d.getMonth()];
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
+    
+    const toDateFormatted = formatDateForTally(toDate);
+    console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
+    console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
     
     const query = `
       SELECT $Name, $_PrimaryGroup, $Parent, $IsRevenue, 
@@ -87,19 +107,28 @@ ipcMain.handle('odbc-fetch-trial-balance', async () => {
     const result = await odbcConnection.query(query);
     
     // Process the data to match the Excel template format
+    // Parse numeric values properly - Tally may return strings
+    const parseNumeric = (val) => {
+      if (val === null || val === undefined || val === '') return 0;
+      const num = parseFloat(val);
+      return isNaN(num) ? 0 : num;
+    };
+    
     const processedData = result.map(row => ({
       accountHead: row['$Name'] || '',
-      openingBalance: row['$OpeningBalance'] || 0,
-      totalDebit: row['$DebitTotals'] || 0,
-      totalCredit: row['$CreditTotals'] || 0,
-      closingBalance: row['$ClosingBalance'] || 0,
+      openingBalance: parseNumeric(row['$OpeningBalance']),
+      totalDebit: parseNumeric(row['$DebitTotals']),
+      totalCredit: parseNumeric(row['$CreditTotals']),
+      closingBalance: parseNumeric(row['$ClosingBalance']),
       accountCode: row['$Code'] || '',
       branch: row['$Branch'] || 'HO',
       // Add hierarchy data
       primaryGroup: row['$_PrimaryGroup'] || '',
       parent: row['$Parent'] || '',
-      isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true,
+      isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
     }));
+    
+    console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
     
     return { success: true, data: processedData };
   } catch (error) {
@@ -125,6 +154,7 @@ ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) 
     const monthSqlParts = [];
 
     // Build SQL parts for each month
+    // Note: Tally ODBC may not support AS aliases, so we'll access by position
     for (const mName of selectedMonths) {
       const year = (mName === "Jan" || mName === "Feb" || mName === "Mar") ? fyStartYear + 1 : fyStartYear;
       
@@ -171,9 +201,50 @@ ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) 
       const isPL = isRevCheck || groupCheck;
 
       // Get monthly balances (closing balances)
+      // ODBC may return columns with different names - try multiple possibilities
       const monthlyBalances = {};
+      const rowKeys = Object.keys(row);
+      
+      // Log available keys for debugging (only for first row)
+      if (lines.length === 0 && rowKeys.length > 0) {
+        console.log('Available row keys:', rowKeys);
+        console.log('Month SQL parts:', monthSqlParts);
+      }
+      
       selectedMonths.forEach((month, i) => {
-        monthlyBalances[month] = parseFloat(row[monthSqlParts[i]]) || 0;
+        let balance = 0;
+        
+        // Strategy 1: Access by position (most reliable - ODBC returns columns in SELECT order)
+        // Columns: $Name (0), $_PrimaryGroup (1), $IsRevenue (2), $OpeningBalance (3), then month columns (4+)
+        const monthIndex = 4 + i;
+        if (monthIndex < rowKeys.length) {
+          const key = rowKeys[monthIndex];
+          balance = parseFloat(row[key]) || 0;
+        }
+        
+        // Strategy 2: Try exact SQL expression as key (fallback)
+        if (balance === 0) {
+          const sqlExpr = monthSqlParts[i];
+          if (row[sqlExpr] !== undefined && row[sqlExpr] !== null) {
+            balance = parseFloat(row[sqlExpr]) || 0;
+          }
+        }
+        
+        // Strategy 3: Try finding by month name in key (last resort)
+        if (balance === 0) {
+          const altKeys = rowKeys.filter(key => 
+            key.toLowerCase().includes(month.toLowerCase()) && 
+            !key.includes('Name') && 
+            !key.includes('Group') &&
+            !key.includes('Revenue') &&
+            !key.includes('Opening')
+          );
+          if (altKeys.length > 0) {
+            balance = parseFloat(row[altKeys[0]]) || 0;
+          }
+        }
+        
+        monthlyBalances[month] = balance;
       });
 
       // Check if has non-zero balances
@@ -199,7 +270,7 @@ ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) 
         lines.push({
           accountName: ledgerName,
           primaryGroup: primaryGroup,
-          isRevenue: isRevenue,
+          isRevenue: isPL, // Use isPL (includes group check) instead of just isRevenue flag
           openingBalance: openingBalance,
           monthlyBalances: monthlyBalances,
         });
@@ -207,7 +278,7 @@ ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) 
     }
 
     console.log('Processed lines count:', lines.length);
-    const plLines = lines.filter(line => line.isRevenue);
+    const plLines = lines.filter(line => line.isRevenue); // isRevenue now contains isPL classification
     const bsLines = lines.filter(line => !line.isRevenue);
     console.log('PL lines:', plLines.length, 'BS lines:', bsLines.length);
     
@@ -244,8 +315,10 @@ ipcMain.handle('odbc-fetch-old-tally-ledgers', async () => {
       const isRevenue = row['$IsRevenue'] === 1 || row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true;
       
       // Convert closing balance to Dr/Cr format
-      const drBalance = closingBalance < 0 ? Math.abs(closingBalance) : 0;
-      const crBalance = closingBalance > 0 ? closingBalance : 0;
+      // Tally convention: Positive = Debit, Negative = Credit
+      // Reference: trial_balance.py line 37-59
+      const drBalance = closingBalance > 0 ? closingBalance : 0;
+      const crBalance = closingBalance < 0 ? Math.abs(closingBalance) : 0;
       
       return {
         $Name: row['$Name'] || '',
@@ -293,8 +366,10 @@ ipcMain.handle('odbc-fetch-new-tally-ledgers', async () => {
       const isRevenue = row['$IsRevenue'] === 1 || row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true;
       
       // Convert opening balance to Dr/Cr format
-      const drBalance = openingBalance < 0 ? Math.abs(openingBalance) : 0;
-      const crBalance = openingBalance > 0 ? openingBalance : 0;
+      // Tally convention: Positive = Debit, Negative = Credit
+      // Reference: trial_balance.py line 37-59
+      const drBalance = openingBalance > 0 ? openingBalance : 0;
+      const crBalance = openingBalance < 0 ? Math.abs(openingBalance) : 0;
       
       return {
         $Name: row['$Name'] || '',
@@ -532,23 +607,23 @@ ipcMain.handle('odbc-fetch-gst-not-feeded', async () => {
       return { success: false, error: 'Not connected to Tally ODBC' };
     }
     
-    // Query ledgers - fetch all Sundry Debtors/Creditors first, then filter in JavaScript
-    // This approach is more reliable as Tally ODBC field names/values may vary
+    // Query all ledgers - GST registration can be on any ledger, not just Sundry Debtors/Creditors
+    // This matches the XML/Tally Bridge approach which queries all ledgers
     let query = `
       SELECT 
         $Name, 
         $_PrimaryGroup,
         $GSTRegistrationType,
-        $GSTIN
+        $GSTIN,
+        $PartyGSTIN
       FROM Ledger
-      WHERE $_PrimaryGroup = 'Sundry Debtors' OR $_PrimaryGroup = 'Sundry Creditors'
       ORDER BY $Name
     `;
     
     let result;
     try {
       result = await odbcConnection.query(query);
-      console.log(`GST Not Feeded: Queried ${result.length} Sundry Debtors/Creditors ledgers`);
+      console.log(`GST Not Feeded: Queried ${result.length} total ledgers`);
     } catch (err) {
       console.error('Error querying GST data:', err.message);
       // Try without WHERE clause to see what fields are available
@@ -563,16 +638,19 @@ ipcMain.handle('odbc-fetch-gst-not-feeded', async () => {
     }
     
     // Filter in JavaScript to handle different GSTIN formats and registration types
+    // Tally ODBC may use $GSTIN or $PartyGSTIN - try both
     const lines = result
       .map(row => {
         const gstRegType = row['$GSTRegistrationType'] || row['GSTRegistrationType'] || '';
-        const gstin = row['$GSTIN'] || row['GSTIN'] || null;
+        // Try both $GSTIN and $PartyGSTIN as Tally ODBC field names may vary
+        const gstin = row['$PartyGSTIN'] || row['$GSTIN'] || row['PartyGSTIN'] || row['GSTIN'] || null;
         
         return {
           ledgerName: row['$Name'] || '',
           primaryGroup: row['$_PrimaryGroup'] || row['PrimaryGroup'] || '',
           partyGSTIN: gstin,
           registrationType: gstRegType,
+          gstRegistrationType: gstRegType, // Alias for compatibility
         };
       })
       .filter(line => {
@@ -580,13 +658,20 @@ ipcMain.handle('odbc-fetch-gst-not-feeded', async () => {
         const regType = (line.registrationType || '').toString().trim().toLowerCase();
         const isRegular = regType === 'regular';
         
+        // Skip if not Regular GST type
+        if (!isRegular) {
+          return false;
+        }
+        
         const gstinValue = line.partyGSTIN;
         const gstinBlank = !gstinValue || 
                           gstinValue.toString().trim() === '' || 
                           gstinValue.toString().trim().toLowerCase() === 'null' ||
-                          gstinValue.toString().trim() === '0';
+                          gstinValue.toString().trim() === '0' ||
+                          gstinValue.toString().trim().toLowerCase() === 'na' ||
+                          gstinValue.toString().trim().toLowerCase() === 'n/a';
         
-        return isRegular && gstinBlank;
+        return gstinBlank;
       });
     
     console.log(`GST Not Feeded: Found ${lines.length} ledgers with Regular GST but no GSTIN out of ${result.length} total ledgers checked`);
@@ -597,13 +682,14 @@ ipcMain.handle('odbc-fetch-gst-not-feeded', async () => {
         const regType = (r['$GSTRegistrationType'] || '').toString().trim().toLowerCase();
         return regType === 'regular';
       });
-      console.log(`Found ${regularLedgers.length} Regular GST ledgers, all have GSTIN entered`);
+      console.log(`Found ${regularLedgers.length} Regular GST ledgers out of ${result.length} total, all have GSTIN entered`);
       if (regularLedgers.length > 0) {
         const sample = regularLedgers[0];
         console.log('Sample Regular GST ledger:', {
           name: sample['$Name'],
+          primaryGroup: sample['$_PrimaryGroup'],
           gstRegType: sample['$GSTRegistrationType'],
-          gstin: sample['$GSTIN'] || '(empty)',
+          gstin: sample['$PartyGSTIN'] || sample['$GSTIN'] || '(empty)',
         });
       }
     }
