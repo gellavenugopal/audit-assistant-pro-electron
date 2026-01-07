@@ -101,6 +101,14 @@ const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
 // Helper function to automatically classify H1 and H2 based on Is Revenue and Closing Balance
 function applyAutoH1H2Classification(rows: LedgerRow[]): LedgerRow[] {
   return rows.map(row => {
+    // Skip classification for "Profit & Loss A/c" ledger when parent group contains "Primary"
+    const ledgerName = (row['Ledger Name'] || '').toLowerCase();
+    const parentGroup = (row['Parent Group'] || '').toLowerCase();
+    
+    if (ledgerName.includes('profit') && ledgerName.includes('loss') && ledgerName.includes('a/c') && parentGroup.includes('primary')) {
+      return row; // Return unchanged
+    }
+    
     const isRevenue = row['Is Revenue'] === 'Yes';
     const closingBalance = row['Closing Balance'] || 0;
     const isNegative = closingBalance < 0;
@@ -194,6 +202,9 @@ export default function TrialBalanceNew() {
   const [isEntityDialogOpen, setIsEntityDialogOpen] = useState(false);
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
+  const [isSingleEditDialogOpen, setIsSingleEditDialogOpen] = useState(false);
+  const [editingLedger, setEditingLedger] = useState<LedgerRow | null>(null);
+  const [editingLedgerIndex, setEditingLedgerIndex] = useState<number>(-1);
   const [isClassificationManagerOpen, setIsClassificationManagerOpen] = useState(false);
   const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
   const [editingRuleKey, setEditingRuleKey] = useState<string | null>(null);
@@ -405,10 +416,11 @@ export default function TrialBalanceNew() {
           const transformedStockItems = stockItems.map((item: any) => ({
             'Item Name': item['Item Name'] || '',
             'Stock Group': item['Stock Group'] || '',
+            'Primary Group': item['Primary Group'] || '',
             'Opening Value': parseFloat(item['Opening Value'] || 0),
             'Closing Value': parseFloat(item['Closing Value'] || 0),
             'Stock Category': item['Stock Category'] || '',
-            'Key': item['Key'] || ''
+            'Composite Key': item['Composite Key'] || `STOCK|${item['Item Name']}`
           }));
           setCurrentStockData(transformedStockItems);
         } catch (error) {
@@ -503,10 +515,11 @@ export default function TrialBalanceNew() {
         const transformedStockItems = stockItems.map((item: any) => ({
           'Item Name': item['Item Name'] || '',
           'Stock Group': item['Stock Group'] || '',
+          'Primary Group': item['Primary Group'] || '',
           'Opening Value': parseFloat(item['Opening Value'] || 0),
           'Closing Value': parseFloat(item['Closing Value'] || 0),
           'Stock Category': item['Stock Category'] || '',
-          'Key': item['Key'] || ''
+          'Composite Key': item['Composite Key'] || `STOCK|${item['Item Name']}`
         }));
         setCurrentStockData(transformedStockItems);
       } catch (error) {
@@ -699,6 +712,7 @@ export default function TrialBalanceNew() {
 
   // Excel-like keyboard navigation
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
+  const [focusedClassifiedRowIndex, setFocusedClassifiedRowIndex] = useState<number | null>(null);
   
   // Load default rules and engagement-specific rules on mount
   useEffect(() => {
@@ -747,72 +761,130 @@ export default function TrialBalanceNew() {
         return;
       }
 
-      if (filteredData.length === 0) return;
-
-      // Arrow keys for navigation
-      if (e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        setFocusedRowIndex(prev => {
-          const current = prev !== null ? prev : -1;
-          const next = Math.min(current + 1, filteredData.length - 1);
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[next]?.['Composite Key']
-          );
-          if (originalIndex !== -1 && !e.shiftKey) {
-            setSelectedRowIndices(new Set([originalIndex]));
+      // Handle keyboard navigation based on active tab
+      if (activeTab === 'actual-tb' && filteredData.length > 0) {
+        // ACTUAL TB Navigation
+        if (e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setFocusedRowIndex(prev => {
+            const current = prev !== null ? prev : -1;
+            const next = Math.min(current + 1, filteredData.length - 1);
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[next]?.['Composite Key']
+            );
+            if (originalIndex !== -1 && !e.shiftKey) {
+              setSelectedRowIndices(new Set([originalIndex]));
+            }
+            return next;
+          });
+        } else if (e.key === 'ArrowUp' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setFocusedRowIndex(prev => {
+            const current = prev !== null ? prev : filteredData.length;
+            const next = Math.max(current - 1, 0);
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[next]?.['Composite Key']
+            );
+            if (originalIndex !== -1 && !e.shiftKey) {
+              setSelectedRowIndices(new Set([originalIndex]));
+            }
+            return next;
+          });
+        } else if (e.key === 'Home' && e.ctrlKey) {
+          e.preventDefault();
+          if (filteredData.length > 0) {
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[0]?.['Composite Key']
+            );
+            if (originalIndex !== -1) {
+              setFocusedRowIndex(0);
+              setSelectedRowIndices(new Set([originalIndex]));
+            }
           }
-          return next;
-        });
-      } else if (e.key === 'ArrowUp' && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        setFocusedRowIndex(prev => {
-          const current = prev !== null ? prev : filteredData.length;
-          const next = Math.max(current - 1, 0);
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[next]?.['Composite Key']
-          );
-          if (originalIndex !== -1 && !e.shiftKey) {
-            setSelectedRowIndices(new Set([originalIndex]));
+        } else if (e.key === 'End' && e.ctrlKey) {
+          e.preventDefault();
+          if (filteredData.length > 0) {
+            const lastIndex = filteredData.length - 1;
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[lastIndex]?.['Composite Key']
+            );
+            if (originalIndex !== -1) {
+              setFocusedRowIndex(lastIndex);
+              setSelectedRowIndices(new Set([originalIndex]));
+            }
           }
-          return next;
-        });
-      } else if (e.key === 'Home' && e.ctrlKey) {
-        e.preventDefault();
-        if (filteredData.length > 0) {
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[0]?.['Composite Key']
-          );
-          if (originalIndex !== -1) {
-            setFocusedRowIndex(0);
-            setSelectedRowIndices(new Set([originalIndex]));
+        } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          setSelectedRowIndices(new Set(filteredData.map((_, i) => {
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[i]?.['Composite Key']
+            );
+            return originalIndex;
+          }).filter(i => i !== -1)));
+        }
+      } else if (activeTab === 'classified-tb' && currentData.length > 0) {
+        // CLASSIFIED TB Navigation with Spacebar support
+        if (e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setFocusedClassifiedRowIndex(prev => {
+            const current = prev !== null ? prev : -1;
+            const next = Math.min(current + 1, currentData.length - 1);
+            if (!e.shiftKey) {
+              setSelectedRowIndices(new Set([next]));
+            }
+            return next;
+          });
+        } else if (e.key === 'ArrowUp' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setFocusedClassifiedRowIndex(prev => {
+            const current = prev !== null ? prev : currentData.length;
+            const next = Math.max(current - 1, 0);
+            if (!e.shiftKey) {
+              setSelectedRowIndices(new Set([next]));
+            }
+            return next;
+          });
+        } else if (e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          if (focusedClassifiedRowIndex !== null && focusedClassifiedRowIndex >= 0) {
+            setSelectedRowIndices(prev => {
+              const newSet = new Set(prev);
+              if (newSet.has(focusedClassifiedRowIndex)) {
+                newSet.delete(focusedClassifiedRowIndex);
+              } else {
+                newSet.add(focusedClassifiedRowIndex);
+              }
+              return newSet;
+            });
+          }
+        } else if (e.key === 'Home' && e.ctrlKey) {
+          e.preventDefault();
+          setFocusedClassifiedRowIndex(0);
+          setSelectedRowIndices(new Set([0]));
+        } else if (e.key === 'End' && e.ctrlKey) {
+          e.preventDefault();
+          const lastIndex = currentData.length - 1;
+          setFocusedClassifiedRowIndex(lastIndex);
+          setSelectedRowIndices(new Set([lastIndex]));
+        } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          setSelectedRowIndices(new Set(currentData.map((_, i) => i)));
+        } else if (e.key === 'Enter' && focusedClassifiedRowIndex !== null) {
+          e.preventDefault();
+          // Open single edit dialog for focused row
+          const ledger = currentData[focusedClassifiedRowIndex];
+          if (ledger) {
+            setEditingLedger(ledger);
+            setEditingLedgerIndex(focusedClassifiedRowIndex);
+            setIsSingleEditDialogOpen(true);
           }
         }
-      } else if (e.key === 'End' && e.ctrlKey) {
-        e.preventDefault();
-        if (filteredData.length > 0) {
-          const lastIndex = filteredData.length - 1;
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[lastIndex]?.['Composite Key']
-          );
-          if (originalIndex !== -1) {
-            setFocusedRowIndex(lastIndex);
-            setSelectedRowIndices(new Set([originalIndex]));
-          }
-        }
-      } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        setSelectedRowIndices(new Set(filteredData.map((_, i) => {
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[i]?.['Composite Key']
-          );
-          return originalIndex;
-        }).filter(i => i !== -1)));
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [filteredData, currentData]);
+  }, [filteredData, currentData, activeTab, focusedClassifiedRowIndex]);
   
   // Format number for display
   const formatNumber = (num: number): string => {
@@ -1880,64 +1952,60 @@ export default function TrialBalanceNew() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredData.length === 0 ? (
+                {currentData.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={14} className="text-center text-muted-foreground py-8">
-                      No data loaded. Import from Tally or Excel to get started.
+                      No classified data. Import from Tally to get started.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredData.map((row, index) => {
-                    // Find the original index in currentData
-                    const originalIndex = currentData.findIndex(r => 
-                      r['Composite Key'] === row['Composite Key']
-                    );
-                    const isSelected = originalIndex !== -1 && selectedRowIndices.has(originalIndex);
+                  currentData.map((row, index) => {
+                    const isSelected = selectedRowIndices.has(index);
+                    const isFocused = focusedClassifiedRowIndex === index;
                     
                     return (
                       <TableRow 
                         key={row['Composite Key'] || index}
                         className={cn(
-                          isSelected && "bg-blue-100/50",
-                          focusedRowIndex === index && "ring-2 ring-blue-500 ring-inset",
-                          "cursor-pointer hover:bg-muted/30"
+                          isSelected && "bg-blue-50",
+                          isFocused && "ring-2 ring-blue-400 ring-inset",
+                          "cursor-pointer hover:bg-gray-50 transition-colors"
                         )}
                         onClick={(e) => {
-                          if (originalIndex !== -1) {
-                            setFocusedRowIndex(index);
-                            toggleRowSelection(originalIndex, e);
-                          }
+                          setFocusedClassifiedRowIndex(index);
+                          toggleRowSelection(index, e);
+                        }}
+                        onDoubleClick={() => {
+                          setEditingLedger(row);
+                          setEditingLedgerIndex(index);
+                          setIsSingleEditDialogOpen(true);
                         }}
                         tabIndex={0}
-                        onFocus={() => setFocusedRowIndex(index)}
+                        onFocus={() => setFocusedClassifiedRowIndex(index)}
                       >
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => {
-                              if (originalIndex !== -1) {
-                                toggleRowSelection(originalIndex);
-                              }
-                            }}
+                            onChange={() => toggleRowSelection(index)}
                             onClick={(e) => e.stopPropagation()}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{row['Ledger Name']}</TableCell>
-                        <TableCell>{row['Parent Group'] || row['Primary Group'] || '-'}</TableCell>
-                        <TableCell>{row['Primary Group']}</TableCell>
-                        <TableCell className="text-right">{formatNumber(row['Opening Balance'])}</TableCell>
-                        <TableCell className="text-right">{formatNumber(row['Debit'])}</TableCell>
-                        <TableCell className="text-right">{formatNumber(row['Credit'])}</TableCell>
-                        <TableCell className="text-right">{formatNumber(row['Closing Balance'])}</TableCell>
-                        <TableCell>{row['H1'] || '-'}</TableCell>
-                        <TableCell>{row['H2'] || '-'}</TableCell>
-                        <TableCell>{row['H3'] || '-'}</TableCell>
-                        <TableCell>{row['H4'] || '-'}</TableCell>
-                        <TableCell>{row['H5'] || '-'}</TableCell>
+                        <TableCell className="font-medium text-sm">{row['Ledger Name']}</TableCell>
+                        <TableCell className="text-xs text-gray-600">{row['Parent Group'] || row['Primary Group'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['Primary Group']}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Opening Balance'])}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Debit'])}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Credit'])}</TableCell>
+                        <TableCell className="text-right text-sm font-medium">{formatNumber(row['Closing Balance'])}</TableCell>
+                        <TableCell className="text-xs">{row['H1'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['H2'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['H3'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['H4'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['H5'] || '-'}</TableCell>
                         <TableCell>
                           <span className={cn(
-                            "px-2 py-1 rounded text-xs",
+                            "px-2 py-1 rounded text-xs font-medium",
                             row['Status'] === 'Mapped' ? "bg-green-100 text-green-800" :
                             row['Status'] === 'Unmapped' ? "bg-yellow-100 text-yellow-800" :
                             "bg-red-100 text-red-800"
@@ -2456,6 +2524,104 @@ export default function TrialBalanceNew() {
           .filter((row): row is LedgerRow => row !== undefined)}
         onUpdate={handleBulkUpdate}
       />
+
+      {/* Single Ledger Edit Dialog */}
+      <Dialog open={isSingleEditDialogOpen} onOpenChange={setIsSingleEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Classification</DialogTitle>
+            <DialogDescription>
+              Update classification for: <strong>{editingLedger?.['Ledger Name']}</strong>
+            </DialogDescription>
+          </DialogHeader>
+          {editingLedger && (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs text-gray-500">Primary Group</Label>
+                  <div className="text-sm font-medium">{editingLedger['Primary Group']}</div>
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">Closing Balance</Label>
+                  <div className="text-sm font-medium">{formatNumber(editingLedger['Closing Balance'])}</div>
+                </div>
+              </div>
+
+              <div className="space-y-3 border-t pt-4">
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H1</Label>
+                  <Input
+                    value={editingLedger['H1'] || ''}
+                    onChange={(e) => setEditingLedger({...editingLedger, 'H1': e.target.value})}
+                    className="col-span-3"
+                    placeholder="e.g., Balance Sheet, Profit and Loss"
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H2</Label>
+                  <Input
+                    value={editingLedger['H2'] || ''}
+                    onChange={(e) => setEditingLedger({...editingLedger, 'H2': e.target.value})}
+                    className="col-span-3"
+                    placeholder="e.g., Assets, Liabilities, Income, Expenses"
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H3</Label>
+                  <Input
+                    value={editingLedger['H3'] || ''}
+                    onChange={(e) => setEditingLedger({...editingLedger, 'H3': e.target.value})}
+                    className="col-span-3"
+                    placeholder="e.g., Current Assets, Fixed Assets"
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H4</Label>
+                  <Input
+                    value={editingLedger['H4'] || ''}
+                    onChange={(e) => setEditingLedger({...editingLedger, 'H4': e.target.value})}
+                    className="col-span-3"
+                    placeholder="e.g., Cash and Bank Balance"
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H5</Label>
+                  <Input
+                    value={editingLedger['H5'] || ''}
+                    onChange={(e) => setEditingLedger({...editingLedger, 'H5': e.target.value})}
+                    className="col-span-3"
+                    placeholder="e.g., Cash-in-Hand"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t pt-4">
+                <Button variant="outline" onClick={() => setIsSingleEditDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={() => {
+                  if (editingLedger && editingLedgerIndex >= 0) {
+                    const updatedData = [...currentData];
+                    updatedData[editingLedgerIndex] = editingLedger;
+                    setCurrentData(updatedData);
+                    toast({
+                      title: 'Updated',
+                      description: `Classification updated for "${editingLedger['Ledger Name']}"`
+                    });
+                    setIsSingleEditDialogOpen(false);
+                  }
+                }}>
+                  Save Changes
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Filter Modal */}
       <FilterModal
