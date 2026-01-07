@@ -15,6 +15,7 @@ import StaffDashboard from "./pages/StaffDashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
 import TrialBalance from "./pages/TrialBalance";
+import TrialBalanceNew from "./pages/TrialBalanceNew";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
 import AuditPrograms from "./pages/AuditPrograms";
@@ -98,6 +99,16 @@ const App = () => (
                   <ProtectedEngagementRoute>
                     <MainLayout>
                       <TrialBalance />
+                    </MainLayout>
+                  </ProtectedEngagementRoute>
+                }
+              />
+              <Route
+                path="/trial-balance-new"
+                element={
+                  <ProtectedEngagementRoute>
+                    <MainLayout>
+                      <TrialBalanceNew />
                     </MainLayout>
                   </ProtectedEngagementRoute>
                 }

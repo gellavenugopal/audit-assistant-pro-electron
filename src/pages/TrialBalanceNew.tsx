@@ -40,6 +40,10 @@ import {
   Layers,
   Calculator,
   Pencil,
+  Cog,
+  Plus,
+  Edit,
+  Trash,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTallyODBC } from '@/hooks/useTallyODBC';
@@ -87,6 +91,9 @@ export default function TrialBalanceNew() {
   const [entityType, setEntityType] = useState<string>('');
   const [entityName, setEntityName] = useState<string>('');
   const [businessType, setBusinessType] = useState<string>('');
+  const [includeStockItems, setIncludeStockItems] = useState<boolean>(false);
+  const [isBusinessDialogOpen, setIsBusinessDialogOpen] = useState(false);
+  const [isStockPreferenceDialogOpen, setIsStockPreferenceDialogOpen] = useState(false);
   
   // Data State
   const [currentData, setCurrentData] = useState<LedgerRow[]>([]);
@@ -94,7 +101,7 @@ export default function TrialBalanceNew() {
   const [savedMappings, setSavedMappings] = useState<Record<string, ClassificationResult>>({});
   
   // UI State
-  const [activeTab, setActiveTab] = useState('trial-balance');
+  const [activeTab, setActiveTab] = useState('data');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [h2Filter, setH2Filter] = useState<string>('all');
@@ -103,7 +110,6 @@ export default function TrialBalanceNew() {
   const [odbcPort, setOdbcPort] = useState<string>('9000');
   const [isFetching, setIsFetching] = useState(false);
   const [isEntityDialogOpen, setIsEntityDialogOpen] = useState(false);
-  const [isBusinessDialogOpen, setIsBusinessDialogOpen] = useState(false);
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [isClassificationManagerOpen, setIsClassificationManagerOpen] = useState(false);
@@ -156,9 +162,27 @@ export default function TrialBalanceNew() {
       }
     }
     
-    // Show entity type dialog first
+    // Check if entity type is selected
+    if (!entityType) {
+      setIsEntityDialogOpen(true);
+      return;
+    }
+    
+    // Check if business type is selected
+    if (!businessType) {
+      setIsBusinessDialogOpen(true);
+      return;
+    }
+    
+    // For Trading/Manufacturing, ask about stock items preference
+    if ((businessType === 'Trading' || businessType === 'Manufacturing')) {
+      setIsStockPreferenceDialogOpen(true);
+      return;
+    }
+    
+    // If all checks passed, entity dialog should trigger the fetch
     setIsEntityDialogOpen(true);
-  }, [odbcConnection]);
+  }, [odbcConnection, entityType, businessType]);
   
   // Fetch data from Tally after entity selection
   const handleFetchFromTally = useCallback(async () => {
@@ -173,12 +197,6 @@ export default function TrialBalanceNew() {
     
     setIsFetching(true);
     try {
-      // Fetch company info first
-      const companyInfo = await odbcConnection.fetchCompanyInfo();
-      if (companyInfo && companyInfo.companyName) {
-        setEntityName(companyInfo.companyName);
-      }
-      
       const lines = await odbcConnection.fetchTrialBalance(fromDate, toDate);
       
       if (!lines || lines.length === 0) {
@@ -191,23 +209,46 @@ export default function TrialBalanceNew() {
         return;
       }
       
-      // Convert to LedgerRow format
-      const processedData: LedgerRow[] = lines.map(line => ({
-        'Ledger Name': line.accountHead,
-        'Primary Group': line.primaryGroup || '',
-        'Parent Group': line.parent || '',
-        'Composite Key': generateLedgerKey(line.accountHead, line.primaryGroup || ''),
-        'Opening Balance': line.openingBalance || 0,
-        'Debit': Math.abs(line.totalDebit || 0),
-        'Credit': Math.abs(line.totalCredit || 0),
-        'Closing Balance': line.closingBalance || 0,
-        'Is Revenue': line.isRevenue ? 'Yes' : 'No',
-        'Sheet Name': 'TB CY'
-      }));
+      // Convert to LedgerRow format and filter out zero balance rows
+      const processedData: LedgerRow[] = lines
+        .filter(line => {
+          // Filter out rows where both opening and closing balances are 0
+          const opening = line.openingBalance || 0;
+          const closing = line.closingBalance || 0;
+          return opening !== 0 || closing !== 0;
+        })
+        .map(line => ({
+          'Ledger Name': line.accountHead,
+          'Primary Group': line.primaryGroup || '',
+          'Parent Group': line.parent || '',
+          'Composite Key': generateLedgerKey(line.accountHead, line.primaryGroup || ''),
+          'Opening Balance': line.openingBalance || 0,
+          'Debit': Math.abs(line.totalDebit || 0),
+          'Credit': Math.abs(line.totalCredit || 0),
+          'Closing Balance': line.closingBalance || 0,
+          'Is Revenue': line.isRevenue ? 'Yes' : 'No',
+          'Sheet Name': 'TB CY'
+        }));
       
       // Auto-classify
       const classified = classifyDataframeBatch(processedData, savedMappings);
       setCurrentData(classified);
+      
+      // Fetch stock items if required
+      if (includeStockItems && (businessType === 'Trading' || businessType === 'Manufacturing')) {
+        try {
+          // TODO: Implement stock items fetch from Tally ODBC
+          // const stockItems = await odbcConnection.fetchStockItems();
+          // setCurrentStockData(stockItems);
+          toast({
+            title: 'Stock Items',
+            description: 'Stock items fetching not yet implemented',
+            variant: 'default'
+          });
+        } catch (error) {
+          console.error('Failed to fetch stock items:', error);
+        }
+      }
       
       toast({
         title: 'Success',
@@ -446,27 +487,32 @@ export default function TrialBalanceNew() {
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
         
-        const processedData: LedgerRow[] = jsonData.map((row: any) => ({
-          'Ledger Name': row['Ledger Name'] || row['ledger_name'] || '',
-          'Primary Group': row['Primary Group'] || row['primary_group'] || '',
-          'Parent Group': row['Parent Group'] || row['parent_group'] || '',
-          'Composite Key': generateLedgerKey(
-            row['Ledger Name'] || row['ledger_name'] || '',
-            row['Primary Group'] || row['primary_group'] || ''
-          ),
-          'Opening Balance': parseFloat(row['Opening Balance'] || row['opening_balance'] || 0),
-          'Debit': parseFloat(row['Debit'] || row['debit'] || 0),
-          'Credit': parseFloat(row['Credit'] || row['credit'] || 0),
-          'Closing Balance': parseFloat(row['Closing Balance'] || row['closing_balance'] || 0),
-          'Is Revenue': row['Is Revenue'] || row['is_revenue'] || 'No',
-          'H1': row['H1'] || '',
-          'H2': row['H2'] || '',
-          'H3': row['H3'] || '',
-          'H4': row['H4'] || '',
-          'H5': row['H5'] || '',
-          'Status': row['Status'] || 'Unmapped',
-          'Sheet Name': 'TB CY'
-        }));
+        const processedData: LedgerRow[] = jsonData
+          .map((row: any) => ({
+            'Ledger Name': row['Ledger Name'] || row['ledger_name'] || '',
+            'Primary Group': row['Primary Group'] || row['primary_group'] || '',
+            'Parent Group': row['Parent Group'] || row['parent_group'] || '',
+            'Composite Key': generateLedgerKey(
+              row['Ledger Name'] || row['ledger_name'] || '',
+              row['Primary Group'] || row['primary_group'] || ''
+            ),
+            'Opening Balance': parseFloat(row['Opening Balance'] || row['opening_balance'] || 0),
+            'Debit': parseFloat(row['Debit'] || row['debit'] || 0),
+            'Credit': parseFloat(row['Credit'] || row['credit'] || 0),
+            'Closing Balance': parseFloat(row['Closing Balance'] || row['closing_balance'] || 0),
+            'Is Revenue': row['Is Revenue'] || row['is_revenue'] || 'No',
+            'H1': row['H1'] || '',
+            'H2': row['H2'] || '',
+            'H3': row['H3'] || '',
+            'H4': row['H4'] || '',
+            'H5': row['H5'] || '',
+            'Status': row['Status'] || 'Unmapped',
+            'Sheet Name': 'TB CY'
+          }))
+          .filter(row => {
+            // Filter out rows where both opening and closing balances are 0
+            return row['Opening Balance'] !== 0 || row['Closing Balance'] !== 0;
+          });
         
         const classified = classifyDataframeBatch(processedData, savedMappings);
         setCurrentData(classified);
@@ -693,6 +739,13 @@ export default function TrialBalanceNew() {
                 <FileText className="w-3 h-3 mr-1.5" />
                 Reports
               </TabsTrigger>
+              <TabsTrigger 
+                value="rule-engine"
+                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+              >
+                <Cog className="w-3 h-3 mr-1.5" />
+                Rule Engine
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -860,6 +913,83 @@ export default function TrialBalanceNew() {
                 entityType={entityType}
               />
             </TabsContent>
+            
+            <TabsContent value="rule-engine" className="mt-0 p-4">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-lg font-semibold">Classification Rules</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Manage automatic classification rules for trial balance items
+                    </p>
+                  </div>
+                  <Button onClick={() => toast({ title: 'Add Rule', description: 'Rule creation dialog coming soon' })}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add New Rule
+                  </Button>
+                </div>
+                
+                <div className="border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Rule Name</TableHead>
+                        <TableHead>Condition Type</TableHead>
+                        <TableHead>Condition Value</TableHead>
+                        <TableHead>Mapped To</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Object.entries(savedMappings).length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                            No rules defined yet. Create rules to automate classification.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        Object.entries(savedMappings).map(([key, mapping], index) => (
+                          <TableRow key={key}>
+                            <TableCell className="font-medium">Rule {index + 1}</TableCell>
+                            <TableCell>
+                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
+                                Tally Primary Group
+                              </span>
+                            </TableCell>
+                            <TableCell>{key.split('|')[1] || key}</TableCell>
+                            <TableCell>
+                              <div className="text-xs space-y-1">
+                                <div><strong>H1:</strong> {mapping.h1}</div>
+                                <div><strong>H2:</strong> {mapping.h2}</div>
+                                <div><strong>H3:</strong> {mapping.h3}</div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost"
+                                  onClick={() => toast({ title: 'Edit Rule', description: 'Edit functionality coming soon' })}
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost"
+                                  onClick={() => handleDeleteMapping(key)}
+                                >
+                                  <Trash className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </TabsContent>
           </Tabs>
         </div>
 
@@ -952,8 +1082,63 @@ export default function TrialBalanceNew() {
               <Button variant="outline" onClick={() => setIsBusinessDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={() => setIsBusinessDialogOpen(false)}>
+              <Button onClick={() => {
+                setIsBusinessDialogOpen(false);
+                // If Trading or Manufacturing, show stock preference dialog
+                if (businessType === 'Trading' || businessType === 'Manufacturing') {
+                  setIsStockPreferenceDialogOpen(true);
+                } else {
+                  handleFetchFromTally();
+                }
+              }} disabled={!businessType}>
                 Confirm
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stock Items Preference Dialog */}
+      <Dialog open={isStockPreferenceDialogOpen} onOpenChange={setIsStockPreferenceDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Stock Items Handling</DialogTitle>
+            <DialogDescription>
+              How would you like to handle stock items for Financial Statement verification?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  name="stockPreference"
+                  checked={includeStockItems}
+                  onChange={() => setIncludeStockItems(true)}
+                  className="w-4 h-4"
+                />
+                <span>Import stock items from Tally and include in FS verification</span>
+              </label>
+              <label className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  name="stockPreference"
+                  checked={!includeStockItems}
+                  onChange={() => setIncludeStockItems(false)}
+                  className="w-4 h-4"
+                />
+                <span>I will manually enter stock items later</span>
+              </label>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setIsStockPreferenceDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => {
+                setIsStockPreferenceDialogOpen(false);
+                handleFetchFromTally();
+              }}>
+                Confirm & Fetch
               </Button>
             </div>
           </div>
