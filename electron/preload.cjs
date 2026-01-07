@@ -5,6 +5,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // Add any IPC methods you need here
   platform: process.platform,
+  gstzen: {
+    login: (credentials) => ipcRenderer.invoke('gstzen-login', credentials),
+    testGstinConnection: (gstinUuid, token) => ipcRenderer.invoke('gstzen-test-connection', { gstinUuid, token }),
+    generateOtp: (data, token) => ipcRenderer.invoke('gstzen-generate-otp', { data, token }),
+    establishSession: (data, token) => ipcRenderer.invoke('gstzen-establish-session', { data, token }),
+    downloadGstr1: (data, token) => ipcRenderer.invoke('gstzen-download-gstr1', { data, token }),
+  },
   // Example: send a message to main process
   send: (channel, data) => {
     const validChannels = ['toMain'];

@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -7,6 +7,130 @@ if (require('electron-squirrel-startup')) {
 }
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+// GSTZen API Configuration
+const GSTZEN_API_URL = process.env.VITE_GSTZEN_API_URL || 'http://localhost:9001';
+
+// GSTZen API Helper Function
+async function gstzenApiCall(endpoint, options = {}) {
+    const url = `${GSTZEN_API_URL}${endpoint}`;
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+    };
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            headers,
+        });
+
+        const text = await response.text();
+        let data;
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (e) {
+            console.error('Failed to parse JSON response:', text.substring(0, 100));
+            data = { error: 'Invalid JSON response', raw: text.substring(0, 1000) };
+        }
+
+        return {
+            ok: response.ok,
+            status: response.status,
+            data,
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            status: 0,
+            data: { error: error.message },
+        };
+    }
+}
+
+// IPC Handlers for GSTZen API
+function setupGstzenHandlers() {
+    // Login
+    ipcMain.handle('gstzen:login', async (event, credentials) => {
+        return await gstzenApiCall('/accounts/api/login/token/', {
+            method: 'POST',
+            body: JSON.stringify(credentials),
+        });
+    });
+
+    // Customer operations
+    ipcMain.handle('gstzen:getCustomerByEmail', async (event, { email, token }) => {
+        return await gstzenApiCall(`/api/customer/by-email/${email}/`, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+    });
+
+    ipcMain.handle('gstzen:createCustomer', async (event, { customerData, token }) => {
+        return await gstzenApiCall('/api/customer/create/', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(customerData),
+        });
+    });
+
+    // GSTIN operations
+    ipcMain.handle('gstzen:getGstins', async (event, { customerUuid, token }) => {
+        return await gstzenApiCall(`/api/customer/${customerUuid}/gstins/`, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+    });
+
+    ipcMain.handle('gstzen:addGstin', async (event, { customerUuid, gstinData, token }) => {
+        return await gstzenApiCall(`/api/customer/${customerUuid}/gstins/`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(gstinData),
+        });
+    });
+
+    ipcMain.handle('gstzen:updateGstinCredentials', async (event, { gstinUuid, credentials, token }) => {
+        return await gstzenApiCall(`/api/gstin/${gstinUuid}/credentials/`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(credentials),
+        });
+    });
+
+    ipcMain.handle('gstzen:testGstinConnection', async (event, { gstinUuid, token }) => {
+        return await gstzenApiCall(`/api/gstin/${gstinUuid}/test-connection/`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+    });
+
+    // GSTN OTP Login
+    ipcMain.handle('gstzen:generateOtp', async (event, { requestData, token }) => {
+        return await gstzenApiCall('/api/gstn-generate-otp/', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(requestData),
+        });
+    });
+
+    ipcMain.handle('gstzen:establishSession', async (event, { requestData, token }) => {
+        return await gstzenApiCall('/api/gstn-establish-session/', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(requestData),
+        });
+    });
+
+    // GSTR1 Downloads
+    ipcMain.handle('gstzen:downloadGstr1', async (event, { downloadRequest, token }) => {
+        return await gstzenApiCall('/api/gstr1/download/', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(downloadRequest),
+        });
+    });
+}
 
 function createWindow() {
     // Create the browser window.
@@ -45,6 +169,7 @@ function createWindow() {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
+    setupGstzenHandlers();
     createWindow();
 
     app.on('activate', () => {
