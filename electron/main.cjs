@@ -99,6 +99,19 @@ function registerIpcHandlers() {
     console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
     console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
     
+    // First, get company name
+    let companyName = '';
+    try {
+      const companyQuery = `SELECT $Name FROM Company`;
+      const companyResult = await odbcConnection.query(companyQuery);
+      if (companyResult && companyResult.length > 0) {
+        companyName = companyResult[0]['$Name'] || '';
+        console.log(`Trial Balance: Company Name - ${companyName}`);
+      }
+    } catch (err) {
+      console.warn('Could not fetch company name:', err.message);
+    }
+    
     const query = `
       SELECT $Name, $_PrimaryGroup, $Parent, $IsRevenue, 
              $OpeningBalance, $ClosingBalance, $DebitTotals, $CreditTotals,
@@ -133,7 +146,7 @@ function registerIpcHandlers() {
     
     console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
     
-    return { success: true, data: processedData };
+    return { success: true, data: processedData, companyName: companyName };
   } catch (error) {
     return { success: false, error: error.message };
   }

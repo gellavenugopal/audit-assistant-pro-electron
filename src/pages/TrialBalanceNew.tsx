@@ -94,7 +94,6 @@ export default function TrialBalanceNew() {
   const [businessType, setBusinessType] = useState<string>('');
   const [includeStockItems, setIncludeStockItems] = useState<boolean>(false);
   const [isBusinessDialogOpen, setIsBusinessDialogOpen] = useState(false);
-  const [isStockPreferenceDialogOpen, setIsStockPreferenceDialogOpen] = useState(false);
   
   // Data State
   const [currentData, setCurrentData] = useState<LedgerRow[]>([]);
@@ -177,6 +176,9 @@ export default function TrialBalanceNew() {
       }
     }
     
+    // Set default stock items to true
+    setIncludeStockItems(true);
+    
     // Check if entity type is selected
     if (!entityType) {
       setIsEntityDialogOpen(true);
@@ -186,12 +188,6 @@ export default function TrialBalanceNew() {
     // Check if business type is selected
     if (!businessType) {
       setIsBusinessDialogOpen(true);
-      return;
-    }
-    
-    // For Trading/Manufacturing, ask about stock items preference
-    if ((businessType === 'Trading' || businessType === 'Manufacturing')) {
-      setIsStockPreferenceDialogOpen(true);
       return;
     }
     
@@ -212,7 +208,12 @@ export default function TrialBalanceNew() {
     
     setIsFetching(true);
     try {
-      const lines = await odbcConnection.fetchTrialBalance(fromDate, toDate);
+      const { data: lines, companyName } = await odbcConnection.fetchTrialBalance(fromDate, toDate);
+      
+      // Set company name
+      if (companyName) {
+        setEntityName(companyName);
+      }
       
       if (!lines || lines.length === 0) {
         toast({
@@ -535,6 +536,100 @@ export default function TrialBalanceNew() {
     }).format(num);
   };
 
+  // Export Template for Excel Import
+  const handleExportTemplate = useCallback(() => {
+    try {
+      const templateData = [
+        {
+          'Ledger Name': 'Cash',
+          'Primary Group': 'Cash-in-Hand',
+          'Parent Group': 'Current Assets',
+          'Opening Balance': 50000,
+          'Debit': 200000,
+          'Credit': 150000,
+          'Closing Balance': 100000,
+          'Is Revenue': 'No',
+          'Sheet Name': 'TB CY'
+        },
+        {
+          'Ledger Name': 'Sales',
+          'Primary Group': 'Sales Accounts',
+          'Parent Group': 'Primary',
+          'Opening Balance': 0,
+          'Debit': 0,
+          'Credit': 500000,
+          'Closing Balance': -500000,
+          'Is Revenue': 'Yes',
+          'Sheet Name': 'TB CY'
+        },
+        {
+          'Ledger Name': 'Purchase',
+          'Primary Group': 'Purchase Accounts',
+          'Parent Group': 'Primary',
+          'Opening Balance': 0,
+          'Debit': 300000,
+          'Credit': 0,
+          'Closing Balance': 300000,
+          'Is Revenue': 'No',
+          'Sheet Name': 'TB CY'
+        }
+      ];
+      
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(templateData);
+      
+      // Set column widths
+      worksheet['!cols'] = [
+        { wch: 30 }, // Ledger Name
+        { wch: 20 }, // Primary Group
+        { wch: 20 }, // Parent Group
+        { wch: 15 }, // Opening Balance
+        { wch: 15 }, // Debit
+        { wch: 15 }, // Credit
+        { wch: 15 }, // Closing Balance
+        { wch: 12 }, // Is Revenue
+        { wch: 12 }  // Sheet Name
+      ];
+      
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Trial Balance Template');
+      
+      // Add instructions sheet
+      const instructions = [
+        { 'Column Name': 'Ledger Name', 'Description': 'Name of the ledger account', 'Required': 'Yes', 'Example': 'Cash, Bank, Sales, Purchase' },
+        { 'Column Name': 'Primary Group', 'Description': 'Primary group from Tally', 'Required': 'Yes', 'Example': 'Current Assets, Sales Accounts' },
+        { 'Column Name': 'Parent Group', 'Description': 'Parent of the primary group', 'Required': 'No', 'Example': 'Primary, Current Assets' },
+        { 'Column Name': 'Opening Balance', 'Description': 'Opening balance (numeric)', 'Required': 'Yes', 'Example': '50000, -20000' },
+        { 'Column Name': 'Debit', 'Description': 'Total debit amount', 'Required': 'Yes', 'Example': '100000' },
+        { 'Column Name': 'Credit', 'Description': 'Total credit amount', 'Required': 'Yes', 'Example': '50000' },
+        { 'Column Name': 'Closing Balance', 'Description': 'Closing balance (numeric)', 'Required': 'Yes', 'Example': '100000, -75000' },
+        { 'Column Name': 'Is Revenue', 'Description': 'Whether this is a revenue account', 'Required': 'No', 'Example': 'Yes, No' },
+        { 'Column Name': 'Sheet Name', 'Description': 'Always use "TB CY" for current year', 'Required': 'Yes', 'Example': 'TB CY' }
+      ];
+      
+      const instructionsSheet = XLSX.utils.json_to_sheet(instructions);
+      instructionsSheet['!cols'] = [
+        { wch: 20 },
+        { wch: 50 },
+        { wch: 10 },
+        { wch: 30 }
+      ];
+      XLSX.utils.book_append_sheet(workbook, instructionsSheet, 'Instructions');
+      
+      XLSX.writeFile(workbook, 'Trial_Balance_Import_Template.xlsx');
+      
+      toast({
+        title: 'Template Downloaded',
+        description: 'Trial Balance import template has been downloaded. Fill it with your data and import.'
+      });
+    } catch (error) {
+      toast({
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export template',
+        variant: 'destructive'
+      });
+    }
+  }, [toast]);
+  
   // Excel Import
   const handleExcelImport = useCallback(() => {
     const input = document.createElement('input');
@@ -881,6 +976,7 @@ export default function TrialBalanceNew() {
         onToDateChange={setToDate}
         onTallyImport={handleConnectTally}
         onExcelImport={handleExcelImport}
+        onExportTemplate={handleExportTemplate}
         isConnecting={isFetching || odbcConnection.isConnecting}
         isConnected={odbcConnection.isConnected}
         onAutoClassify={handleAutoClassify}
@@ -1566,7 +1662,7 @@ export default function TrialBalanceNew() {
           <DialogHeader>
             <DialogTitle>Select Business Type</DialogTitle>
             <DialogDescription>
-              Select the business type for stock classification
+              Select the business type for proper classification
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1580,67 +1676,32 @@ export default function TrialBalanceNew() {
                 ))}
               </SelectContent>
             </Select>
+            
+            {/* Stock Items Checkbox - shown for Trading/Manufacturing */}
+            {(businessType === 'Trading' || businessType === 'Manufacturing') && (
+              <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded">
+                <input
+                  type="checkbox"
+                  id="includeStock"
+                  checked={includeStockItems}
+                  onChange={(e) => setIncludeStockItems(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 rounded"
+                />
+                <label htmlFor="includeStock" className="text-sm font-medium cursor-pointer">
+                  Import stock items from Tally
+                </label>
+              </div>
+            )}
+            
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setIsBusinessDialogOpen(false)}>
                 Cancel
               </Button>
               <Button onClick={() => {
                 setIsBusinessDialogOpen(false);
-                // If Trading or Manufacturing, show stock preference dialog
-                if (businessType === 'Trading' || businessType === 'Manufacturing') {
-                  setIsStockPreferenceDialogOpen(true);
-                } else {
-                  handleFetchFromTally();
-                }
-              }} disabled={!businessType}>
-                Confirm
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Stock Items Preference Dialog */}
-      <Dialog open={isStockPreferenceDialogOpen} onOpenChange={setIsStockPreferenceDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Stock Items Handling</DialogTitle>
-            <DialogDescription>
-              How would you like to handle stock items for Financial Statement verification?
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="stockPreference"
-                  checked={includeStockItems}
-                  onChange={() => setIncludeStockItems(true)}
-                  className="w-4 h-4"
-                />
-                <span>Import stock items from Tally and include in FS verification</span>
-              </label>
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="stockPreference"
-                  checked={!includeStockItems}
-                  onChange={() => setIncludeStockItems(false)}
-                  className="w-4 h-4"
-                />
-                <span>I will manually enter stock items later</span>
-              </label>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsStockPreferenceDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => {
-                setIsStockPreferenceDialogOpen(false);
                 handleFetchFromTally();
-              }}>
-                Confirm & Fetch
+              }} disabled={!businessType}>
+                Confirm & Import
               </Button>
             </div>
           </div>
