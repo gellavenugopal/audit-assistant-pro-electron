@@ -20,10 +20,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
   // ODBC methods
+  odbcCheckConnection: () => ipcRenderer.invoke('odbc-check-connection'),
   odbcTestConnection: () => ipcRenderer.invoke('odbc-test-connection'),
   odbcFetchTrialBalance: () => ipcRenderer.invoke('odbc-fetch-trial-balance'),
   odbcFetchMonthWise: (fyStartYear, targetMonth) => ipcRenderer.invoke('odbc-fetch-month-wise', fyStartYear, targetMonth),
   odbcDisconnect: () => ipcRenderer.invoke('odbc-disconnect'),
+  // Opening Balance Matching methods
+  odbcFetchOldTallyLedgers: () => ipcRenderer.invoke('odbc-fetch-old-tally-ledgers'),
+  odbcFetchNewTallyLedgers: () => ipcRenderer.invoke('odbc-fetch-new-tally-ledgers'),
+  odbcCompareOpeningBalances: (data) => ipcRenderer.invoke('odbc-compare-opening-balances', data),
+  // Month wise and GST methods
+  odbcFetchMonthWiseData: (data) => ipcRenderer.invoke('odbc-fetch-month-wise-data', data),
+  odbcFetchGSTNotFeeded: () => ipcRenderer.invoke('odbc-fetch-gst-not-feeded'),
 });
 
 // Log when preload script is loaded

@@ -14,6 +14,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { FileSpreadsheet, AlertCircle, CheckCircle2, Download, Info } from 'lucide-react';
 import { TrialBalanceLineInput } from '@/hooks/useTrialBalance';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useTally } from '@/contexts/TallyContext';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2 } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -153,6 +156,22 @@ export function TrialBalanceImportDialog({ open, onOpenChange, onImport }: Props
   const [sheet1StartRow, setSheet1StartRow] = useState<number>(2);
   const [sheet2StartRow, setSheet2StartRow] = useState<number>(2);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tallyConnection = useTally();
+  const { toast } = useToast();
+  const [isFetchingTally, setIsFetchingTally] = useState(false);
+  const [fetchingProgress, setFetchingProgress] = useState(0);
+  const [previewLimit, setPreviewLimit] = useState(10);
+  const [showAllPreview, setShowAllPreview] = useState(false);
+  const [tallyFromDate, setTallyFromDate] = useState<string>(() => {
+    // Default to FY start based on current date (April 1st)
+    const now = new Date();
+    const year = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+    return `${year}-04-01`;
+  });
+  const [tallyToDate, setTallyToDate] = useState<string>(() => {
+    const now = new Date();
+    return now.toISOString().slice(0, 10);
+  });
 
   const resetState = () => {
     setFile(null);
@@ -162,6 +181,72 @@ export function TrialBalanceImportDialog({ open, onOpenChange, onImport }: Props
     setPeriodType('current');
     setSheet1StartRow(2);
     setSheet2StartRow(2);
+    setIsFetchingTally(false);
+    setFetchingProgress(0);
+    setShowAllPreview(false);
+  };
+
+  const handleFetchFromTally = async () => {
+    if (!tallyFromDate || !tallyToDate) {
+      toast({ title: 'Invalid Dates', description: 'Please select a valid from and to date for Tally fetch', variant: 'destructive' });
+      return;
+    }
+
+    setIsFetchingTally(true);
+    try {
+      const result = await tallyConnection.fetchTrialBalance(tallyFromDate, tallyToDate);
+      if (!result || !result.success) {
+        toast({ title: 'Tally Fetch Failed', description: 'Unable to fetch Trial Balance from Tally', variant: 'destructive' });
+        setIsFetchingTally(false);
+        return;
+      }
+
+      // Map TallyTrialBalanceLine[] to ParsedRow[] with incremental progress updates
+      setParsedData([]);
+      setFetchingProgress(0);
+
+      const total = result.lines.length;
+      const batchSize = 200;
+      const accumulated: ParsedRow[] = [];
+
+      for (let i = 0; i < total; i += batchSize) {
+        const batch = result.lines.slice(i, i + batchSize);
+        const mapped = batch.map((line) => {
+          const closingBalance = line.closingCr > 0 ? line.closingCr : line.closingDr > 0 ? -line.closingDr : 0;
+          const openingBalance = line.openingCr > 0 ? line.openingCr : line.openingDr > 0 ? -line.openingDr : 0;
+
+          return {
+            account_name: line.accountName,
+            account_code: line.accountName.substring(0, 20).toUpperCase().replace(/\s+/g, '_'),
+            ledger_parent: line.parentGroup || undefined,
+            ledger_primary_group: line.primaryGroup || undefined,
+            opening_balance: openingBalance,
+            debit: Math.abs(line.debitTotals || 0),
+            credit: Math.abs(line.creditTotals || 0),
+            closing_balance: closingBalance,
+            period_type: periodType,
+            period_ending: periodEnding || tallyToDate,
+          } as ParsedRow;
+        });
+
+        accumulated.push(...mapped);
+        // Update preview incrementally so UI shows data as it comes in
+        setParsedData((prev) => [...prev, ...mapped]);
+        setFetchingProgress(Math.round(((i + mapped.length) / total) * 100));
+
+        // Yield to the event loop so UI can update for very large sets
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      setParsedData(accumulated);
+      setFetchingProgress(100);
+      toast({ title: 'Tally Fetch Complete', description: `Fetched ${accumulated.length} ledgers from Tally` });
+    } catch (err) {
+      console.error('Error fetching from Tally:', err);
+      toast({ title: 'Tally Fetch Error', description: (err as Error)?.message || 'Unknown error', variant: 'destructive' });
+    } finally {
+      setIsFetchingTally(false);
+    }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -274,6 +359,24 @@ export function TrialBalanceImportDialog({ open, onOpenChange, onImport }: Props
     }
   };
 
+  const exportPreview = () => {
+    if (parsedData.length === 0) return;
+    const rows = (showAllPreview ? parsedData : parsedData.slice(0, previewLimit)).map(r => ({
+      'Account Name': r.account_name,
+      'Parent': r.ledger_parent || r.ledger_primary_group || '',
+      'Debit': r.debit || 0,
+      'Credit': r.credit || 0,
+      'Closing Balance': r.closing_balance || 0,
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Preview');
+    const fileName = `Tally_Preview_${new Date().toISOString().slice(0,10)}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    toast({ title: 'Export Complete', description: `Saved preview to ${fileName}` });
+  };
+
   const handleImport = async () => {
     if (parsedData.length === 0) return;
 
@@ -341,6 +444,30 @@ export function TrialBalanceImportDialog({ open, onOpenChange, onImport }: Props
                 value={periodEnding}
                 onChange={(e) => setPeriodEnding(e.target.value)}
               />
+            </div>
+          </div>
+
+          {/* Tally Import */}
+          <div className="grid grid-cols-3 gap-4 items-end">
+            <div className="col-span-1 space-y-2">
+              <Label>Fetch from Tally</Label>
+              <p className="text-xs text-muted-foreground">Requires Tally Bridge connection</p>
+            </div>
+            <div className="col-span-1 space-y-2">
+              <Label htmlFor="tally_from">From</Label>
+              <Input id="tally_from" type="date" value={tallyFromDate} onChange={(e) => setTallyFromDate(e.target.value)} />
+            </div>
+            <div className="col-span-1 space-y-2">
+              <Label htmlFor="tally_to">To</Label>
+              <Input id="tally_to" type="date" value={tallyToDate} onChange={(e) => setTallyToDate(e.target.value)} />
+            </div>
+            <div className="col-span-3 flex items-center gap-3">
+              <div className="text-sm text-muted-foreground">
+                {tallyConnection?.isConnected ? <span className="text-success">Tally Bridge connected</span> : <span className="text-destructive">Not connected</span>}
+              </div>
+              <Button onClick={handleFetchFromTally} disabled={isFetchingTally} className="ml-auto">
+                {isFetchingTally ? (<><Loader2 className="w-4 h-4 animate-spin mr-2" />Fetching...</>) : 'Fetch from Tally'}
+              </Button>
             </div>
           </div>
 
@@ -440,14 +567,78 @@ export function TrialBalanceImportDialog({ open, onOpenChange, onImport }: Props
                 </div>
               )}
 
-              {parsedData.length > 0 && !error && (
-                <div className="flex items-start gap-2 p-3 bg-success/10 text-success rounded-lg">
-                  <CheckCircle2 className="h-5 w-5 mt-0.5 shrink-0" />
-                  <div className="text-sm">
-                    <p className="font-medium">Ready to import {parsedData.length} lines</p>
-                    <p className="text-xs opacity-80 mt-1">
-                      Sheet 1: Trial Balance data | Sheet 2: Hierarchy mapping
-                    </p>
+              {isFetchingTally && (
+                <div className="p-3 bg-muted rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    <div className="flex-1">
+                      <p className="text-sm">Fetching Trial Balance from Tally…</p>
+                      <div className="w-full bg-muted rounded h-2 mt-2 overflow-hidden">
+                        <div className="bg-primary h-2" style={{ width: `${fetchingProgress}%` }} />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{fetchingProgress}%</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {parsedData.length > 0 && !error && !isFetchingTally && (
+                <div>
+                  <div className="flex items-start gap-2 p-3 bg-success/10 text-success rounded-lg">
+                    <CheckCircle2 className="h-5 w-5 mt-0.5 shrink-0" />
+                    <div className="text-sm">
+                      <p className="font-medium">Ready to import {parsedData.length} lines</p>
+                      <p className="text-xs opacity-80 mt-1">Sheet 1: Trial Balance data | Sheet 2: Hierarchy mapping</p>
+                    </div>
+                  </div>
+
+                  {/* Preview controls */}
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm text-muted">Previewing {Math.min(parsedData.length, showAllPreview ? parsedData.length : previewLimit)} of {parsedData.length} lines</p>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={previewLimit}
+                          onChange={(e) => setPreviewLimit(parseInt(e.target.value))}
+                          className="h-8 rounded border px-2 text-sm"
+                        >
+                          <option value={10}>10</option>
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                        </select>
+                        <Button variant="ghost" size="sm" onClick={() => setShowAllPreview((s) => !s)}>
+                          {showAllPreview ? 'Show Less' : 'Show All'}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => exportPreview()}>
+                          Export Preview
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="overflow-auto max-h-48 border rounded">
+                      <table className="w-full text-sm table-fixed">
+                        <thead className="bg-muted/50 text-left sticky top-0">
+                          <tr>
+                            <th className="p-2 w-2/5">Account</th>
+                            <th className="p-2 w-1/5">Parent</th>
+                            <th className="p-2 w-1/5 text-right">Debit</th>
+                            <th className="p-2 w-1/5 text-right">Credit</th>
+                            <th className="p-2 w-1/5 text-right">Closing</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(showAllPreview ? parsedData : parsedData.slice(0, previewLimit)).map((r, idx) => (
+                            <tr key={`${r.account_name}_${idx}`} className={idx % 2 === 0 ? 'bg-background' : ''}>
+                              <td className="p-2 truncate">{r.account_name}</td>
+                              <td className="p-2 truncate">{r.ledger_parent || r.ledger_primary_group || '-'}</td>
+                              <td className="p-2 text-right">{r.debit?.toLocaleString() || ''}</td>
+                              <td className="p-2 text-right">{r.credit?.toLocaleString() || ''}</td>
+                              <td className="p-2 text-right">{r.closing_balance?.toLocaleString() || ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
