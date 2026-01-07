@@ -95,25 +95,33 @@ export function GstnLoginDialog({ open, onOpenChange, gstin, onSuccess }: GstnLo
                 otp: data.otp,
             });
 
-            if (result && result.message && result.message.status_cd === "1") {
+            console.log("Establish Session Result:", result);
+
+            // Handle various response formats
+            // Check nested message.status_cd
+            const nestedStatus = result?.message?.status_cd;
+            // Check flat status_cd
+            const flatStatus = result?.status_cd;
+
+            // Allow string "1" or number 1
+            // Also treat empty result (204 No Content) as success
+            const isEmptySuccess = result && Object.keys(result).length === 0;
+            const isSuccess = nestedStatus == 1 || flatStatus == 1 || isEmptySuccess;
+
+            if (isSuccess) {
+                console.log("Login successful based on status_cd or empty result (204)");
                 onOpenChange(false);
                 if (onSuccess) onSuccess();
                 // Reset flow
                 setStep("username");
                 setOtpSent(false);
                 form.reset();
-            } else if (result && result.status_cd === "1") {
-                // Fallback if structure is flat
-                onOpenChange(false);
-                if (onSuccess) onSuccess();
-                setStep("username");
-                setOtpSent(false);
-                form.reset();
             } else {
+                console.warn("Login failed validation:", result);
                 form.setError("otp", { message: "Login failed. Check OTP." });
             }
         } catch (error) {
-            console.error(error);
+            console.error("verify error", error);
         }
     };
 

@@ -12,6 +12,7 @@ import type {
   CreateCustomerRequest,
   AddGstinRequest,
   UpdateGstinCredentialsRequest,
+  Gstr1ReportType,
 } from '@/types/gstzen';
 
 const API_BASE_URL = (import.meta as any).env.VITE_GSTZEN_API_URL || 'https://app.gstzen.in';
@@ -58,6 +59,44 @@ class GstzenApiClient {
   }
 
   /**
+   * Login to GSTZen
+   */
+  async login(credentials: { username: string; password: string }): Promise<ApiResponse<{ access: string; refresh: string }>> {
+    // Check if running in Electron
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.login) {
+      const result = await window.electronAPI.gstzen.login(credentials);
+      if (result.ok && result.data && result.data.access) {
+        return { 
+          success: true, 
+          data: { access: result.data.access, refresh: result.data.refresh || '' } 
+        };
+      } else {
+        return { 
+          success: false, 
+          error: result.data?.detail || result.data?.message || 'Login failed' 
+        };
+      }
+    }
+
+    // Fallback to direct fetch
+    const apiUrl = (import.meta as any).env.VITE_GSTZEN_API_URL || 'http://localhost:9001';
+    try {
+        const response = await fetch(`${apiUrl}/accounts/api/login/token/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(credentials),
+        });
+        const data = await response.json();
+        if (response.ok && data.access) {
+            return { success: true, data: { access: data.access, refresh: data.refresh || '' } };
+        }
+        return { success: false, error: data.detail || data.message || 'Login failed' };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Network error' };
+    }
+  }
+
+  /**
    * Make an authenticated API request
    */
   private async request<T>(
@@ -87,7 +126,15 @@ class GstzenApiClient {
         throw new Error(errorData.message || `HTTP error ${response.status}`);
       }
 
-      const data = await response.json();
+      let data;
+      try {
+        const text = await response.text();
+        data = text ? JSON.parse(text) : {};
+      } catch (e) {
+        console.warn('Invalid JSON response:', e);
+        throw new Error('Received invalid response from server');
+      }
+      
       return {
         success: true,
         data,
@@ -340,6 +387,65 @@ class GstzenApiClient {
       filing_period: filingPeriod,
       api_name: 'b2cs',
     });
+  }
+
+  /**
+   * Get all GSTINs for the user (Authenticated View)
+   */
+  async getGstinList(): Promise<ApiResponse<{ gstins: Gstin[], page_info: any }>> {
+      // Endpoint corresponds to views.GstInListApi
+      return this.get<{ gstins: Gstin[], page_info: any }>(`/a/gstin-list/`);
+  }
+
+  /**
+   * Get fresh GSTIN details (to check session status)
+   */
+  async getGstinDetails(uuid: string): Promise<Gstin | null> {
+      try {
+          const response = await this.getGstinList();
+          if (response.success && response.data?.gstins) {
+              return response.data.gstins.find(g => g.uuid === uuid) || null;
+          }
+          return null;
+      } catch (error) {
+          console.warn("Failed to fetch fresh GSTIN details", error);
+          return null;
+      }
+  }
+
+  /**
+   * Fetch specific GSTR-1 section data
+   */
+  async fetchGstr1SectionData(
+    gstin: string,
+    filingPeriod: string,
+    apiName: Gstr1ReportType
+  ): Promise<any[]> {
+    try {
+      const response = await this.downloadGstr1({
+        gstin,
+        filing_period: filingPeriod,
+        api_name: apiName,
+      });
+
+      if (response.success && response.data) {
+        // Check for Status 1 (Success)
+        if (response.data.status === 1 && response.data.message && typeof response.data.message !== 'string') {
+           // Extract the first key's value (e.g. "b2b": [...])
+           const keys = Object.keys(response.data.message);
+           if (keys.length > 0) {
+             const data = response.data.message[keys[0]];
+             if (Array.isArray(data)) {
+               return data;
+             }
+           }
+        }
+      }
+      return [];
+    } catch (error) {
+      console.warn(`Failed to fetch section ${apiName}:`, error);
+      return [];
+    }
   }
 }
 

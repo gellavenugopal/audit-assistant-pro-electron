@@ -32,6 +32,7 @@ import AuditReport from "./pages/AuditReport";
 import Auth from "./pages/Auth";
 import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
+import Gstr1Dashboard from '@/pages/Gstr1Dashboard';
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -225,6 +226,16 @@ const App = () => (
                   element={
                     <ProtectedRoute>
                       <GstzenLogin />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/gstin/:gstinUuid/gstr1"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <Gstr1Dashboard />
+                      </MainLayout>
                     </ProtectedRoute>
                   }
                 />

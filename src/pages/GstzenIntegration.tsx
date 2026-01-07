@@ -1,33 +1,66 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Plus, Download, Settings, CheckCircle, XCircle, AlertCircle, Building, Mail, Phone, UserCircle, LogIn } from "lucide-react";
+import { Plus, Download, Settings, CheckCircle, XCircle, AlertCircle, Building, Mail, Phone, UserCircle, LogIn, LogOut, Loader2, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGstzenCustomer } from "@/hooks/useGstzenCustomer";
 import { useGstins } from "@/hooks/useGstins";
 import { AddGstinDialog } from "@/components/gstin/AddGstinDialog";
 import { GstinCredentialsDialog } from "@/components/gstin/GstinCredentialsDialog";
-import { Gstr1DownloadDialog } from "@/components/gstr1/Gstr1DownloadDialog";
 import { GstnLoginDialog } from "@/components/gstin/GstnLoginDialog";
-import { ConsolidatedReportDialog } from "@/components/gstin/ConsolidatedReportDialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { gstzenKeys } from "@/hooks/useGstzenCustomer";
+import { gstzenApi } from "@/services/gstzen-api";
 import type { Gstin } from "@/types/gstzen";
 
-type DialogType = "none" | "add-gstin" | "credentials" | "download" | "login" | "consolidated";
+type DialogType = "none" | "add-gstin" | "credentials" | "download" | "login" | "consolidated" | "settings";
 
+// DEMO: Auto-login credentials
+const DEMO_CREDENTIALS = {
+    username: "demo@cloudzen.in",
+    password: "demo" // Demonstration access
+};
 
 export default function GstzenIntegration() {
     const { user } = useAuth();
     const queryClient = useQueryClient();
+    const navigate = useNavigate();
     const [selectedGstin, setSelectedGstin] = useState<Gstin | null>(null);
     const [activeDialog, setActiveDialog] = useState<DialogType>("none");
+    const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(false);
 
     // Check if user is authenticated with GSTZen
     const gstzenToken = localStorage.getItem('gstzen_token');
     const isGstzenAuthenticated = !!gstzenToken;
+
+    // DEMO: Auto-login effect
+    useEffect(() => {
+        const autoLogin = async () => {
+            if (!gstzenToken && !isAutoLoggingIn) {
+                setIsAutoLoggingIn(true);
+                try {
+                    console.log("Demo: Attempting auto-login...");
+                    const result = await gstzenApi.login(DEMO_CREDENTIALS);
+                    if (result.success && result.data) {
+                        gstzenApi.setAuthToken(result.data.access);
+                        localStorage.setItem("gstzen_email", DEMO_CREDENTIALS.username);
+                        // Force reload to update state
+                        window.location.reload();
+                    } else {
+                        console.warn("Demo auto-login failed:", result.error);
+                    }
+                } catch (e) {
+                    console.error("Demo auto-login error", e);
+                } finally {
+                    setIsAutoLoggingIn(false);
+                }
+            }
+        };
+        autoLogin();
+    }, [gstzenToken]);
 
     // Get or create customer profile
     const { customer, isLoading: customerLoading } = useGstzenCustomer(user?.email || null);
@@ -77,8 +110,10 @@ export default function GstzenIntegration() {
     };
 
     const handleOpenDownload = (gstin: Gstin) => {
-        setSelectedGstin(gstin);
-        setActiveDialog("download");
+        // Navigate to Gstr1Dashboard
+        navigate(`/gstin/${gstin.uuid}/gstr1`, {
+            state: { gstin }
+        });
     };
 
     const handleOpenLogin = (gstin: Gstin) => {
@@ -86,14 +121,19 @@ export default function GstzenIntegration() {
         setActiveDialog("login");
     };
 
-    const handleOpenConsolidated = (gstin: Gstin) => {
+    const handleOpenSettings = (gstin: Gstin) => {
         setSelectedGstin(gstin);
-        setActiveDialog("consolidated");
+        setActiveDialog("settings");
     };
 
     const handleCloseDialog = () => {
         setActiveDialog("none");
         setSelectedGstin(null);
+    };
+
+    const handleLogout = () => {
+        gstzenApi.clearAuthToken();
+        window.location.reload();
     };
 
     return (
@@ -113,18 +153,20 @@ export default function GstzenIntegration() {
                     <CardContent className="pt-6">
                         <div className="flex items-start gap-4">
                             <div className="rounded-full bg-amber-100 dark:bg-amber-900/30 p-3">
-                                <AlertCircle className="h-6 w-6 text-amber-600" />
+                                {isAutoLoggingIn ? <Loader2 className="h-6 w-6 text-amber-600 animate-spin" /> : <AlertCircle className="h-6 w-6 text-amber-600" />}
                             </div>
                             <div className="flex-1">
                                 <h3 className="font-semibold text-amber-900 dark:text-amber-100 mb-2">
-                                    GSTZen Authentication Required
+                                    {isAutoLoggingIn ? "Setting up Demo Environment..." : "GSTZen Authentication Required"}
                                 </h3>
                                 <p className="text-sm text-amber-800 dark:text-amber-200 mb-4">
-                                    To access GSTR1 reports and manage GSTINs, you need to sign in to your GSTZen account.
+                                    {isAutoLoggingIn ? "Please wait while we log you in automatically." : "To access GSTR1 reports and manage GSTINs, you need to sign in to your GSTZen account."}
                                 </p>
-                                <Button onClick={() => window.location.href = '/gstzen-login'}>
-                                    Sign in to GSTZen
-                                </Button>
+                                {!isAutoLoggingIn && (
+                                    <Button onClick={() => window.location.href = '/gstzen-login'}>
+                                        Sign in to GSTZen
+                                    </Button>
+                                )}
                             </div>
                         </div>
                     </CardContent>
@@ -137,7 +179,14 @@ export default function GstzenIntegration() {
                     <div className="grid gap-6 md:grid-cols-2 mb-8">
                         {/* Customer Profile Card */}
                         <Card className="md:col-span-2 overflow-hidden">
-                            <div className="bg-primary/5 p-6 md:p-8 flex flex-col md:flex-row gap-6 items-center md:items-start text-center md:text-left">
+                            <div className="bg-primary/5 p-6 md:p-8 flex flex-col md:flex-row gap-6 items-center md:items-start text-center md:text-left relative group">
+                                {/* DEMO: Sign Out button hidden as requested
+                                <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                    <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-destructive">
+                                        <LogOut className="h-4 w-4 md:mr-2" />
+                                        <span className="hidden md:inline">Sign Out</span>
+                                    </Button>
+                                </div> */}
                                 <div className="h-20 w-20 rounded-full bg-background shadow-sm flex items-center justify-center shrink-0">
                                     <UserCircle className="h-10 w-10 text-primary" />
                                 </div>
@@ -181,10 +230,11 @@ export default function GstzenIntegration() {
                                 <h2 className="section-title">Registered GSTINs</h2>
                                 <p className="text-muted-foreground">Manage your GST identification numbers</p>
                             </div>
+                            {/* DEMO: Button hidden as requested
                             <Button onClick={handleOpenAddGstin} disabled={!customer} className="shadow-sm">
                                 <Plus className="w-4 h-4 mr-2" />
                                 Add GSTIN
-                            </Button>
+                            </Button> */}
                         </div>
 
                         {gstinsLoading ? (
@@ -217,24 +267,23 @@ export default function GstzenIntegration() {
                                         </CardHeader>
 
                                         <div className="mt-auto border-t bg-muted/5 p-4 space-y-3">
+                                            <Button
+                                                className="w-full shadow-sm"
+                                                onClick={() => handleOpenDownload(gstin)}
+                                                disabled={!gstin.metadata?.gstn?.credentials?.username}
+                                            >
+                                                <FileText className="mr-2 h-4 w-4" />
+                                                Manage GSTR-1
+                                            </Button>
+
                                             <div className="grid grid-cols-2 gap-2">
                                                 <Button variant="outline" size="sm" className="w-full" onClick={() => handleOpenLogin(gstin)} title="Login to GST Portal">
                                                     <LogIn className="h-3.5 w-3.5 mr-2" />
-                                                    Portal Login
+                                                    Sync
                                                 </Button>
                                                 <Button variant="outline" size="sm" className="w-full" onClick={() => handleOpenCredentials(gstin)} title="Configure Credentials">
                                                     <Settings className="h-3.5 w-3.5 mr-2" />
                                                     Settings
-                                                </Button>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <Button variant="secondary" size="sm" className="w-full" onClick={() => handleOpenConsolidated(gstin)} disabled={!gstin.metadata?.gstn?.credentials?.username} title="Download Consolidated Report">
-                                                    Consolidated
-                                                </Button>
-                                                <Button size="sm" className="w-full" onClick={() => handleOpenDownload(gstin)} disabled={!gstin.metadata?.gstn?.credentials?.username} title="Download GSTR-1 JSON">
-                                                    <Download className="h-3.5 w-3.5 mr-2" />
-                                                    GSTR-1
                                                 </Button>
                                             </div>
                                         </div>
@@ -274,19 +323,6 @@ export default function GstzenIntegration() {
                                         open={activeDialog === "credentials"}
                                         onOpenChange={handleCloseDialog}
                                         gstin={selectedGstin}
-                                    />
-
-                                    <Gstr1DownloadDialog
-                                        open={activeDialog === "download"}
-                                        onOpenChange={handleCloseDialog}
-                                        gstin={selectedGstin}
-                                    />
-
-                                    <ConsolidatedReportDialog
-                                        open={activeDialog === "consolidated"}
-                                        onOpenChange={handleCloseDialog}
-                                        gstinUuid={selectedGstin.uuid}
-                                        gstin={selectedGstin.gstin}
                                     />
 
                                     <GstnLoginDialog

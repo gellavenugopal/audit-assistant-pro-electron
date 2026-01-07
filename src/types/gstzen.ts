@@ -106,10 +106,11 @@ export type Gstr1ReportType =
   | 'supecoa';  // Supplies through E-commerce Amendment
 
 export interface Gstr1Response {
-  status: 'success' | 'error';
-  data?: any;
+  status: number; // 1 for success, 0 for error
+  api_call?: string;
+  message?: string | Record<string, any[]>; // Can be error string or data object like { b2b: [] }
+  data?: any; // Keeping for compatibility if needed
   error?: string;
-  message?: string;
 }
 
 // API Request/Response Types
@@ -159,4 +160,36 @@ export interface GstzenApiError {
   code: string;
   message: string;
   details?: any;
+}
+
+// Consolidated Report Types
+export interface ConsolidatedReportDisplaySpec {
+  return_name: string;
+  key_name: string;
+  apicalls: Array<{
+    long_name: string;
+    action: string;
+    key_name: string;
+    multi_api_spec_name: string;
+    summary_sction_name?: string;
+  }>;
+}
+
+export interface ConsolidatedReportApiCallDetail {
+  return_period: string;
+  return_period_month_range: [string, string];
+  taxreturn_details: Record<string, string | null>;
+  apicalls: {
+    gstr1: Record<string, any | null>;
+    gstr1a?: Record<string, any | null>;
+    gstr3b?: Record<string, any | null>;
+    [key: string]: Record<string, any | null> | undefined;
+  };
+  sections_in_summary: Record<string, any | null>;
+}
+
+export interface ConsolidatedReportResponseData {
+  display_spec: ConsolidatedReportDisplaySpec[];
+  apicall_details: ConsolidatedReportApiCallDetail[];
+  now: string;
 }
