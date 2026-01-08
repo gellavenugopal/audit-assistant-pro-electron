@@ -131,65 +131,41 @@ export function ScheduleIIIProfitLoss({
       .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   };
 
-  // Helper to check if stock item is raw material (goes to Cost of Materials Consumed)
-  const isRawMaterial = (item: any) => {
-    const category = (item['Stock Category'] || '').toLowerCase();
-    const stockGroup = (item['Stock Group'] || '').toLowerCase();
-    return (
-      category.includes('raw') || 
-      stockGroup.includes('raw') ||
-      category.includes('pack') || 
-      stockGroup.includes('pack') ||
-      category.includes('consumable') || 
-      category.includes('other') ||
-      category.includes('component') || 
-      category.includes('intermediate')
-    );
-  };
-
-  // Calculate Changes in Inventories from stock data (EXCLUDES raw materials)
-  const changesInInventories = useMemo(() => {
-    if (!stockData || !Array.isArray(stockData) || stockData.length === 0) {
-      console.log('ScheduleIIIProfitLoss: No stock data available');
-      return 0;
-    }
-    
-    // Filter to non-raw-material items (finished goods, WIP, stock-in-trade)
-    const finishedItems = stockData.filter(item => item && !isRawMaterial(item));
-    
-    // Stock values are assets (Dr), so use Math.abs to ensure positive values
-    const totalOpening = finishedItems.reduce((sum, item) => {
-      return sum + Math.abs(item['Opening Value'] || 0);
-    }, 0);
-    const totalClosing = finishedItems.reduce((sum, item) => {
-      return sum + Math.abs(item['Closing Value'] || 0);
-    }, 0);
-    const changes = totalOpening - totalClosing;
-    
-    console.log('ScheduleIIIProfitLoss: Changes in Inventories calculated:', {
-      totalStockItems: stockData.length,
-      finishedGoodsItems: finishedItems.length,
-      totalOpening,
-      totalClosing,
-      changes
-    });
-    
-    return changes; // Opening - Closing
-  }, [stockData]);
-
-  // Calculate computed totals
-  const currentRevenue = getAmountByFsArea(currentLines, 'Revenue');
-  const currentOtherIncome = getAmountByFsArea(currentLines, 'Other Income');
+  // Calculate computed totals - Use note values when available, fallback to trial balance
+  const currentRevenue = noteValues.revenueFromOperations ?? getAmountByFsArea(currentLines, 'Revenue');
+  const currentOtherIncome = noteValues.otherIncome ?? getAmountByFsArea(currentLines, 'Other Income');
   const currentTotalIncome = currentRevenue + currentOtherIncome;
   
-  // Calculate Total Expenses - sum all expense lines
-  const expenseLines = (currentLines || []).filter(l => l && (l.aile === 'Expense' || l.note_group === 'Expenses'));
-  const currentTotalExpenses = expenseLines.reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+  // Calculate Total Expenses from note values
+  const currentCostOfMaterials = noteValues.costOfMaterialsConsumed ?? 0;
+  const currentPurchases = noteValues.purchasesOfStockInTrade ?? 0;
+  const currentChangesInInventories = noteValues.changesInInventories ?? 0;
+  const currentEmployeeBenefits = noteValues.employeeBenefits ?? 0;
+  const currentFinanceCosts = noteValues.financeCosts ?? 0;
+  const currentDepreciation = noteValues.depreciation ?? 0;
+  const currentOtherExpenses = noteValues.otherExpenses ?? 0;
   
-  console.log('ScheduleIIIProfitLoss: Total Expenses:', {
-    expenseLineCount: expenseLines.length,
-    totalExpenses: currentTotalExpenses,
-    sampleLines: expenseLines.slice(0, 3).map(l => ({ name: l.account_name, aile: l.aile, note_group: l.note_group, balance: l.closing_balance }))
+  // Sum all expense note values
+  const currentTotalExpenses = 
+    currentCostOfMaterials +
+    currentPurchases +
+    currentChangesInInventories +
+    currentEmployeeBenefits +
+    currentFinanceCosts +
+    currentDepreciation +
+    currentOtherExpenses;
+  
+  console.log('ScheduleIIIProfitLoss: P&L populated from note values:', {
+    revenue: currentRevenue,
+    otherIncome: currentOtherIncome,
+    costOfMaterials: currentCostOfMaterials,
+    purchases: currentPurchases,
+    changesInInventories: currentChangesInInventories,
+    employeeBenefits: currentEmployeeBenefits,
+    financeCosts: currentFinanceCosts,
+    depreciation: currentDepreciation,
+    otherExpenses: currentOtherExpenses,
+    totalExpenses: currentTotalExpenses
   });
   
   const currentPBT = currentTotalIncome - currentTotalExpenses;
@@ -233,24 +209,19 @@ export function ScheduleIIIProfitLoss({
       let previousAmount = 0;
       let noteKey: string | undefined;
 
-      // Check for note values first (from computed notes)
+      // Check for note values first (from computed notes) - ALWAYS USE NOTE VALUES when available
       if (formatItem.fsArea) {
         noteKey = fsAreaToNoteKey[formatItem.fsArea];
         
-        // Use noteValues if available for this fsArea
+        // PRIORITY: Use noteValues from computed notes
         if (noteKey && noteValues[noteKey] !== undefined) {
           currentAmount = noteValues[noteKey] as number;
           console.log(`P&L: Using note value for ${formatItem.fsArea}:`, currentAmount);
-        } else if (formatItem.fsArea === 'Inventory Change' || 
-            formatItem.particulars.toLowerCase().includes('changes in inventories')) {
-          // Use calculated changes in inventories from stock data
-          currentAmount = changesInInventories;
-          noteKey = 'changesInInventories';
-          console.log('P&L: Applying Changes in Inventories:', currentAmount);
         } else {
-          // Fall back to trial balance lines
+          // Fall back to trial balance lines only if no note value exists
           currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
           previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
+          console.log(`P&L: No note value for ${formatItem.fsArea}, using trial balance:`, currentAmount);
         }
       } else if (formatItem.particulars.includes('Total Income')) {
         currentAmount = currentTotalIncome;
@@ -287,7 +258,7 @@ export function ScheduleIIIProfitLoss({
     });
 
     return items;
-  }, [plFormat, currentLines, previousLines, startingNoteNumber, currentTotalIncome, prevTotalIncome, currentTotalExpenses, prevTotalExpenses, currentPBT, prevPBT, currentPAT, prevPAT, changesInInventories, noteValues]);
+  }, [plFormat, currentLines, previousLines, startingNoteNumber, currentTotalIncome, prevTotalIncome, currentTotalExpenses, prevTotalExpenses, currentPBT, prevPBT, currentPAT, prevPAT, noteValues]);
 
   // Store note number mapping for click handler
   const noteNumberMap = useMemo(() => {
