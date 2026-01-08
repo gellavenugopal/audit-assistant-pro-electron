@@ -1805,57 +1805,19 @@ export default function TrialBalanceNew() {
             {odbcConnection.isConnected ? 'Tally Connected' : 'Not Connected'}
           </div>
 
-          {/* Settings */}
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <Settings className="w-4 h-4" />
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Connection Settings</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="odbc-port">Tally ODBC Port</Label>
-                  <Input
-                    id="odbc-port"
-                    type="text"
-                    value={odbcPort}
-                    onChange={(e) => setOdbcPort(e.target.value)}
-                    placeholder="9000"
-                  />
-                </div>
-                <Button
-                  onClick={handleConnectTally}
-                  disabled={isFetching || odbcConnection.isConnecting}
-                  className="w-full"
-                >
-                  {isFetching || odbcConnection.isConnecting ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <Database className="w-4 h-4 mr-2" />
-                      Test Connection
-                    </>
-                  )}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          {/* More Menu */}
+          {/* Settings Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <ChevronDown className="w-4 h-4" />
+                <Settings className="w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => setIsEntityDialogOpen(true)}>
+                <Cog className="w-4 h-4 mr-2" />
+                Configure Entity
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setIsClassificationManagerOpen(true)} disabled={currentData.length === 0}>
                 <Settings className="w-4 h-4 mr-2" />
                 Classification Manager
@@ -1875,55 +1837,6 @@ export default function TrialBalanceNew() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-      </div>
-
-      {/* Row 2: Company Info */}
-      <div className="flex items-center justify-between px-2 py-1 bg-gradient-to-r from-gray-50 to-white border-b" style={{ minHeight: '28px' }}>
-        <div className="flex items-center gap-2">
-          {/* Company Name - Large & Bold */}
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-sm font-bold text-gray-900">
-              {entityName ? entityName.replace(/\s*\(from[^)]+\)/, '') : 'No Company Selected'}
-            </h1>
-            {entityName && entityName.includes('(from') && (
-              <span className="text-xs text-gray-500 font-normal">
-                {entityName.match(/\(from[^)]+\)/)?.[0] || ''}
-              </span>
-            )}
-          </div>
-
-          {/* Entity Type Badge */}
-          {entityType && (
-            <Badge variant="outline" className="text-xs font-normal">
-              {entityType}
-            </Badge>
-          )}
-
-          {/* Business Type Badge */}
-          {businessType && (
-            <Badge variant="secondary" className="text-xs">
-              {businessType}
-            </Badge>
-          )}
-        </div>
-
-        {/* Right: FY Badge + Configure Button */}
-        <div className="flex items-center gap-2">
-          {fromDate && toDate && (
-            <Badge variant="outline" className="text-xs font-medium">
-              FY {new Date(fromDate).getFullYear()}-{new Date(toDate).getFullYear().toString().slice(-2)}
-            </Badge>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsEntityDialogOpen(true)}
-            className="h-7 text-xs"
-          >
-            <Settings className="w-3 h-3 mr-1" />
-            Configure Entity
-          </Button>
         </div>
       </div>
       

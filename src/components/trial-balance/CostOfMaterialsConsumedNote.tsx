@@ -7,7 +7,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { LayoutList, List, Download } from 'lucide-react';
@@ -467,29 +466,44 @@ export function CostOfMaterialsConsumedNote({
   );
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between border-b pb-2">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between border-b pb-1">
         <div>
-          <h3 className="text-lg font-bold">
+          <h3 className="text-sm font-semibold">
             Note {noteNumber}: Cost of materials consumed
           </h3>
-          <p className="text-sm text-gray-600">{getScaleLabel()}</p>
+          <p className="text-[10px] text-gray-500">{getScaleLabel()}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'summary' | 'detailed')}>
-            <TabsList className="h-8">
-              <TabsTrigger value="summary" className="text-xs gap-1 px-2">
-                <LayoutList className="h-3 w-3" />
-                Summary
-              </TabsTrigger>
-              <TabsTrigger value="detailed" className="text-xs gap-1 px-2">
-                <List className="h-3 w-3" />
-                Detailed
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="h-4 w-4 mr-1" />
+        <div className="flex items-center gap-1">
+          {/* Compact segmented control */}
+          <div className="flex items-center bg-gray-100 rounded p-0.5">
+            <button
+              onClick={() => setViewMode('summary')}
+              className={cn(
+                "px-2 py-0.5 text-[10px] font-medium rounded transition-colors",
+                viewMode === 'summary' 
+                  ? "bg-white text-blue-700 shadow-sm" 
+                  : "text-gray-600 hover:text-gray-900"
+              )}
+            >
+              <LayoutList className="h-3 w-3 inline mr-1" />
+              Summary
+            </button>
+            <button
+              onClick={() => setViewMode('detailed')}
+              className={cn(
+                "px-2 py-0.5 text-[10px] font-medium rounded transition-colors",
+                viewMode === 'detailed' 
+                  ? "bg-white text-blue-700 shadow-sm" 
+                  : "text-gray-600 hover:text-gray-900"
+              )}
+            >
+              <List className="h-3 w-3 inline mr-1" />
+              Detailed
+            </button>
+          </div>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={handleExport}>
+            <Download className="h-3 w-3 mr-1" />
             Export
           </Button>
         </div>

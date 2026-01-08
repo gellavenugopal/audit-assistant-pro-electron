@@ -393,37 +393,7 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
   }, [filteredData, focusedRowIndex, stockData, toggleSelection, handleDoubleClick, selectAll, clearSelection]);
 
   return (
-    <div className="space-y-4" onKeyDown={handleKeyDown} tabIndex={0}>
-      {/* Action bar - only show when there are items or selections */}
-      {baseStockData.length > 0 && (
-        <div className="flex justify-end items-center gap-2">
-          {selectedIndices.size > 0 && (
-            <>
-              <span className="text-sm text-blue-600 font-medium">
-                {selectedIndices.size} selected
-              </span>
-              <Button size="sm" variant="default" onClick={() => setIsBulkUpdateDialogOpen(true)}>
-                <Settings2 className="w-4 h-4 mr-2" />
-                Bulk Update ({selectedIndices.size})
-              </Button>
-              <Button size="sm" variant="outline" onClick={clearSelection}>
-                Clear Selection
-              </Button>
-            </>
-          )}
-          {businessType && baseStockData.length > 0 && (
-            <Button size="sm" variant="outline" onClick={handleAutoClassifyAll}>
-              <Wand2 className="w-4 h-4 mr-2" />
-              Auto-Classify
-            </Button>
-          )}
-          <Button size="sm" variant="outline">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Item
-          </Button>
-        </div>
-      )}
-
+    <div className="space-y-0" onKeyDown={handleKeyDown} tabIndex={0}>
       {baseStockData.length === 0 ? (
         <div className="border rounded-lg p-8 text-center text-muted-foreground">
           No stock items loaded. Stock items will be imported from Tally if available.
@@ -434,6 +404,37 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
         </div>
       ) : (
         <div className="border rounded-lg">
+          {/* Compact toolbar row inside table container */}
+          <div className="flex items-center justify-between px-2 py-1 bg-gray-50 border-b" style={{ minHeight: '28px' }}>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              {selectedIndices.size > 0 && (
+                <>
+                  <span className="text-blue-600 font-medium">
+                    {selectedIndices.size} selected
+                  </span>
+                  <Button size="sm" variant="default" className="h-6 px-2 text-xs" onClick={() => setIsBulkUpdateDialogOpen(true)}>
+                    <Settings2 className="w-3 h-3 mr-1" />
+                    Bulk Update
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={clearSelection}>
+                    Clear
+                  </Button>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {businessType && (
+                <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={handleAutoClassifyAll}>
+                  <Wand2 className="w-3 h-3 mr-1" />
+                  Auto-Classify
+                </Button>
+              )}
+              <Button size="sm" variant="outline" className="h-6 px-2 text-xs">
+                <Plus className="w-3 h-3 mr-1" />
+                Add Item
+              </Button>
+            </div>
+          </div>
           <Table>
             <TableHeader className="sticky top-0 bg-white">
               <TableRow>

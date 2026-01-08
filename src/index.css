@@ -202,7 +202,7 @@
     padding: 2px 6px !important;
   }
 
-  /* Compact tab bars */
+  /* Compact tab bars - FIX: Ensure selected tab text is always visible */
   [role="tablist"] {
     padding: 2px !important;
     gap: 2px;
@@ -215,6 +215,25 @@
     padding: 4px 10px !important;
     height: auto !important;
     min-height: auto !important;
+    /* FIX: Ensure text is always visible */
+    color: inherit !important;
+  }
+
+  /* FIX: Selected tab must always show text - override any background-only states */
+  [role="tab"][data-state="active"] {
+    color: hsl(var(--primary)) !important;
+    font-weight: 500;
+  }
+
+  [role="tab"][aria-selected="true"] {
+    color: hsl(var(--primary)) !important;
+    font-weight: 500;
+  }
+
+  /* Ensure inactive tabs are also visible */
+  [role="tab"][data-state="inactive"],
+  [role="tab"][aria-selected="false"] {
+    color: hsl(var(--muted-foreground)) !important;
   }
 
   /* Compact workspace headers */

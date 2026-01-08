@@ -365,16 +365,16 @@ export function ScheduleIIIProfitLoss({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h2 className="text-xl font-bold">Statement of Profit and Loss</h2>
-        <p className="text-sm text-muted-foreground">{formatLabel}</p>
+    <div className="space-y-2">
+      <div className="text-center mb-2">
+        <h2 className="text-base font-semibold">Statement of Profit and Loss</h2>
+        <p className="text-xs text-muted-foreground">{formatLabel}</p>
         {reportingScale !== 'auto' && (
-          <p className="text-xs text-muted-foreground mt-1">{getScaleLabel()}</p>
+          <p className="text-[10px] text-muted-foreground">{getScaleLabel()}</p>
         )}
       </div>
 
-      <div className="audit-card p-0 overflow-hidden">
+      <div className="border rounded overflow-hidden">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
