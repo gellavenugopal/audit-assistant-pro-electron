@@ -6,11 +6,13 @@ import { ClipboardCheck, FileSignature, ShieldCheck, UploadCloud, FileDown } fro
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import { LettersPage } from '@/components/appointment/Letters';
 
 export default function Appointment() {
   const { currentEngagement } = useEngagement();
   const navigate = useNavigate();
+  const [showLettersPage, setShowLettersPage] = useState(false);
   const appointmentLetterInputRef = useRef<HTMLInputElement>(null);
   const adt1InputRef = useRef<HTMLInputElement>(null);
   const challanInputRef = useRef<HTMLInputElement>(null);
@@ -166,30 +168,40 @@ export default function Appointment() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileSignature className="h-5 w-5" />
-              Engagement Letter
-            </CardTitle>
-            <CardDescription>
-              Mail-merge driven; will link to Word template once rules are finalized.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        {/* Engagement Letter - Now with full generator */}
+        {!showLettersPage ? (
+          <Card className="md:col-span-2 xl:col-span-3">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileSignature className="h-5 w-5" />
+                Engagement Letter Generator
+              </CardTitle>
+              <CardDescription>
+                Generate professional engagement letters for different audit types
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                onClick={() => setShowLettersPage(true)}
+                className="gap-2"
+              >
+                <FileDown className="h-4 w-4" />
+                Generate Engagement Letter
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="md:col-span-2 xl:col-span-3">
             <Button 
               variant="outline" 
-              size="sm"
-              onClick={handleGenerateEngagementLetter}
+              onClick={() => setShowLettersPage(false)}
+              className="mb-4"
             >
-              <FileDown className="h-4 w-4 mr-2" />
-              Generate Engagement Letter
+              ← Back to Appointment
             </Button>
-            <p className="text-xs text-muted-foreground">
-              Demo mode - mail-merge logic and template will be added later.
-            </p>
-          </CardContent>
-        </Card>
+            <LettersPage engagementId={currentEngagement?.id || ''} />
+          </div>
+        )}
 
         <Card>
           <CardHeader>

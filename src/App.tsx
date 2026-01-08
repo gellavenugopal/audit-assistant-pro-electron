@@ -97,6 +97,16 @@ const App = () => (
                   }
                 />
                 <Route
+                  path="/trial-balance-new"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <TrialBalanceNew />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
                   path="/appointment"
                   element={
                     <ProtectedEngagementRoute>
@@ -290,6 +300,16 @@ const App = () => (
                     <ProtectedEngagementRoute>
                       <MainLayout>
                         <StaffDashboard />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/compliance-applicability"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <ComplianceApplicability />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
