@@ -324,7 +324,8 @@ export function classifyLedgerWithPriority(
   closingBalance: number,
   savedMappingsDict: Record<string, ClassificationResult> | null = null,
   businessType: string = '',
-  constitution: string = 'company'
+  constitution: string = 'company',
+  isRevenue: boolean = false
 ): ClassificationResult {
   // Generate composite key for lookup
   const compositeKey = generateLedgerKey(ledgerName, tallyGroup);
@@ -334,7 +335,29 @@ export function classifyLedgerWithPriority(
     return savedMappingsDict[compositeKey];
   }
   
-  // PRIORITY 2: Business Type Specific Rules
+  // PRIORITY 2: Special Equity Classification Rule
+  // If IsRevenue = No AND Primary Group = Capital / Reserves & Surplus AND balance is Credit → H2 = Equity
+  const groupLower = tallyGroup.toLowerCase();
+  const isCredit = closingBalance < 0; // Credit balance in accounting
+  const isRevenueGroup = ['Sales Accounts', 'Direct Incomes', 'Indirect Incomes'].includes(tallyGroup);
+  
+  if (!isRevenueGroup && 
+      (groupLower.includes('capital') || groupLower.includes('reserve') || groupLower.includes('surplus')) && 
+      isCredit) {
+    return {
+      h1: 'Balance Sheet',
+      h2: 'Equity',
+      h3: groupLower.includes('capital') ? 'Share Capital' : 'Other Equity',
+      h4: groupLower.includes('reserve') ? 'Reserves and Surplus' : '',
+      h5: '',
+      technicalCode: 'BS_EQUITY',
+      headCode: 'EQUITY_HEAD',
+      sectionCode: 'EQUITY',
+      noteCode: 'NOTE_EQUITY'
+    };
+  }
+  
+  // PRIORITY 3: Business Type Specific Rules
   
   // Trading Business: Purchase Accounts → Purchase of Stock-in-Trade
   if (businessType === 'Trading' && tallyGroup === 'Purchase Accounts') {
@@ -417,10 +440,20 @@ export function classifyLedgerWithPriority(
     // Try priority-based expense classification first
     const expenseMatch = classifyExpenseLedger(ledgerName);
     
+    // Determine H1 and H2 based on IsRevenue and closing balance
+    const h1 = isRevenue ? 'Profit and Loss' : 'Balance Sheet';
+    const isNegative = closingBalance < 0;
+    let h2 = '';
+    if (h1 === 'Balance Sheet') {
+      h2 = isNegative ? 'Assets' : 'Liabilities';
+    } else { // Profit and Loss
+      h2 = isNegative ? 'Expenses' : 'Income';
+    }
+    
     if (expenseMatch) {
       return {
-        h1: 'Profit and Loss',
-        h2: 'Expenses',
+        h1,
+        h2,
         h3: expenseMatch.h3,
         h4: expenseMatch.h4,
         h5: ''
@@ -430,8 +463,8 @@ export function classifyLedgerWithPriority(
     // Fallback to Other Expenses with keyword matching
     const h4Matched = matchOtherExpenseKeyword(ledgerName);
     return {
-      h1: 'Profit and Loss',
-      h2: 'Expenses',
+      h1,
+      h2,
       h3: 'Other expenses',
       h4: h4Matched,
       h5: ''
@@ -513,27 +546,54 @@ export function classifyDataframeBatch(
   constitution: string = 'company'
 ): LedgerRow[] {
   return dataframe.map(row => {
+    // First get the IsRevenue value to determine correct H1/H2
+    const isRevenue = row['Is Revenue'] === 'Yes';
+    const closingBalance = row['Closing Balance'] || 0;
+    
     const classification = classifyLedgerWithPriority(
       row['Ledger Name'] || '',
       row['Primary Group'] || '',
-      row['Closing Balance'] || 0,
+      closingBalance,
       savedMappingsDict,
       businessType,
-      constitution
+      constitution,
+      isRevenue // Pass isRevenue to classification
     );
+    
+    // IMPORTANT: Always override H1/H2 based on IsRevenue and closing balance
+    // Skip this logic ONLY for "Profit & Loss A/c" ledger with Primary parent
+    const ledgerName = (row['Ledger Name'] || '').toLowerCase();
+    const parentGroup = (row['Parent Group'] || '').toLowerCase();
+    const skipAutoClassification = ledgerName.includes('profit') && ledgerName.includes('loss') && ledgerName.includes('a/c') && parentGroup.includes('primary');
+    
+    let finalH1 = classification.h1;
+    let finalH2 = classification.h2;
+    
+    if (!skipAutoClassification) {
+      // Determine H1 based on IsRevenue
+      finalH1 = isRevenue ? 'Profit and Loss' : 'Balance Sheet';
+      
+      // Determine H2 based on H1 and closing balance sign
+      const isNegative = closingBalance < 0;
+      if (finalH1 === 'Balance Sheet') {
+        finalH2 = isNegative ? 'Assets' : 'Liabilities';
+      } else { // Profit and Loss
+        finalH2 = isNegative ? 'Expenses' : 'Income';
+      }
+    }
     
     // Determine status
     let status = 'Mapped';
-    if (classification.h1 === 'Needs User Input') {
+    if (finalH1 === 'Needs User Input') {
       status = 'Error';
-    } else if (!classification.h1 || !classification.h2) {
+    } else if (!finalH1 || !finalH2) {
       status = 'Unmapped';
     }
     
     return {
       ...row,
-      'H1': classification.h1,
-      'H2': classification.h2,
+      'H1': finalH1,
+      'H2': finalH2,
       'H3': classification.h3,
       'H4': classification.h4,
       'H5': classification.h5,

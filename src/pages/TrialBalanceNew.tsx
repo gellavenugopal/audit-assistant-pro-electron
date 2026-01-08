@@ -557,11 +557,8 @@ export default function TrialBalanceNew() {
         return !(opening === 0 && closing === 0);
       });
       
-      // Auto-classify the filtered data
-      let classified = classifyDataframeBatch(dataToClassify, savedMappings, businessType, constitution);
-      
-      // Apply automatic H1 and H2 classification based on Is Revenue and Closing Balance
-      classified = applyAutoH1H2Classification(classified);
+      // Auto-classify the filtered data (now handles IsRevenue internally)
+      const classified = classifyDataframeBatch(dataToClassify, savedMappings, businessType, constitution);
       
       // Import directly based on selected period type
       if (importPeriodType === 'current') {
@@ -1419,16 +1416,33 @@ export default function TrialBalanceNew() {
   }, []);
 
   // Clear Data
-  const handleClear = useCallback(() => {
-    if (confirm('Are you sure you want to clear all data?')) {
-      setCurrentData([]);
-      setCurrentStockData([]);
-      toast({
-        title: 'Data Cleared',
-        description: 'All data has been cleared'
-      });
+  const handleClear = useCallback(async () => {
+    if (confirm('Are you sure you want to clear all data? This will clear both Actual TB and Classified TB.')) {
+      try {
+        // Delete from database if there are lines
+        if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0) {
+          const lineIds = trialBalanceDB.lines.map(line => line.id);
+          await trialBalanceDB.deleteLines(lineIds);
+        }
+        
+        // Clear state
+        setActualData([]);
+        setCurrentData([]);
+        setCurrentStockData([]);
+        toast({
+          title: 'Data Cleared',
+          description: 'All Actual TB and Classified TB data has been cleared'
+        });
+      } catch (error) {
+        console.error('Error clearing data:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to clear data',
+          variant: 'destructive'
+        });
+      }
     }
-  }, [toast]);
+  }, [toast, trialBalanceDB]);
   
   // Rule Engine Handlers
   const handleAddRule = useCallback(() => {
@@ -2879,26 +2893,12 @@ export default function TrialBalanceNew() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
-            {/* Entity Type */}
+            {/* Entity Type - Read Only Display */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Entity Type *</label>
-              <Select value={entityType} onValueChange={setEntityType}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select entity type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ENTITY_TYPES.map(type => (
-                    <SelectItem 
-                      key={type} 
-                      value={type}
-                      disabled={DISABLED_ENTITY_TYPES.includes(type)}
-                      className={DISABLED_ENTITY_TYPES.includes(type) ? "text-gray-400" : ""}
-                    >
-                      {type}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm">
+                {entityType || 'Not configured'}
+              </div>
             </div>
 
             {/* Business Type */}
