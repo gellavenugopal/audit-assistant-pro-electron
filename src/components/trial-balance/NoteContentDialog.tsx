@@ -96,15 +96,40 @@ export function NoteContentDialog({
   // Calculate total from ledgers
   const total = ledgers.reduce((sum, l) => sum + Math.abs(l.closingBalance || 0), 0);
 
+  const getScaleLabel = () => {
+    switch (reportingScale) {
+      case 'rupees': return '(Amount in ₹)';
+      case 'thousands': return '(Amount in ₹ Thousands)';
+      case 'lakhs': return '(Amount in ₹ Lakhs)';
+      case 'crores': return '(Amount in ₹ Crores)';
+      case 'auto': return '(Auto Scale)';
+      default: return '';
+    }
+  };
+
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
+    const sign = amount < 0 ? '-' : '';
     const absAmount = Math.abs(amount);
-    if (absAmount >= 10000000) {
-      return `₹${(absAmount / 10000000).toFixed(2)} Cr`;
-    } else if (absAmount >= 100000) {
-      return `₹${(absAmount / 100000).toFixed(2)} L`;
+    
+    switch (reportingScale) {
+      case 'rupees':
+        return `${sign}₹${absAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+      case 'thousands':
+        return `${sign}₹${(absAmount / 1000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      case 'lakhs':
+        return `${sign}₹${(absAmount / 100000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      case 'crores':
+        return `${sign}₹${(absAmount / 10000000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      case 'auto':
+      default:
+        if (absAmount >= 10000000) {
+          return `${sign}₹${(absAmount / 10000000).toFixed(2)} Cr`;
+        } else if (absAmount >= 100000) {
+          return `${sign}₹${(absAmount / 100000).toFixed(2)} L`;
+        }
+        return `${sign}₹${absAmount.toLocaleString('en-IN')}`;
     }
-    return `₹${absAmount.toLocaleString('en-IN')}`;
   };
 
   const renderNoteComponent = () => {
@@ -141,6 +166,9 @@ export function NoteContentDialog({
             </span>
             {title}
           </DialogTitle>
+          {reportingScale && reportingScale !== 'auto' && (
+            <p className="text-xs text-muted-foreground">{getScaleLabel()}</p>
+          )}
         </DialogHeader>
 
         {hasNoteComponent ? (

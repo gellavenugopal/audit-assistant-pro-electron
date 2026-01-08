@@ -310,6 +310,7 @@ export function ScheduleIIIBalanceSheet({
         onOpenChange={setAnnexureOpen}
         noteKey={selectedNote}
         ledgers={selectedNote ? noteLedgers[selectedNote] || [] : []}
+        reportingScale={reportingScale}
       />
     </div>
   );

@@ -153,6 +153,17 @@ export function LedgerAnnexureDialog({
     return ledgers.reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
   }, [ledgers]);
 
+  const getScaleLabel = () => {
+    switch (reportingScale) {
+      case 'rupees': return '(Amount in ₹)';
+      case 'thousands': return '(Amount in ₹ Thousands)';
+      case 'lakhs': return '(Amount in ₹ Lakhs)';
+      case 'crores': return '(Amount in ₹ Crores)';
+      case 'auto': return '(Auto Scale)';
+      default: return '';
+    }
+  };
+
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
     const sign = amount < 0 ? '-' : '';
@@ -217,6 +228,9 @@ export function LedgerAnnexureDialog({
               <DialogDescription>
                 Ledger-wise details showing {ledgers.length} ledger(s) with total of {formatCurrency(totalAmount)}
               </DialogDescription>
+              {reportingScale && reportingScale !== 'auto' && (
+                <p className="text-xs text-muted-foreground mt-1">{getScaleLabel()}</p>
+              )}
             </div>
             <Button variant="outline" size="sm" onClick={handleExportToExcel}>
               <Download className="w-4 h-4 mr-2" />

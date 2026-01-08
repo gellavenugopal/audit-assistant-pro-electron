@@ -41,27 +41,29 @@ export function EmployeeBenefitsNote({ noteNumber, ledgers, reportingScale = 'ru
     };
 
     ledgers.forEach(ledger => {
-      // Extract H3 from classification string
+      // Extract H3 and H4 from classification string
       const classification = ledger.classification || '';
       const parts = classification.split('>').map(p => p.trim());
       const h3 = parts.length > 1 ? parts[1] : '';
-      const h3Lower = h3.toLowerCase();
+      const h4 = parts.length > 2 ? parts[2] : '';
+      // Prefer H4 if available, otherwise use H3
+      const classificationText = (h4 || h3).toLowerCase();
 
-      // Use H3 classification to categorize
-      if (!h3) {
+      // Use H4/H3 classification to categorize
+      if (!classificationText) {
         categories['Staff welfare expenses'].push(ledger);
         return;
       }
 
-      if (h3Lower.includes('salary') || h3Lower.includes('wage') || h3Lower.includes('bonus') || h3Lower.includes('allowance')) {
+      if (classificationText.includes('salary') || classificationText.includes('wage') || classificationText.includes('bonus') || classificationText.includes('allowance')) {
         categories['Salaries, wages, bonus and other allowances'].push(ledger);
-      } else if (h3Lower.includes('provident') || h3Lower.includes('pf') || h3Lower.includes('esi') || h3Lower.includes('pension')) {
+      } else if (classificationText.includes('provident') || classificationText.includes('pf') || classificationText.includes('esi') || classificationText.includes('pension')) {
         categories['Contribution to provident and other funds'].push(ledger);
-      } else if (h3Lower.includes('gratuity')) {
+      } else if (classificationText.includes('gratuity')) {
         categories['Gratuity expenses'].push(ledger);
-      } else if (h3Lower.includes('director') && h3Lower.includes('remuneration')) {
+      } else if (classificationText.includes('director') && classificationText.includes('remuneration')) {
         categories['Director\'s Remuneration'].push(ledger);
-      } else if (h3Lower.includes('esop') || h3Lower.includes('stock option') || h3Lower.includes('share based')) {
+      } else if (classificationText.includes('esop') || classificationText.includes('stock option') || classificationText.includes('share based')) {
         categories['Share based payments to employees(ESOP)'].push(ledger);
       } else {
         categories['Staff welfare expenses'].push(ledger);

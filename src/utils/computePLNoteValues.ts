@@ -101,16 +101,22 @@ export function computePLNoteValues(
 
     const h1 = row['H1'] || '';
     const h2 = row['H2'] || '';
+    const h3 = row['H3'] || '';
     const ledgerName = row['Ledger Name'] || '';
     const groupName = row['Group Name'] || '';
     const openingBalance = row['Opening Balance'] || 0;
     const closingBalance = row['Closing Balance'] || 0;
 
-    // Only process P&L items
-    if (h1 !== 'Profit and Loss') return;
+    // Only process P&L items - handle both possible H1 values
+    if (h1 !== 'Profit and Loss' && h1 !== 'P&L Account') return;
 
-    // Determine note key from H2
-    const noteKey = H2_TO_NOTE_KEY[h2];
+    // Debug: Log P&L items to see the actual structure
+    if (ledgerName) {
+      console.log('P&L Ledger:', { h1, h2, h3, ledgerName, closingBalance });
+    }
+
+    // Determine note key from H2 or H3
+    let noteKey = H2_TO_NOTE_KEY[h2] || H2_TO_NOTE_KEY[h3];
     
     if (noteKey) {
       const ledgerItem: NoteLedgerItem = {
@@ -180,47 +186,92 @@ export function computePLNoteValues(
 
   // Calculate cost of materials consumed and changes in inventories from stock data
   if (stockData && Array.isArray(stockData) && stockData.length > 0) {
-    let totalOpeningStock = 0;
-    let totalClosingStock = 0;
-    let totalPurchases = 0;
+    // Helper to check if item is a raw material
+    const isRawMaterial = (item: StockItem) => {
+      const category = (item['Stock Category'] || '').toLowerCase();
+      const stockGroup = (item['Stock Group'] || '').toLowerCase();
+      return (
+        category.includes('raw') || 
+        stockGroup.includes('raw') ||
+        category.includes('pack') || 
+        stockGroup.includes('pack') ||
+        category.includes('consumable') || 
+        category.includes('other') ||
+        category.includes('component') || 
+        category.includes('intermediate')
+      );
+    };
 
-    // Calculate opening and closing inventory
+    // Calculate Changes in Inventories (excludes raw materials - only FG, WIP, SIT)
+    let changesInvOpening = 0;
+    let changesInvClosing = 0;
+    
     stockData.forEach(item => {
-      if (!item) return;
-      const openingValue = Math.abs(item['Opening Value'] || 0);
-      const closingValue = Math.abs(item['Closing Value'] || 0);
-      totalOpeningStock += openingValue;
-      totalClosingStock += closingValue;
+      if (!item || isRawMaterial(item)) return; // Skip raw materials
+      changesInvOpening += Math.abs(item['Opening Value'] || 0);
+      changesInvClosing += Math.abs(item['Closing Value'] || 0);
+    });
+    
+    // Changes in inventories = Opening - Closing (for FG, WIP, SIT only)
+    const changesInInventories = changesInvOpening - changesInvClosing;
+    noteValues.changesInInventories = changesInInventories;
+
+    // Calculate Cost of Materials Consumed (includes raw materials)
+    let rawMaterialOpening = 0;
+    let rawMaterialClosing = 0;
+    
+    stockData.forEach(item => {
+      if (!item || !isRawMaterial(item)) return; // Only raw materials
+      rawMaterialOpening += Math.abs(item['Opening Value'] || 0);
+      rawMaterialClosing += Math.abs(item['Closing Value'] || 0);
     });
 
-    // Get purchases from ledger data
+    // Get purchases from ledger data - ONLY those classified as "Cost of materials consumed"
+    let totalPurchases = 0;
     data.forEach(row => {
       if (!row) return;
       const h3 = (row['H3'] || '').toLowerCase();
-      const ledgerName = (row['Ledger Name'] || '').toLowerCase();
       
-      if (h3.includes('purchase') || ledgerName.includes('purchase')) {
+      // ONLY include if H3 is "Cost of materials consumed"
+      if (h3.includes('cost of materials consumed')) {
         totalPurchases += Math.abs(row['Closing Balance'] || 0);
+        
+        // Also add to costOfMaterialsConsumed ledger list
+        noteLedgers.costOfMaterialsConsumed.push({
+          ledgerName: row['Ledger Name'] || '',
+          groupName: row['Group Name'] || row['Primary Group'] || '',
+          openingBalance: row['Opening Balance'] || 0,
+          closingBalance: row['Closing Balance'] || 0,
+          classification: `${row['H2']}${row['H3'] ? ' > ' + row['H3'] : ''}${row['H4'] ? ' > ' + row['H4'] : ''}`,
+        });
       }
     });
 
-    // Changes in inventories = Opening Stock - Closing Stock (positive if decrease)
-    const changesInInventories = totalOpeningStock - totalClosingStock;
-    noteValues.changesInInventories = changesInInventories;
-
-    // Cost of materials consumed = Opening + Purchases - Closing
-    const costOfMaterialsConsumed = totalOpeningStock + totalPurchases - totalClosingStock;
+    // Cost of materials consumed = Raw Material Opening + Purchases - Raw Material Closing
+    const costOfMaterialsConsumed = rawMaterialOpening + totalPurchases - rawMaterialClosing;
     noteValues.costOfMaterialsConsumed = costOfMaterialsConsumed;
 
-    // Add stock items to changes in inventories ledger list
+    // Add stock items to changes in inventories ledger list (non-raw materials only)
     stockData.forEach(item => {
-      if (!item) return;
+      if (!item || isRawMaterial(item)) return;
       noteLedgers.changesInInventories.push({
         ledgerName: item['Item Name'] || 'Unknown Item',
         groupName: item['Stock Group'] || 'Unknown Group',
         openingBalance: Math.abs(item['Opening Value'] || 0),
         closingBalance: Math.abs(item['Closing Value'] || 0),
         classification: item['Stock Category'] || 'Stock Item',
+      });
+    });
+
+    // Add raw materials to cost of materials ledger list
+    stockData.forEach(item => {
+      if (!item || !isRawMaterial(item)) return;
+      noteLedgers.costOfMaterialsConsumed.push({
+        ledgerName: item['Item Name'] || 'Unknown Item',
+        groupName: item['Stock Group'] || 'Unknown Group',
+        openingBalance: Math.abs(item['Opening Value'] || 0),
+        closingBalance: Math.abs(item['Closing Value'] || 0),
+        classification: item['Stock Category'] || 'Raw Material',
       });
     });
 

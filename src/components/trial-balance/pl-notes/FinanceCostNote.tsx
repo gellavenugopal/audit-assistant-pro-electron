@@ -41,27 +41,29 @@ export function FinanceCostNote({ noteNumber, ledgers, reportingScale = 'rupees'
     };
 
     ledgers.forEach(ledger => {
-      // Extract H3 from classification string
+      // Extract H3 and H4 from classification string
       const classification = ledger.classification || '';
       const parts = classification.split('>').map(p => p.trim());
       const h3 = parts.length > 1 ? parts[1] : '';
-      const h3Lower = h3.toLowerCase();
+      const h4 = parts.length > 2 ? parts[2] : '';
+      // Prefer H4 if available, otherwise use H3
+      const classificationText = (h4 || h3).toLowerCase();
 
-      // Use H3 classification to categorize
-      if (!h3) {
+      // Use H4/H3 classification to categorize
+      if (!classificationText) {
         categories['Other borrowing costs'].push(ledger);
         return;
       }
 
-      if (h3Lower.includes('bank loan') || h3Lower.includes('loan from bank')) {
+      if (classificationText.includes('bank loan') || classificationText.includes('loan from bank')) {
         categories['On bank loan'].push(ledger);
-      } else if (h3Lower.includes('finance lease') || (h3Lower.includes('lease') && h3Lower.includes('interest'))) {
+      } else if (classificationText.includes('finance lease') || (classificationText.includes('lease') && classificationText.includes('interest'))) {
         categories['On assets on finance lease'].push(ledger);
-      } else if ((h3Lower.includes('partner') && h3Lower.includes('capital')) || (h3Lower.includes('member') && h3Lower.includes('capital'))) {
+      } else if ((classificationText.includes('partner') && classificationText.includes('capital')) || (classificationText.includes('member') && classificationText.includes('capital'))) {
         categories['On partners\' capital/member\' capital'].push(ledger);
-      } else if ((h3Lower.includes('late payment') && h3Lower.includes('tax')) || h3Lower.includes('interest on tax')) {
+      } else if ((classificationText.includes('late payment') && classificationText.includes('tax')) || classificationText.includes('interest on tax')) {
         categories['On Late Payment of taxes'].push(ledger);
-      } else if ((h3Lower.includes('foreign exchange') && h3Lower.includes('loss')) || h3Lower.includes('forex loss')) {
+      } else if ((classificationText.includes('foreign exchange') && classificationText.includes('loss')) || classificationText.includes('forex loss')) {
         categories['Loss on foreign exchange transactions and translations considered as finance cost (net)'].push(ledger);
       } else {
         categories['Other borrowing costs'].push(ledger);

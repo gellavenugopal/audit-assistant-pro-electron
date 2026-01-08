@@ -38,7 +38,7 @@ interface Props {
 }
 
 export function RevenueFromOperationsNote({ noteNumber, ledgers, reportingScale = 'rupees' }: Props) {
-  // Group ledgers by H3 classification from trial balance (similar to Changes in Inventories pattern)
+  // Group ledgers by H4 classification from trial balance
   const categorized = useMemo(() => {
     const categories: Record<string, LedgerItem[]> = {
       'Sale of products': [],
@@ -48,25 +48,30 @@ export function RevenueFromOperationsNote({ noteNumber, ledgers, reportingScale 
     };
 
     ledgers.forEach(ledger => {
-      // Extract H3 from classification string (format: \"H2 > H3 > H4\")
+      // Extract H3 and H4 from classification string (format: \"H2 > H3 > H4\")
       const classification = ledger.classification || '';
       const parts = classification.split('>').map(p => p.trim());
       const h3 = parts.length > 1 ? parts[1] : '';
+      const h4 = parts.length > 2 ? parts[2] : '';
       
-      // Use H3 classification to categorize
-      if (h3) {
-        const h3Lower = h3.toLowerCase();
-        if (h3Lower.includes('sale of product')) {
+      // Use H4 first, then fall back to H3 for categorization
+      const classificationText = (h4 || h3).toLowerCase();
+      
+      if (classificationText) {
+        if (classificationText.includes('sale of product')) {
           categories['Sale of products'].push(ledger);
-        } else if (h3Lower.includes('sale of service')) {
+        } else if (classificationText.includes('sale of service')) {
           categories['Sale of services'].push(ledger);
-        } else if (h3Lower.includes('grant') || h3Lower.includes('donation')) {
+        } else if (classificationText.includes('grant') || classificationText.includes('donation')) {
           categories['Grants or donations received'].push(ledger);
+        } else if (classificationText.includes('other operating revenue')) {
+          categories['Other operating revenue'].push(ledger);
         } else {
+          // Default to other operating revenue if no match
           categories['Other operating revenue'].push(ledger);
         }
       } else {
-        // If no H3, add to other operating revenue
+        // If no classification, add to other operating revenue
         categories['Other operating revenue'].push(ledger);
       }
     });

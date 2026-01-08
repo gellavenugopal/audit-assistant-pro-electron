@@ -213,15 +213,20 @@ export function ScheduleIIIProfitLoss({
       if (formatItem.fsArea) {
         noteKey = fsAreaToNoteKey[formatItem.fsArea];
         
-        // PRIORITY: Use noteValues from computed notes
-        if (noteKey && noteValues[noteKey] !== undefined) {
+        // PRIORITY: ONLY use noteValues from computed notes for these items
+        // Do NOT fall back to trial balance for these calculated items
+        if (noteKey && noteValues[noteKey] !== undefined && noteValues[noteKey] !== null) {
           currentAmount = noteValues[noteKey] as number;
-          console.log(`P&L: Using note value for ${formatItem.fsArea}:`, currentAmount);
-        } else {
-          // Fall back to trial balance lines only if no note value exists
+          console.log(`P&L: Using note value for ${formatItem.fsArea}:`, currentAmount, `(noteKey: ${noteKey})`);
+        } else if (noteKey && ['costOfMaterialsConsumed', 'changesInInventories', 'purchasesOfStockInTrade'].includes(noteKey)) {
+          // These items MUST come from noteValues only - no trial balance fallback
+          currentAmount = 0;
+          console.log(`P&L: WARNING - No note value found for ${formatItem.fsArea} (${noteKey}), using 0`);
+        } else if (formatItem.fsArea) {
+          // Fall back to trial balance lines only for simple items
           currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
           previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
-          console.log(`P&L: No note value for ${formatItem.fsArea}, using trial balance:`, currentAmount);
+          console.log(`P&L: Using trial balance for ${formatItem.fsArea}:`, currentAmount);
         }
       } else if (formatItem.particulars.includes('Total Income')) {
         currentAmount = currentTotalIncome;
@@ -285,7 +290,7 @@ export function ScheduleIIIProfitLoss({
     const showAmount = item.fsArea || item.isTotal || item.particulars.includes('Profit') || item.particulars.includes('Total') || isChangesInInventories;
     // Note is clickable if it has a noteKey (either has prepared Note component or ledger data)
     const hasNoteData = item.noteKey && (
-      ['costOfMaterialsConsumed', 'changesInInventories'].includes(item.noteKey) || // Has prepared component
+      ['costOfMaterialsConsumed', 'changesInInventories', 'purchasesOfStockInTrade', 'employeeBenefits', 'financeCosts', 'depreciation', 'otherExpenses'].includes(item.noteKey) || // Has prepared component
       (noteLedgers[item.noteKey] && noteLedgers[item.noteKey].length > 0) // Has ledger data
     );
     

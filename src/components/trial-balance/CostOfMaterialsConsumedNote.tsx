@@ -136,10 +136,12 @@ export function CostOfMaterialsConsumedNote({
     ledgerData.forEach(row => {
       if (!row) return;
       const h3 = (row['H3'] || '').toLowerCase();
+      const h4 = (row['H4'] || '').toLowerCase();
       const ledgerName = (row['Ledger Name'] || '').toLowerCase();
       const closing = Math.abs(row['Closing Balance'] || 0);
       
-      if (h3.includes('purchase') || ledgerName.includes('purchase')) {
+      // ONLY include if H3 is "Cost of materials consumed" (not just any purchase ledger)
+      if (h3.includes('cost of materials consumed')) {
         if (ledgerName.includes('raw') || ledgerName.includes('material')) {
           if (ledgerName.includes('pack')) {
             result['Packing Material'] += closing;
@@ -149,7 +151,7 @@ export function CostOfMaterialsConsumedNote({
         } else if (ledgerName.includes('pack')) {
           result['Packing Material'] += closing;
         } else {
-          // Default to raw material for general purchases
+          // Default to raw material for general purchases under Cost of Materials
           result['Raw Material'] += closing;
         }
       }
@@ -198,11 +200,10 @@ export function CostOfMaterialsConsumedNote({
     return category.includes('raw') || group.includes('raw');
   });
 
-  // Get purchase ledgers for detailed view
+  // Get purchase ledgers for detailed view - ONLY those classified as "Cost of materials consumed"
   const purchaseLedgers = ledgerData.filter(row => {
     const h3 = (row['H3'] || '').toLowerCase();
-    const name = (row['Ledger Name'] || '').toLowerCase();
-    return h3.includes('purchase') || name.includes('purchase');
+    return h3.includes('cost of materials consumed');
   });
 
   // Export to Excel

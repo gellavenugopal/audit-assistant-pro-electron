@@ -62,62 +62,81 @@ export function OtherIncomeNote({ noteNumber, ledgers, reportingScale = 'rupees'
     };
 
     ledgers.forEach(ledger => {
-      // Extract H3 from classification string
+      // Extract H3 and H4 from classification string
       const classification = ledger.classification || '';
       const parts = classification.split('>').map(p => p.trim());
       const h3 = parts.length > 1 ? parts[1] : '';
-      const h3Lower = h3.toLowerCase();
+      const h4 = parts.length > 2 ? parts[2] : '';
+      // Prefer H4 if available, otherwise use H3
+      const classificationText = (h4 || h3).toLowerCase();
 
-      // Use H3 classification to categorize - all ledgers under "Other Income" H2
-      // should be categorized by their H3 values
-      if (!h3) {
+      // Use H4/H3 classification to categorize - all ledgers under "Other Income" H2
+      // should be categorized by their H4/H3 values
+      if (!classificationText) {
         // No H3 classification, add to miscellaneous
         categories['Miscellaneous non-operating Income'].push(ledger);
         return;
       }
 
-      // Interest income categorization
-      if (h3Lower.includes('interest') && h3Lower.includes('bank')) {
-        categories['Interest income on Bank deposits'].push(ledger);
-      } else if (h3Lower.includes('interest') && h3Lower.includes('non-current')) {
-        categories['Interest income on Non-current Investments'].push(ledger);
-      } else if (h3Lower.includes('interest') && h3Lower.includes('current')) {
-        categories['Interest income on Current Investments'].push(ledger);
-      } else if (h3Lower.includes('interest') && (h3Lower.includes('advance') || h3Lower.includes('deposit'))) {
-        categories['Interest income on Advances and Deposits'].push(ledger);
-      } else if (h3Lower.includes('interest') && h3Lower.includes('loan')) {
-        categories['Interest income on Loans'].push(ledger);
-      } else if (h3Lower.includes('interest') && h3Lower.includes('tax')) {
-        categories['Interest income on Tax refunds'].push(ledger);
+      // Interest income categorization - check both classification and ledger name
+      const ledgerNameLower = ledger.ledgerName.toLowerCase();
+      const combinedText = `${classificationText} ${ledgerNameLower}`;
+      
+      if (classificationText.includes('interest') || ledgerNameLower.includes('interest')) {
+        // Specific interest categorization based on ledger name or classification
+        if (combinedText.includes('bank') || combinedText.includes('fd') || combinedText.includes('fixed deposit')) {
+          categories['Interest income on Bank deposits'].push(ledger);
+        } else if (combinedText.includes('non-current invest')) {
+          categories['Interest income on Non-current Investments'].push(ledger);
+        } else if (combinedText.includes('current invest')) {
+          categories['Interest income on Current Investments'].push(ledger);
+        } else if (combinedText.includes('advance') || combinedText.includes('deposit')) {
+          categories['Interest income on Advances and Deposits'].push(ledger);
+        } else if (combinedText.includes('loan')) {
+          categories['Interest income on Loans'].push(ledger);
+        } else if (combinedText.includes('tax') || combinedText.includes('refund')) {
+          categories['Interest income on Tax refunds'].push(ledger);
+        } else {
+          // Generic interest income - default to miscellaneous or bank deposits
+          categories['Interest income on Bank deposits'].push(ledger);
+        }
       }
       // Dividend income
-      else if (h3Lower.includes('dividend') && h3Lower.includes('non-current')) {
-        categories['Dividend income on Non-current Investments'].push(ledger);
-      } else if (h3Lower.includes('dividend') && h3Lower.includes('current')) {
-        categories['Dividend income on Current Investments'].push(ledger);
-      } else if (h3Lower.includes('dividend') && h3Lower.includes('subsid')) {
-        categories['Dividend income from Subsidiaries'].push(ledger);
+      else if (classificationText.includes('dividend')) {
+        if (combinedText.includes('non-current')) {
+          categories['Dividend income on Non-current Investments'].push(ledger);
+        } else if (combinedText.includes('current')) {
+          categories['Dividend income on Current Investments'].push(ledger);
+        } else if (combinedText.includes('subsid')) {
+          categories['Dividend income from Subsidiaries'].push(ledger);
+        } else {
+          categories['Miscellaneous non-operating Income'].push(ledger);
+        }
       }
       // Gains on sale
-      else if ((h3Lower.includes('gain') || h3Lower.includes('profit')) && h3Lower.includes('non-current invest')) {
-        categories['Gain on realisation of Non-current Investments [Net]'].push(ledger);
-      } else if ((h3Lower.includes('gain') || h3Lower.includes('profit')) && h3Lower.includes('current invest')) {
-        categories['Gain on realisation of Current Investments [Net]'].push(ledger);
-      } else if ((h3Lower.includes('gain') || h3Lower.includes('profit')) && (h3Lower.includes('ppe') || h3Lower.includes('property') || h3Lower.includes('plant'))) {
-        categories['Gain on sale or disposal of Property, Plant and Equipment [Net]'].push(ledger);
+      else if (classificationText.includes('gain') || classificationText.includes('profit')) {
+        if (combinedText.includes('non-current invest')) {
+          categories['Gain on realisation of Non-current Investments [Net]'].push(ledger);
+        } else if (combinedText.includes('current invest')) {
+          categories['Gain on realisation of Current Investments [Net]'].push(ledger);
+        } else if (combinedText.includes('ppe') || combinedText.includes('property') || combinedText.includes('plant')) {
+          categories['Gain on sale or disposal of Property, Plant and Equipment [Net]'].push(ledger);
+        } else {
+          categories['Miscellaneous non-operating Income'].push(ledger);
+        }
       }
       // Foreign exchange
-      else if (h3Lower.includes('foreign exchange') || h3Lower.includes('forex')) {
+      else if (classificationText.includes('foreign exchange') || classificationText.includes('forex')) {
         categories['Gain on Foreign Exchange fluctuations [Net]'].push(ledger);
       }
       // Written back items
-      else if (h3Lower.includes('provision') && h3Lower.includes('written back')) {
+      else if (classificationText.includes('provision') && classificationText.includes('written back')) {
         categories['Provisions written back'].push(ledger);
-      } else if (h3Lower.includes('payable') && h3Lower.includes('written back')) {
+      } else if (classificationText.includes('payable') && classificationText.includes('written back')) {
         categories['Trade Payables written back'].push(ledger);
-      } else if (h3Lower.includes('liabilit') && h3Lower.includes('written back')) {
+      } else if (classificationText.includes('liabilit') && classificationText.includes('written back')) {
         categories['Other liabilities written back'].push(ledger);
-      } else if (h3Lower.includes('transfer from reserve')) {
+      } else if (classificationText.includes('transfer from reserve')) {
         categories['Transfer from reserves'].push(ledger);
       }
       // Miscellaneous

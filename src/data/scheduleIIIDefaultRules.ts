@@ -149,19 +149,32 @@ export const DEFAULT_KEYWORD_RULES: KeywordRule[] = [
   { ruleId: 'KW030', keywordPattern: 'Wages', matchType: 'Contains', mapsToCode: 'EXP-EBE-SAL', mapsToDescription: 'Salaries and Wages', priority: 65 },
   { ruleId: 'KW031', keywordPattern: 'Bonus', matchType: 'Contains', mapsToCode: 'EXP-EBE-BON', mapsToDescription: 'Bonus', priority: 65 },
   { ruleId: 'KW032', keywordPattern: 'Staff Welfare', matchType: 'Contains', mapsToCode: 'EXP-EBE-WEL', mapsToDescription: 'Staff Welfare Expenses', priority: 65 },
+  { ruleId: 'KW033', keywordPattern: 'Gratuity', matchType: 'Contains', mapsToCode: 'EXP-EBE-GRT', mapsToDescription: 'Gratuity', priority: 65 },
+  { ruleId: 'KW034', keywordPattern: 'PF', matchType: 'Contains', mapsToCode: 'EXP-EBE-PF', mapsToDescription: 'Contribution to Provident Fund', priority: 65 },
+  { ruleId: 'KW035', keywordPattern: 'Provident Fund', matchType: 'Contains', mapsToCode: 'EXP-EBE-PF', mapsToDescription: 'Contribution to Provident Fund', priority: 65 },
+  { ruleId: 'KW036', keywordPattern: 'ESI', matchType: 'Contains', mapsToCode: 'EXP-EBE-ESI', mapsToDescription: 'ESI Contribution', priority: 65 },
+  { ruleId: 'KW037', keywordPattern: 'Stipend', matchType: 'Contains', mapsToCode: 'EXP-EBE-SAL', mapsToDescription: 'Salaries and Wages', priority: 65 },
+  { ruleId: 'KW038', keywordPattern: 'Pension', matchType: 'Contains', mapsToCode: 'EXP-EBE-PEN', mapsToDescription: 'Pension', priority: 65 },
+  { ruleId: 'KW039', keywordPattern: 'Labour', matchType: 'Contains', mapsToCode: 'EXP-EBE-SAL', mapsToDescription: 'Salaries and Wages', priority: 65 },
+  { ruleId: 'KW040', keywordPattern: 'Labor', matchType: 'Contains', mapsToCode: 'EXP-EBE-SAL', mapsToDescription: 'Salaries and Wages', priority: 65 },
+  { ruleId: 'KW041', keywordPattern: 'Employee', matchType: 'Contains', mapsToCode: 'EXP-EBE-WEL', mapsToDescription: 'Staff Welfare Expenses', priority: 60 },
+  { ruleId: 'KW042', keywordPattern: 'Staff', matchType: 'Contains', mapsToCode: 'EXP-EBE-WEL', mapsToDescription: 'Staff Welfare Expenses', priority: 60 },
+  { ruleId: 'KW043', keywordPattern: 'Allowance', matchType: 'Contains', mapsToCode: 'EXP-EBE-SAL', mapsToDescription: 'Salaries and Wages', priority: 60 },
+  { ruleId: 'KW044', keywordPattern: 'Leave Encashment', matchType: 'Contains', mapsToCode: 'EXP-EBE-LE', mapsToDescription: 'Leave Encashment', priority: 65 },
+  { ruleId: 'KW045', keywordPattern: 'Welfare', matchType: 'Contains', mapsToCode: 'EXP-EBE-WEL', mapsToDescription: 'Staff Welfare Expenses', priority: 60 },
   
   // === LOWER PRIORITY KEYWORDS (20-49) ===
   
   // Expenses
-  { ruleId: 'KW033', keywordPattern: 'Audit Fee', matchType: 'Contains', mapsToCode: 'EXP-OE-AUD', mapsToDescription: 'Audit Fees', priority: 60 },
-  { ruleId: 'KW034', keywordPattern: 'Legal Fee', matchType: 'Contains', mapsToCode: 'EXP-OE-LEG', mapsToDescription: 'Legal and Professional Fees', priority: 60 },
-  { ruleId: 'KW035', keywordPattern: 'Professional Fee', matchType: 'Contains', mapsToCode: 'EXP-OE-LEG', mapsToDescription: 'Legal and Professional Fees', priority: 60 },
-  { ruleId: 'KW036', keywordPattern: 'Consulting', matchType: 'Contains', mapsToCode: 'EXP-OE-LEG', mapsToDescription: 'Legal and Professional Fees', priority: 55 },
-  { ruleId: 'KW037', keywordPattern: 'Travelling', matchType: 'Contains', mapsToCode: 'EXP-OE-TRV', mapsToDescription: 'Travelling and Conveyance', priority: 55 },
-  { ruleId: 'KW038', keywordPattern: 'Conveyance', matchType: 'Contains', mapsToCode: 'EXP-OE-TRV', mapsToDescription: 'Travelling and Conveyance', priority: 55 },
-  { ruleId: 'KW039', keywordPattern: 'Telephone', matchType: 'Contains', mapsToCode: 'EXP-OE-TEL', mapsToDescription: 'Telephone and Communication', priority: 55 },
-  { ruleId: 'KW040', keywordPattern: 'Insurance', matchType: 'Contains', mapsToCode: 'EXP-OE-INS', mapsToDescription: 'Insurance', priority: 55 },
-  { ruleId: 'KW041', keywordPattern: 'Bank Charges', matchType: 'Contains', mapsToCode: 'EXP-FC-BC', mapsToDescription: 'Bank Charges', priority: 55 },
+  { ruleId: 'KW046', keywordPattern: 'Audit Fee', matchType: 'Contains', mapsToCode: 'EXP-OE-AUD', mapsToDescription: 'Audit Fees', priority: 60 },
+  { ruleId: 'KW047', keywordPattern: 'Legal Fee', matchType: 'Contains', mapsToCode: 'EXP-OE-LEG', mapsToDescription: 'Legal and Professional Fees', priority: 60 },
+  { ruleId: 'KW048', keywordPattern: 'Professional Fee', matchType: 'Contains', mapsToCode: 'EXP-OE-LEG', mapsToDescription: 'Legal and Professional Fees', priority: 60 },
+  { ruleId: 'KW049', keywordPattern: 'Consulting', matchType: 'Contains', mapsToCode: 'EXP-OE-LEG', mapsToDescription: 'Legal and Professional Fees', priority: 55 },
+  { ruleId: 'KW050', keywordPattern: 'Travelling', matchType: 'Contains', mapsToCode: 'EXP-OE-TRV', mapsToDescription: 'Travelling and Conveyance', priority: 55 },
+  { ruleId: 'KW051', keywordPattern: 'Conveyance', matchType: 'Contains', mapsToCode: 'EXP-OE-TRV', mapsToDescription: 'Travelling and Conveyance', priority: 55 },
+  { ruleId: 'KW052', keywordPattern: 'Telephone', matchType: 'Contains', mapsToCode: 'EXP-OE-TEL', mapsToDescription: 'Telephone and Communication', priority: 55 },
+  { ruleId: 'KW053', keywordPattern: 'Insurance', matchType: 'Contains', mapsToCode: 'EXP-OE-INS', mapsToDescription: 'Insurance', priority: 55 },
+  { ruleId: 'KW054', keywordPattern: 'Bank Charges', matchType: 'Contains', mapsToCode: 'EXP-FC-BC', mapsToDescription: 'Bank Charges', priority: 55 },
 ];
 
 // ==========================================

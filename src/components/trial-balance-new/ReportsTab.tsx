@@ -30,6 +30,8 @@ import {
 } from '@/components/trial-balance/pl-notes';
 import { FormatSelector } from '@/components/trial-balance/FormatSelector';
 import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSettings';
+import { EnhancedNoteNumberSettings } from '@/components/trial-balance/EnhancedNoteNumberSettings';
+import { NoteNumberSummary } from '@/components/trial-balance/NoteNumberSummary';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useToast } from '@/hooks/use-toast';
@@ -71,6 +73,10 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
   const [reportingScale, setReportingScale] = useState<string>('rupees');
   const [bsStartingNote, setBsStartingNote] = useState<number>(3);
   const [plStartingNote, setPlStartingNote] = useState<number>(19);
+  const [bsNoteCount, setBsNoteCount] = useState<number>(15);
+  const [plNoteCount, setPlNoteCount] = useState<number>(7);
+  const [includeContingentLiabilities, setIncludeContingentLiabilities] = useState<boolean>(false);
+  const [contingentLiabilityNoteNo, setContingentLiabilityNoteNo] = useState<number>(27);
 
   // Determine constitution from entity type
   const constitution = useMemo(() => {
@@ -185,6 +191,28 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
     }
   }, [data, companyName, financialYear, constitution, plStartingNote, toast]);
 
+  // Handle note number configuration
+  const handleApplyNoteSettings = (
+    startingNote: number,
+    bsCount: number,
+    plCount: number,
+    includeContingent: boolean
+  ) => {
+    setBsStartingNote(startingNote);
+    setBsNoteCount(bsCount);
+    setPlStartingNote(startingNote + bsCount);
+    setPlNoteCount(plCount);
+    setIncludeContingentLiabilities(includeContingent);
+    setContingentLiabilityNoteNo(startingNote + bsCount + plCount);
+
+    toast({
+      title: 'Note Numbers Configured',
+      description: `BS Notes: ${startingNote}-${startingNote + bsCount - 1}, P&L Notes: ${startingNote + bsCount}-${
+        startingNote + bsCount + plCount - 1
+      }${includeContingent ? `, Contingent Liabilities: ${startingNote + bsCount + plCount}` : ''}`,
+    });
+  };
+
   if (!data || data.length === 0) {
     return (
       <div className="border rounded-lg p-8 text-center text-muted-foreground">
@@ -279,15 +307,31 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
         </div>
 
         <TabsContent value="balance-sheet" className="mt-2">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 px-1">
-              <h2 className="text-sm font-semibold text-gray-900">Balance Sheet</h2>
-              {bsStartingNote !== 3 && (
-                <Badge variant="secondary" className="text-[10px] h-4 px-1">
-                  Note starts: {bsStartingNote}
-                </Badge>
-              )}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 px-1 flex-wrap">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-900">Balance Sheet</h2>
+                {bsStartingNote !== 3 && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1">
+                    Note starts: {bsStartingNote}
+                  </Badge>
+                )}
+              </div>
+              <EnhancedNoteNumberSettings
+                onApplySettings={handleApplyNoteSettings}
+                bsStartingNote={bsStartingNote}
+                plStartingNote={plStartingNote}
+                includeContingentLiabilities={includeContingentLiabilities}
+              />
             </div>
+            <NoteNumberSummary
+              bsStartingNote={bsStartingNote}
+              bsNoteCount={bsNoteCount}
+              plStartingNote={plStartingNote}
+              plNoteCount={plNoteCount}
+              includeContingentLiabilities={includeContingentLiabilities}
+              contingentLiabilityNoteNo={contingentLiabilityNoteNo}
+            />
             <div className="bg-white rounded border overflow-hidden">
               <ScheduleIIIBalanceSheet 
                 currentLines={trialBalanceLines} 
@@ -303,15 +347,31 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
         </TabsContent>
 
         <TabsContent value="profit-loss" className="mt-2">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 px-1">
-              <h2 className="text-sm font-semibold text-gray-900">Profit & Loss Account</h2>
-              {plStartingNote !== 19 && (
-                <Badge variant="secondary" className="text-[10px] h-4 px-1">
-                  Note starts: {plStartingNote}
-                </Badge>
-              )}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 px-1 flex-wrap">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-900">Profit & Loss Account</h2>
+                {plStartingNote !== 19 && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1">
+                    Note starts: {plStartingNote}
+                  </Badge>
+                )}
+              </div>
+              <EnhancedNoteNumberSettings
+                onApplySettings={handleApplyNoteSettings}
+                bsStartingNote={bsStartingNote}
+                plStartingNote={plStartingNote}
+                includeContingentLiabilities={includeContingentLiabilities}
+              />
             </div>
+            <NoteNumberSummary
+              bsStartingNote={bsStartingNote}
+              bsNoteCount={bsNoteCount}
+              plStartingNote={plStartingNote}
+              plNoteCount={plNoteCount}
+              includeContingentLiabilities={includeContingentLiabilities}
+              contingentLiabilityNoteNo={contingentLiabilityNoteNo}
+            />
             
             {/* Profit & Loss Statement */}
             <div className="bg-white rounded border overflow-hidden">
@@ -359,7 +419,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               </div>
             )}
 
-            {/* Revenue from Operations */}
+            {/* Revenue from Operations - Note 1 of P&L */}
             <div className="bg-white rounded border p-3">
               <RevenueFromOperationsNote
                 noteNumber={String(plStartingNote)}
@@ -371,7 +431,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               )}
             </div>
 
-            {/* Other Income */}
+            {/* Other Income - Note 2 of P&L */}
             <div className="bg-white rounded border p-3">
               <OtherIncomeNote
                 noteNumber={String(plStartingNote + 1)}
@@ -383,7 +443,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               )}
             </div>
 
-            {/* Changes in Inventories Note - For P&L */}
+            {/* Changes in Inventories Note - Note 3 of P&L */}
             {stockData && Array.isArray(stockData) && stockData.length > 0 && (
               <div className="bg-white rounded border p-3">
                 <ChangesInInventoriesNote
@@ -394,7 +454,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               </div>
             )}
             
-            {/* Cost of Materials Consumed Note */}
+            {/* Cost of Materials Consumed Note - Note 4 of P&L */}
             {stockData && Array.isArray(stockData) && stockData.length > 0 && data && Array.isArray(data) && (
               <div className="bg-white rounded border p-3">
                 <CostOfMaterialsConsumedNote
@@ -406,7 +466,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               </div>
             )}
 
-            {/* Employee Benefits Expense */}
+            {/* Employee Benefits Expense - Note 5 of P&L */}
             <div className="bg-white rounded border p-3">
               <EmployeeBenefitsNote
                 noteNumber={String(plStartingNote + 4)}
@@ -418,7 +478,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               )}
             </div>
 
-            {/* Finance Cost */}
+            {/* Finance Cost - Note 6 of P&L */}
             <div className="bg-white rounded border p-3">
               <FinanceCostNote
                 noteNumber={String(plStartingNote + 5)}
@@ -430,20 +490,20 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               )}
             </div>
 
-            {/* Depreciation and Amortization */}
+            {/* Depreciation and Amortization - Note 7 of P&L */}
             <div className="bg-white rounded border p-3">
               <DepreciationNote
                 noteNumber={String(plStartingNote + 6)}
                 ledgers={plNoteLedgers?.depreciation || []}
                 reportingScale={reportingScale}
-                fixedAssetsNoteNumber="3"
+                fixedAssetsNoteNumber={String(bsStartingNote + 6)}
               />
               {(!plNoteLedgers?.depreciation || plNoteLedgers.depreciation.length === 0) && (
                 <p className="text-xs text-gray-500 mt-2">No ledgers classified under "Depreciation and amortization expense". Please classify ledgers in the Classified TB.</p>
               )}
             </div>
 
-            {/* Other Expenses */}
+            {/* Other Expenses - Note 8 of P&L */}
             <div className="bg-white rounded border p-3">
               <OtherExpensesNote
                 noteNumber={String(plStartingNote + 7)}

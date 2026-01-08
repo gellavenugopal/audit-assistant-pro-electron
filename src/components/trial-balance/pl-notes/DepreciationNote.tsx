@@ -42,10 +42,12 @@ export function DepreciationNote({ noteNumber, ledgers, reportingScale = 'rupees
       const classification = ledger.classification || '';
       const parts = classification.split('>').map(p => p.trim());
       const h3 = parts.length > 1 ? parts[1] : '';
-      const h3Lower = h3.toLowerCase();
+      const h4 = parts.length > 2 ? parts[2] : '';
+      // Prefer H4 if available, otherwise use H3
+      const classificationText = (h4 || h3).toLowerCase();
 
-      // Use H3 classification to categorize
-      if (h3Lower.includes('intangible') || h3Lower.includes('amortiz')) {
+      // Use H4/H3 classification to categorize
+      if (classificationText.includes('intangible') || classificationText.includes('amortiz')) {
         categories['on intangible assets'].push(ledger);
       } else {
         categories['on tangible assets'].push(ledger);
