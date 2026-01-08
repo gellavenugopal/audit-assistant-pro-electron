@@ -20,7 +20,7 @@ import { X, Download, FileSpreadsheet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 
-interface LedgerItem {
+export interface LedgerItem {
   ledgerName: string;
   groupName: string;
   openingBalance: number;
@@ -37,7 +37,7 @@ interface Props {
 }
 
 // Map noteKey to display title - P&L items
-const NOTE_KEY_TO_TITLE: Record<string, string> = {
+export const NOTE_KEY_TO_TITLE: Record<string, string> = {
   // P&L Income
   revenueFromOperations: 'Revenue from Operations',
   otherIncome: 'Other Income',
@@ -77,6 +77,68 @@ const NOTE_KEY_TO_TITLE: Record<string, string> = {
   cash: 'Cash and Cash Equivalents',
   otherCurrent: 'Other Current Assets',
 };
+
+// Standalone content component for reuse in other dialogs
+interface LedgerAnnexureContentProps {
+  ledgers: LedgerItem[];
+  total: number;
+  formatCurrency: (amount: number) => string;
+  onExport?: () => void;
+}
+
+export function LedgerAnnexureContent({
+  ledgers,
+  total,
+  formatCurrency,
+  onExport
+}: LedgerAnnexureContentProps) {
+  return (
+    <div className="border rounded-lg overflow-auto max-h-[60vh]">
+      <Table>
+        <TableHeader className="sticky top-0 bg-muted/95 backdrop-blur">
+          <TableRow>
+            <TableHead className="w-12 text-center">S.No</TableHead>
+            <TableHead>Ledger Name</TableHead>
+            <TableHead>Group</TableHead>
+            <TableHead className="text-right w-32">Opening</TableHead>
+            <TableHead className="text-right w-32">Closing</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {ledgers.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                No ledger details available
+              </TableCell>
+            </TableRow>
+          ) : (
+            <>
+              {ledgers.map((ledger, index) => (
+                <TableRow key={index} className="hover:bg-muted/50">
+                  <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
+                  <TableCell className="font-medium">{ledger.ledgerName}</TableCell>
+                  <TableCell className="text-muted-foreground">{ledger.groupName}</TableCell>
+                  <TableCell className="text-right font-mono">{formatCurrency(ledger.openingBalance)}</TableCell>
+                  <TableCell className="text-right font-mono">{formatCurrency(ledger.closingBalance)}</TableCell>
+                </TableRow>
+              ))}
+              {/* Total Row */}
+              <TableRow className="bg-muted/50 font-semibold border-t-2">
+                <TableCell></TableCell>
+                <TableCell>TOTAL</TableCell>
+                <TableCell></TableCell>
+                <TableCell className="text-right font-mono">
+                  {formatCurrency(ledgers.reduce((sum, l) => sum + l.openingBalance, 0))}
+                </TableCell>
+                <TableCell className="text-right font-mono">{formatCurrency(total)}</TableCell>
+              </TableRow>
+            </>
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
 
 export function LedgerAnnexureDialog({
   open,

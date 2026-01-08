@@ -295,6 +295,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 constitution={constitution}
                 startingNoteNumber={plStartingNote}
                 stockData={stockData}
+                ledgerData={data}
                 noteValues={plNoteValues}
                 noteLedgers={plNoteLedgers}
               />

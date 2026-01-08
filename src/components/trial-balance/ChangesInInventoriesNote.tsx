@@ -77,7 +77,23 @@ export function ChangesInInventoriesNote({
     }
   };
 
-  // Calculate inventory values by category
+  // Helper to check if item is a raw material (goes to Cost of Materials Consumed)
+  const isRawMaterial = (item: StockItem) => {
+    const category = (item['Stock Category'] || '').toLowerCase();
+    const stockGroup = (item['Stock Group'] || '').toLowerCase();
+    return (
+      category.includes('raw') || 
+      stockGroup.includes('raw') ||
+      category.includes('pack') || 
+      stockGroup.includes('pack') ||
+      category.includes('consumable') || 
+      category.includes('other') ||
+      category.includes('component') || 
+      category.includes('intermediate')
+    );
+  };
+
+  // Calculate inventory values by category - includes all NON-raw material items
   const calculateInventory = () => {
     const result = {
       'Stock-in-Trade': { opening: 0, closing: 0 },
@@ -90,19 +106,27 @@ export function ChangesInInventoriesNote({
 
     stockData.forEach(item => {
       if (!item) return;
+      
+      // Skip raw materials - they go to Cost of Materials Consumed
+      if (isRawMaterial(item)) return;
+      
       const category = (item['Stock Category'] || '').toLowerCase();
+      const stockGroup = (item['Stock Group'] || '').toLowerCase();
       // Stock values are assets (Dr), so use Math.abs to ensure positive values
       const openingValue = Math.abs(item['Opening Value'] || 0);
       const closingValue = Math.abs(item['Closing Value'] || 0);
       
       // Match to standard categories with flexible matching
-      if (category.includes('stock-in-trade') || category.includes('stock in trade') || category === 'trading') {
+      if (category.includes('stock-in-trade') || category.includes('stock in trade') || 
+          category === 'trading' || stockGroup.includes('trading')) {
         result['Stock-in-Trade'].opening += openingValue;
         result['Stock-in-Trade'].closing += closingValue;
-      } else if (category.includes('work-in-progress') || category.includes('work in progress') || category.includes('wip')) {
+      } else if (category.includes('work-in-progress') || category.includes('work in progress') || 
+                 category.includes('wip') || stockGroup.includes('wip')) {
         result['Work in Progress'].opening += openingValue;
         result['Work in Progress'].closing += closingValue;
-      } else if (category.includes('finished') || category.includes('fg')) {
+      } else {
+        // Default: Finished Goods (includes items not matching other categories)
         result['Finished Goods'].opening += openingValue;
         result['Finished Goods'].closing += closingValue;
       }
@@ -135,16 +159,19 @@ export function ChangesInInventoriesNote({
     return null;
   }
 
+  // Filter stock data for export - exclude raw materials
+  const finishedGoodsForExport = stockData.filter(item => item && !isRawMaterial(item));
+
   // Export to Excel
   const handleExport = () => {
-    const exportData = stockData.map((item, index) => ({
+    const exportData = finishedGoodsForExport.map((item, index) => ({
       'S.No': index + 1,
       'Item Name': item['Item Name'],
       'Stock Group': item['Stock Group'],
       'Category': item['Stock Category'],
-      'Opening Value': item['Opening Value'],
-      'Closing Value': item['Closing Value'],
-      'Change': item['Opening Value'] - item['Closing Value'],
+      'Opening Value': Math.abs(item['Opening Value']),
+      'Closing Value': Math.abs(item['Closing Value']),
+      'Change': Math.abs(item['Opening Value']) - Math.abs(item['Closing Value']),
     }));
     
     // Add total row
@@ -256,7 +283,10 @@ export function ChangesInInventoriesNote({
     </Table>
   );
 
-  // Render Detailed View (Ledger-wise)
+  // Filter stock data for detailed view - exclude raw materials
+  const finishedGoodsItems = stockData.filter(item => item && !isRawMaterial(item));
+
+  // Render Detailed View (Ledger-wise) - only non-raw material items
   const renderDetailedView = () => (
     <Table>
       <TableHeader>
@@ -271,37 +301,47 @@ export function ChangesInInventoriesNote({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {stockData.map((item, index) => (
-          <TableRow key={item['Composite Key'] || index}>
-            <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
-            <TableCell className="font-medium">{item['Item Name']}</TableCell>
-            <TableCell className="text-muted-foreground">{item['Stock Group']}</TableCell>
-            <TableCell className="text-muted-foreground">{item['Stock Category']}</TableCell>
-            <TableCell className="text-right font-mono">{formatCurrency(Math.abs(item['Opening Value']))}</TableCell>
-            <TableCell className="text-right font-mono">{formatCurrency(Math.abs(item['Closing Value']))}</TableCell>
-            <TableCell className={cn(
-              "text-right font-mono",
-              (item['Opening Value'] - item['Closing Value']) < 0 ? "text-red-600" : "text-green-600"
-            )}>
-              {formatCurrency(Math.abs(item['Opening Value']) - Math.abs(item['Closing Value']))}
+        {finishedGoodsItems.length === 0 ? (
+          <TableRow>
+            <TableCell colSpan={7} className="text-center py-4 text-muted-foreground">
+              No finished goods, WIP, or stock-in-trade items found
             </TableCell>
           </TableRow>
-        ))}
-        {/* Total Row */}
-        <TableRow className="font-bold bg-gray-100 border-t-2">
-          <TableCell></TableCell>
-          <TableCell>TOTAL</TableCell>
-          <TableCell></TableCell>
-          <TableCell></TableCell>
-          <TableCell className="text-right font-mono">{formatCurrency(totalOpening)}</TableCell>
-          <TableCell className="text-right font-mono">{formatCurrency(totalClosing)}</TableCell>
-          <TableCell className={cn(
-            "text-right font-mono",
-            changesInInventories < 0 ? "text-red-600" : "text-green-600"
-          )}>
-            {formatCurrency(changesInInventories)}
-          </TableCell>
-        </TableRow>
+        ) : (
+          <>
+            {finishedGoodsItems.map((item, index) => (
+              <TableRow key={item['Composite Key'] || index}>
+                <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
+                <TableCell className="font-medium">{item['Item Name']}</TableCell>
+                <TableCell className="text-muted-foreground">{item['Stock Group']}</TableCell>
+                <TableCell className="text-muted-foreground">{item['Stock Category']}</TableCell>
+                <TableCell className="text-right font-mono">{formatCurrency(Math.abs(item['Opening Value']))}</TableCell>
+                <TableCell className="text-right font-mono">{formatCurrency(Math.abs(item['Closing Value']))}</TableCell>
+                <TableCell className={cn(
+                  "text-right font-mono",
+                  (item['Opening Value'] - item['Closing Value']) < 0 ? "text-red-600" : "text-green-600"
+                )}>
+                  {formatCurrency(Math.abs(item['Opening Value']) - Math.abs(item['Closing Value']))}
+                </TableCell>
+              </TableRow>
+            ))}
+            {/* Total Row */}
+            <TableRow className="font-bold bg-gray-100 border-t-2">
+              <TableCell></TableCell>
+              <TableCell>TOTAL</TableCell>
+              <TableCell></TableCell>
+              <TableCell></TableCell>
+              <TableCell className="text-right font-mono">{formatCurrency(totalOpening)}</TableCell>
+              <TableCell className="text-right font-mono">{formatCurrency(totalClosing)}</TableCell>
+              <TableCell className={cn(
+                "text-right font-mono",
+                changesInInventories < 0 ? "text-red-600" : "text-green-600"
+              )}>
+                {formatCurrency(changesInInventories)}
+              </TableCell>
+            </TableRow>
+          </>
+        )}
       </TableBody>
     </Table>
   );

@@ -15,7 +15,7 @@ import {
   getFormatLabel,
   FSLineItem,
 } from '@/data/financialStatementFormats';
-import { LedgerAnnexureDialog } from './LedgerAnnexureDialog';
+import { NoteContentDialog } from './NoteContentDialog';
 import { FileText } from 'lucide-react';
 
 // Note values that can be passed from computed notes
@@ -50,6 +50,7 @@ interface Props {
   constitution?: string;
   startingNoteNumber?: number;
   stockData?: any[];
+  ledgerData?: any[];  // Ledger rows for notes like Cost of Materials
   noteValues?: NoteValues;
   noteLedgers?: NoteLedgersMap;
 }
@@ -68,17 +69,15 @@ export function ScheduleIIIProfitLoss({
   constitution = 'company',
   startingNoteNumber = 19,
   stockData = [],
+  ledgerData = [],
   noteValues = {},
   noteLedgers = {}
 }: Props) {
-  // State for annexure dialog
-  const [annexureOpen, setAnnexureOpen] = useState(false);
-  const [selectedNote, setSelectedNote] = useState<{
-    title: string;
-    noteNumber: string;
-    ledgers: NoteLedgerItem[];
-    total: number;
-  } | null>(null);
+  // State for note dialog
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null);
+  const [selectedNoteNumber, setSelectedNoteNumber] = useState<string>('');
+
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
     const sign = amount < 0 ? '-' : '';
@@ -132,26 +131,44 @@ export function ScheduleIIIProfitLoss({
       .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   };
 
-  // Calculate Changes in Inventories from stock data
+  // Helper to check if stock item is raw material (goes to Cost of Materials Consumed)
+  const isRawMaterial = (item: any) => {
+    const category = (item['Stock Category'] || '').toLowerCase();
+    const stockGroup = (item['Stock Group'] || '').toLowerCase();
+    return (
+      category.includes('raw') || 
+      stockGroup.includes('raw') ||
+      category.includes('pack') || 
+      stockGroup.includes('pack') ||
+      category.includes('consumable') || 
+      category.includes('other') ||
+      category.includes('component') || 
+      category.includes('intermediate')
+    );
+  };
+
+  // Calculate Changes in Inventories from stock data (EXCLUDES raw materials)
   const changesInInventories = useMemo(() => {
     if (!stockData || !Array.isArray(stockData) || stockData.length === 0) {
       console.log('ScheduleIIIProfitLoss: No stock data available');
       return 0;
     }
     
+    // Filter to non-raw-material items (finished goods, WIP, stock-in-trade)
+    const finishedItems = stockData.filter(item => item && !isRawMaterial(item));
+    
     // Stock values are assets (Dr), so use Math.abs to ensure positive values
-    const totalOpening = stockData.reduce((sum, item) => {
-      if (!item) return sum;
+    const totalOpening = finishedItems.reduce((sum, item) => {
       return sum + Math.abs(item['Opening Value'] || 0);
     }, 0);
-    const totalClosing = stockData.reduce((sum, item) => {
-      if (!item) return sum;
+    const totalClosing = finishedItems.reduce((sum, item) => {
       return sum + Math.abs(item['Closing Value'] || 0);
     }, 0);
     const changes = totalOpening - totalClosing;
     
     console.log('ScheduleIIIProfitLoss: Changes in Inventories calculated:', {
-      stockItems: stockData.length,
+      totalStockItems: stockData.length,
+      finishedGoodsItems: finishedItems.length,
       totalOpening,
       totalClosing,
       changes
@@ -272,10 +289,22 @@ export function ScheduleIIIProfitLoss({
     return items;
   }, [plFormat, currentLines, previousLines, startingNoteNumber, currentTotalIncome, prevTotalIncome, currentTotalExpenses, prevTotalExpenses, currentPBT, prevPBT, currentPAT, prevPAT, changesInInventories, noteValues]);
 
+  // Store note number mapping for click handler
+  const noteNumberMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    displayItems.forEach(item => {
+      if (item.noteKey && item.displayNoteNo) {
+        map[item.noteKey] = item.displayNoteNo;
+      }
+    });
+    return map;
+  }, [displayItems]);
+
   const handleNoteClick = (noteKey: string) => {
-    if (noteKey && noteLedgers[noteKey] && noteLedgers[noteKey].length > 0) {
-      setSelectedNote(noteKey);
-      setAnnexureOpen(true);
+    if (noteKey) {
+      setSelectedNoteKey(noteKey);
+      setSelectedNoteNumber(noteNumberMap[noteKey] || '');
+      setNoteDialogOpen(true);
     }
   };
 
@@ -283,7 +312,11 @@ export function ScheduleIIIProfitLoss({
     const isHeader = item.level === 0 || (item.level === 1 && !item.srNo);
     const isChangesInInventories = item.particulars.toLowerCase().includes('changes in inventories');
     const showAmount = item.fsArea || item.isTotal || item.particulars.includes('Profit') || item.particulars.includes('Total') || isChangesInInventories;
-    const hasAnnexure = item.noteKey && noteLedgers[item.noteKey] && noteLedgers[item.noteKey].length > 0;
+    // Note is clickable if it has a noteKey (either has prepared Note component or ledger data)
+    const hasNoteData = item.noteKey && (
+      ['costOfMaterialsConsumed', 'changesInInventories'].includes(item.noteKey) || // Has prepared component
+      (noteLedgers[item.noteKey] && noteLedgers[item.noteKey].length > 0) // Has ledger data
+    );
     
     return (
       <TableRow key={index} className={cn(
@@ -300,11 +333,11 @@ export function ScheduleIIIProfitLoss({
           {item.particulars}
         </TableCell>
         <TableCell className="text-center w-16">
-          {item.displayNoteNo && hasAnnexure ? (
+          {item.displayNoteNo && hasNoteData ? (
             <button
               onClick={() => handleNoteClick(item.noteKey!)}
               className="inline-flex items-center gap-1 text-primary hover:text-primary/80 hover:underline font-medium"
-              title="Click to view ledger-wise annexure"
+              title="Click to view note details"
             >
               {item.displayNoteNo}
               <FileText className="h-3 w-3" />
@@ -393,12 +426,16 @@ export function ScheduleIIIProfitLoss({
         </div>
       </div>
 
-      {/* Ledger Annexure Dialog */}
-      <LedgerAnnexureDialog
-        open={annexureOpen}
-        onOpenChange={setAnnexureOpen}
-        noteKey={selectedNote}
-        ledgers={selectedNote ? noteLedgers[selectedNote] || [] : []}
+      {/* Note Content Dialog - shows Note component for prepared notes, or ledger details for others */}
+      <NoteContentDialog
+        open={noteDialogOpen}
+        onOpenChange={setNoteDialogOpen}
+        noteKey={selectedNoteKey}
+        noteNumber={selectedNoteNumber}
+        ledgers={selectedNoteKey ? noteLedgers[selectedNoteKey] || [] : []}
+        stockData={stockData}
+        ledgerData={ledgerData}
+        reportingScale={reportingScale}
       />
     </div>
   );
