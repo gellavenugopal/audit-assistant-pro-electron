@@ -195,6 +195,16 @@ const App = () => (
                   }
                 />
                 <Route
+                  path="/compliance-applicability"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <ComplianceApplicability />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
                   path="/audit-report"
                   element={
                     <ProtectedEngagementRoute>
