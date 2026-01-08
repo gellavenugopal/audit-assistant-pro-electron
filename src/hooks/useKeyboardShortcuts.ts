@@ -26,7 +26,7 @@ export const navigationShortcuts = [
   { key: 'n', route: '/review-notes', description: 'Review Notes', category: 'Navigation', requiresEngagement: true },
   { key: 'i', route: '/misstatements', description: 'Misstatements', category: 'Navigation', requiresEngagement: true },
   { key: 'a', route: '/audit-report', description: 'Audit Report', category: 'Navigation', requiresEngagement: true },
-  { key: 'o', route: '/audit-tools', description: 'Audit Tools', category: 'Navigation', requiresEngagement: true },
+  { key: 'o', route: '/audit-tools', description: 'VERA Tools', category: 'Navigation', requiresEngagement: true },
   { key: 'h', route: '/audit-trail', description: 'Audit Trail (History)', category: 'Navigation', requiresEngagement: true },
   { key: 'l', route: '/completion', description: 'Completion (Lock)', category: 'Navigation', requiresEngagement: true },
   { key: 'y', route: '/my-dashboard', description: 'My Tasks', category: 'Navigation', requiresEngagement: true },

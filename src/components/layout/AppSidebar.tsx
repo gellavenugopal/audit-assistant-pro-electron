@@ -45,7 +45,7 @@ const engagementDependentItems = [
   { name: 'Review Notes', href: '/review-notes', icon: MessageSquare },
   { name: 'Misstatements', href: '/misstatements', icon: AlertCircle },
   { name: 'Audit Report', href: '/audit-report', icon: FileText },
-  { name: 'Audit Tools', href: '/audit-tools', icon: Wrench },
+  { name: 'VERA Tools', href: '/audit-tools', icon: Wrench },
   { name: 'Feedback', href: '/feedback', icon: MessageSquare },
 ];
 

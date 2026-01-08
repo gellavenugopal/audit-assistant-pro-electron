@@ -1134,30 +1134,6 @@ const TallyTools = () => {
                         return null;
                       })()}
                     </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setFetchedTBData(null)}>
-                      Clear
-                    </Button>
-                    <Button variant="outline" onClick={handleExportToExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export to Excel
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        if (!currentEngagement) {
-                          toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
-                          return;
-                        }
-                        toast({
-                          title: "Save to Trial Balance",
-                          description: "Navigate to Trial Balance page and use Import to save this data"
-                        });
-                        setShowTBDialog(false);
-                      }}
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      Use in Trial Balance
-                    </Button>
                   </div>
                 </div>
               </div>
@@ -1606,8 +1582,6 @@ const TallyTools = () => {
               const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length;
               
               const renderTable = (data: TallyTrialBalanceLine[], filteredData: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
-
-              const renderTable = (data: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
                 <div className="border rounded-lg overflow-hidden">
                   <div className="max-h-[350px] overflow-auto">
                     <table className="w-full text-sm">
