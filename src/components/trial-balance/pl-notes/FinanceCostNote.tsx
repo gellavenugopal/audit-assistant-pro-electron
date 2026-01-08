@@ -29,7 +29,7 @@ interface Props {
 }
 
 export function FinanceCostNote({ noteNumber, ledgers, reportingScale = 'rupees' }: Props) {
-  // Group ledgers by category
+  // Group ledgers by H3 classification (like Changes in Inventories pattern)
   const categorized = useMemo(() => {
     const categories: Record<string, LedgerItem[]> = {
       'On bank loan': [],
@@ -41,26 +41,28 @@ export function FinanceCostNote({ noteNumber, ledgers, reportingScale = 'rupees'
     };
 
     ledgers.forEach(ledger => {
-      const ledgerName = ledger.ledgerName.toLowerCase();
-      const groupName = (ledger.groupName || '').toLowerCase();
+      // Extract H3 from classification string
+      const classification = ledger.classification || '';
+      const parts = classification.split('>').map(p => p.trim());
+      const h3 = parts.length > 1 ? parts[1] : '';
+      const h3Lower = h3.toLowerCase();
 
-      if (ledgerName.includes('bank loan') || ledgerName.includes('loan from bank') || 
-          groupName.includes('bank loan')) {
-        categories['On bank loan'].push(ledger);
-      } else if (ledgerName.includes('finance lease') || ledgerName.includes('lease') && ledgerName.includes('interest')) {
-        categories['On assets on finance lease'].push(ledger);
-      } else if (ledgerName.includes('partner') && ledgerName.includes('capital') || 
-                 ledgerName.includes('member') && ledgerName.includes('capital')) {
-        categories['On partners\' capital/member\' capital'].push(ledger);
-      } else if (ledgerName.includes('late payment') && ledgerName.includes('tax') || 
-                 ledgerName.includes('interest on tax')) {
-        categories['On Late Payment of taxes'].push(ledger);
-      } else if (ledgerName.includes('foreign exchange') && ledgerName.includes('loss') || 
-                 ledgerName.includes('forex loss')) {
-        categories['Loss on foreign exchange transactions and translations considered as finance cost (net)'].push(ledger);
-      } else if (ledgerName.includes('interest') || ledgerName.includes('finance cost') || 
-                 ledgerName.includes('bank charge') || groupName.includes('interest')) {
+      // Use H3 classification to categorize
+      if (!h3) {
         categories['Other borrowing costs'].push(ledger);
+        return;
+      }
+
+      if (h3Lower.includes('bank loan') || h3Lower.includes('loan from bank')) {
+        categories['On bank loan'].push(ledger);
+      } else if (h3Lower.includes('finance lease') || (h3Lower.includes('lease') && h3Lower.includes('interest'))) {
+        categories['On assets on finance lease'].push(ledger);
+      } else if ((h3Lower.includes('partner') && h3Lower.includes('capital')) || (h3Lower.includes('member') && h3Lower.includes('capital'))) {
+        categories['On partners\' capital/member\' capital'].push(ledger);
+      } else if ((h3Lower.includes('late payment') && h3Lower.includes('tax')) || h3Lower.includes('interest on tax')) {
+        categories['On Late Payment of taxes'].push(ledger);
+      } else if ((h3Lower.includes('foreign exchange') && h3Lower.includes('loss')) || h3Lower.includes('forex loss')) {
+        categories['Loss on foreign exchange transactions and translations considered as finance cost (net)'].push(ledger);
       } else {
         categories['Other borrowing costs'].push(ledger);
       }
@@ -70,6 +72,7 @@ export function FinanceCostNote({ noteNumber, ledgers, reportingScale = 'rupees'
   }, [ledgers]);
 
   const totals = useMemo(() => {
+    // Use closingBalance directly (same as Purchases in Cost of Materials Consumed)
     const bankLoan = categorized['On bank loan'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
     const financeLease = categorized['On assets on finance lease'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
     const partnersCapital = categorized['On partners\' capital/member\' capital'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);

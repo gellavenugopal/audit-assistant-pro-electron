@@ -30,7 +30,7 @@ interface Props {
 }
 
 export function DepreciationNote({ noteNumber, ledgers, reportingScale = 'rupees', fixedAssetsNoteNumber = '[number]' }: Props) {
-  // Group ledgers by category
+  // Group ledgers by H3 classification (like Changes in Inventories pattern)
   const categorized = useMemo(() => {
     const categories: Record<string, LedgerItem[]> = {
       'on tangible assets': [],
@@ -38,12 +38,14 @@ export function DepreciationNote({ noteNumber, ledgers, reportingScale = 'rupees
     };
 
     ledgers.forEach(ledger => {
-      const ledgerName = ledger.ledgerName.toLowerCase();
-      const groupName = (ledger.groupName || '').toLowerCase();
-      const classification = (ledger.classification || '').toLowerCase();
+      // Extract H3 from classification string
+      const classification = ledger.classification || '';
+      const parts = classification.split('>').map(p => p.trim());
+      const h3 = parts.length > 1 ? parts[1] : '';
+      const h3Lower = h3.toLowerCase();
 
-      if (ledgerName.includes('intangible') || groupName.includes('intangible') || 
-          classification.includes('intangible') || ledgerName.includes('amortiz')) {
+      // Use H3 classification to categorize
+      if (h3Lower.includes('intangible') || h3Lower.includes('amortiz')) {
         categories['on intangible assets'].push(ledger);
       } else {
         categories['on tangible assets'].push(ledger);
@@ -54,6 +56,7 @@ export function DepreciationNote({ noteNumber, ledgers, reportingScale = 'rupees
   }, [ledgers]);
 
   const totals = useMemo(() => {
+    // Use closingBalance directly (same as Purchases in Cost of Materials Consumed)
     const tangible = categorized['on tangible assets'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
     const intangible = categorized['on intangible assets'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
     const total = tangible + intangible;

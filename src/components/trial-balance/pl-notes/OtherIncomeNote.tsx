@@ -31,7 +31,7 @@ interface Props {
 }
 
 export function OtherIncomeNote({ noteNumber, ledgers, reportingScale = 'rupees' }: Props) {
-  // Group ledgers by category
+  // Group ledgers by H3 classification (like Changes in Inventories pattern)
   const categorized = useMemo(() => {
     const categories: Record<string, LedgerItem[]> = {
       // Interest income
@@ -62,62 +62,64 @@ export function OtherIncomeNote({ noteNumber, ledgers, reportingScale = 'rupees'
     };
 
     ledgers.forEach(ledger => {
-      const ledgerName = ledger.ledgerName.toLowerCase();
-      const groupName = (ledger.groupName || '').toLowerCase();
-      const classification = (ledger.classification || '').toLowerCase();
+      // Extract H3 from classification string
+      const classification = ledger.classification || '';
+      const parts = classification.split('>').map(p => p.trim());
+      const h3 = parts.length > 1 ? parts[1] : '';
+      const h3Lower = h3.toLowerCase();
+
+      // Use H3 classification to categorize - all ledgers under "Other Income" H2
+      // should be categorized by their H3 values
+      if (!h3) {
+        // No H3 classification, add to miscellaneous
+        categories['Miscellaneous non-operating Income'].push(ledger);
+        return;
+      }
 
       // Interest income categorization
-      if (ledgerName.includes('interest') && (ledgerName.includes('bank') || groupName.includes('bank'))) {
+      if (h3Lower.includes('interest') && h3Lower.includes('bank')) {
         categories['Interest income on Bank deposits'].push(ledger);
-      } else if (ledgerName.includes('interest') && (ledgerName.includes('non-current invest') || groupName.includes('non-current invest'))) {
+      } else if (h3Lower.includes('interest') && h3Lower.includes('non-current')) {
         categories['Interest income on Non-current Investments'].push(ledger);
-      } else if (ledgerName.includes('interest') && (ledgerName.includes('current invest') || groupName.includes('current invest'))) {
+      } else if (h3Lower.includes('interest') && h3Lower.includes('current')) {
         categories['Interest income on Current Investments'].push(ledger);
-      } else if (ledgerName.includes('interest') && (ledgerName.includes('advance') || ledgerName.includes('deposit'))) {
+      } else if (h3Lower.includes('interest') && (h3Lower.includes('advance') || h3Lower.includes('deposit'))) {
         categories['Interest income on Advances and Deposits'].push(ledger);
-      } else if (ledgerName.includes('interest') && ledgerName.includes('loan')) {
+      } else if (h3Lower.includes('interest') && h3Lower.includes('loan')) {
         categories['Interest income on Loans'].push(ledger);
-      } else if (ledgerName.includes('interest') && ledgerName.includes('tax refund')) {
+      } else if (h3Lower.includes('interest') && h3Lower.includes('tax')) {
         categories['Interest income on Tax refunds'].push(ledger);
       }
-      
       // Dividend income
-      else if (ledgerName.includes('dividend') && (ledgerName.includes('non-current') || groupName.includes('non-current'))) {
+      else if (h3Lower.includes('dividend') && h3Lower.includes('non-current')) {
         categories['Dividend income on Non-current Investments'].push(ledger);
-      } else if (ledgerName.includes('dividend') && (ledgerName.includes('current') || groupName.includes('current'))) {
+      } else if (h3Lower.includes('dividend') && h3Lower.includes('current')) {
         categories['Dividend income on Current Investments'].push(ledger);
-      } else if (ledgerName.includes('dividend') && ledgerName.includes('subsid')) {
+      } else if (h3Lower.includes('dividend') && h3Lower.includes('subsid')) {
         categories['Dividend income from Subsidiaries'].push(ledger);
       }
-      
       // Gains on sale
-      else if ((ledgerName.includes('gain') || ledgerName.includes('profit')) && 
-               (ledgerName.includes('non-current invest') || classification.includes('non-current invest'))) {
+      else if ((h3Lower.includes('gain') || h3Lower.includes('profit')) && h3Lower.includes('non-current invest')) {
         categories['Gain on realisation of Non-current Investments [Net]'].push(ledger);
-      } else if ((ledgerName.includes('gain') || ledgerName.includes('profit')) && 
-                 (ledgerName.includes('current invest') || classification.includes('current invest'))) {
+      } else if ((h3Lower.includes('gain') || h3Lower.includes('profit')) && h3Lower.includes('current invest')) {
         categories['Gain on realisation of Current Investments [Net]'].push(ledger);
-      } else if ((ledgerName.includes('gain') || ledgerName.includes('profit')) && 
-                 (ledgerName.includes('ppe') || ledgerName.includes('fixed asset') || ledgerName.includes('property'))) {
+      } else if ((h3Lower.includes('gain') || h3Lower.includes('profit')) && (h3Lower.includes('ppe') || h3Lower.includes('property') || h3Lower.includes('plant'))) {
         categories['Gain on sale or disposal of Property, Plant and Equipment [Net]'].push(ledger);
       }
-      
       // Foreign exchange
-      else if (ledgerName.includes('foreign exchange') || ledgerName.includes('forex')) {
+      else if (h3Lower.includes('foreign exchange') || h3Lower.includes('forex')) {
         categories['Gain on Foreign Exchange fluctuations [Net]'].push(ledger);
       }
-      
       // Written back items
-      else if (ledgerName.includes('provision') && ledgerName.includes('written back')) {
+      else if (h3Lower.includes('provision') && h3Lower.includes('written back')) {
         categories['Provisions written back'].push(ledger);
-      } else if (ledgerName.includes('payable') && ledgerName.includes('written back')) {
+      } else if (h3Lower.includes('payable') && h3Lower.includes('written back')) {
         categories['Trade Payables written back'].push(ledger);
-      } else if (ledgerName.includes('liabilit') && ledgerName.includes('written back')) {
+      } else if (h3Lower.includes('liabilit') && h3Lower.includes('written back')) {
         categories['Other liabilities written back'].push(ledger);
-      } else if (ledgerName.includes('transfer from reserve')) {
+      } else if (h3Lower.includes('transfer from reserve')) {
         categories['Transfer from reserves'].push(ledger);
       }
-      
       // Miscellaneous
       else {
         categories['Miscellaneous non-operating Income'].push(ledger);
@@ -128,6 +130,7 @@ export function OtherIncomeNote({ noteNumber, ledgers, reportingScale = 'rupees'
   }, [ledgers]);
 
   const totals = useMemo(() => {
+    // Use closingBalance directly (same as Purchases in Cost of Materials Consumed)
     const calc = (category: string) => 
       categorized[category]?.reduce((sum, l) => sum + Math.abs(l.closingBalance), 0) || 0;
 

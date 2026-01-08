@@ -38,7 +38,7 @@ interface Props {
 }
 
 export function RevenueFromOperationsNote({ noteNumber, ledgers, reportingScale = 'rupees' }: Props) {
-  // Group ledgers by category
+  // Group ledgers by H3 classification from trial balance (similar to Changes in Inventories pattern)
   const categorized = useMemo(() => {
     const categories: Record<string, LedgerItem[]> = {
       'Sale of products': [],
@@ -48,20 +48,25 @@ export function RevenueFromOperationsNote({ noteNumber, ledgers, reportingScale 
     };
 
     ledgers.forEach(ledger => {
-      const ledgerName = ledger.ledgerName.toLowerCase();
-      const groupName = (ledger.groupName || '').toLowerCase();
-      const classification = (ledger.classification || '').toLowerCase();
-
-      if (ledgerName.includes('sale of product') || groupName.includes('sale of product') || 
-          ledgerName.includes('product sale') || classification.includes('sale of product')) {
-        categories['Sale of products'].push(ledger);
-      } else if (ledgerName.includes('sale of service') || groupName.includes('sale of service') || 
-                 ledgerName.includes('service income') || classification.includes('sale of service')) {
-        categories['Sale of services'].push(ledger);
-      } else if (ledgerName.includes('grant') || ledgerName.includes('donation') || 
-                 groupName.includes('grant') || groupName.includes('donation')) {
-        categories['Grants or donations received'].push(ledger);
+      // Extract H3 from classification string (format: \"H2 > H3 > H4\")
+      const classification = ledger.classification || '';
+      const parts = classification.split('>').map(p => p.trim());
+      const h3 = parts.length > 1 ? parts[1] : '';
+      
+      // Use H3 classification to categorize
+      if (h3) {
+        const h3Lower = h3.toLowerCase();
+        if (h3Lower.includes('sale of product')) {
+          categories['Sale of products'].push(ledger);
+        } else if (h3Lower.includes('sale of service')) {
+          categories['Sale of services'].push(ledger);
+        } else if (h3Lower.includes('grant') || h3Lower.includes('donation')) {
+          categories['Grants or donations received'].push(ledger);
+        } else {
+          categories['Other operating revenue'].push(ledger);
+        }
       } else {
+        // If no H3, add to other operating revenue
         categories['Other operating revenue'].push(ledger);
       }
     });
@@ -70,6 +75,7 @@ export function RevenueFromOperationsNote({ noteNumber, ledgers, reportingScale 
   }, [ledgers]);
 
   const totals = useMemo(() => {
+    // Use closingBalance directly (same as Purchases in Cost of Materials Consumed)
     const saleOfProducts = categorized['Sale of products'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
     const saleOfServices = categorized['Sale of services'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
     const grants = categorized['Grants or donations received'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);

@@ -29,7 +29,7 @@ interface Props {
 }
 
 export function EmployeeBenefitsNote({ noteNumber, ledgers, reportingScale = 'rupees' }: Props) {
-  // Group ledgers by category
+  // Group ledgers by H3 classification (like Changes in Inventories pattern)
   const categorized = useMemo(() => {
     const categories: Record<string, LedgerItem[]> = {
       'Salaries, wages, bonus and other allowances': [],
@@ -41,21 +41,27 @@ export function EmployeeBenefitsNote({ noteNumber, ledgers, reportingScale = 'ru
     };
 
     ledgers.forEach(ledger => {
-      const ledgerName = ledger.ledgerName.toLowerCase();
-      const groupName = (ledger.groupName || '').toLowerCase();
+      // Extract H3 from classification string
+      const classification = ledger.classification || '';
+      const parts = classification.split('>').map(p => p.trim());
+      const h3 = parts.length > 1 ? parts[1] : '';
+      const h3Lower = h3.toLowerCase();
 
-      if (ledgerName.includes('salary') || ledgerName.includes('wage') || ledgerName.includes('bonus') || 
-          ledgerName.includes('allowance') || groupName.includes('salary') || groupName.includes('wage')) {
+      // Use H3 classification to categorize
+      if (!h3) {
+        categories['Staff welfare expenses'].push(ledger);
+        return;
+      }
+
+      if (h3Lower.includes('salary') || h3Lower.includes('wage') || h3Lower.includes('bonus') || h3Lower.includes('allowance')) {
         categories['Salaries, wages, bonus and other allowances'].push(ledger);
-      } else if (ledgerName.includes('provident') || ledgerName.includes('pf') || ledgerName.includes('esi') ||
-                 ledgerName.includes('pension') || groupName.includes('provident')) {
+      } else if (h3Lower.includes('provident') || h3Lower.includes('pf') || h3Lower.includes('esi') || h3Lower.includes('pension')) {
         categories['Contribution to provident and other funds'].push(ledger);
-      } else if (ledgerName.includes('gratuity')) {
+      } else if (h3Lower.includes('gratuity')) {
         categories['Gratuity expenses'].push(ledger);
-      } else if (ledgerName.includes('director') && ledgerName.includes('remuneration')) {
+      } else if (h3Lower.includes('director') && h3Lower.includes('remuneration')) {
         categories['Director\'s Remuneration'].push(ledger);
-      } else if (ledgerName.includes('esop') || ledgerName.includes('stock option') || 
-                 ledgerName.includes('share based')) {
+      } else if (h3Lower.includes('esop') || h3Lower.includes('stock option') || h3Lower.includes('share based')) {
         categories['Share based payments to employees(ESOP)'].push(ledger);
       } else {
         categories['Staff welfare expenses'].push(ledger);
@@ -66,6 +72,7 @@ export function EmployeeBenefitsNote({ noteNumber, ledgers, reportingScale = 'ru
   }, [ledgers]);
 
   const totals = useMemo(() => {
+    // Use closingBalance directly (same as Purchases in Cost of Materials Consumed)
     const salaries = categorized['Salaries, wages, bonus and other allowances'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
     const provident = categorized['Contribution to provident and other funds'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
     const gratuity = categorized['Gratuity expenses'].reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);

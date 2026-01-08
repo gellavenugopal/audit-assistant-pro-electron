@@ -334,7 +334,29 @@ export function classifyLedgerWithPriority(
     return savedMappingsDict[compositeKey];
   }
   
-  // PRIORITY 2: Business Type Specific Rules
+  // PRIORITY 2: Special Equity Classification Rule
+  // If IsRevenue = No AND Primary Group = Capital / Reserves & Surplus AND balance is Credit → H2 = Equity
+  const groupLower = tallyGroup.toLowerCase();
+  const isCredit = closingBalance < 0; // Credit balance in accounting
+  const isRevenueGroup = ['Sales Accounts', 'Direct Incomes', 'Indirect Incomes'].includes(tallyGroup);
+  
+  if (!isRevenueGroup && 
+      (groupLower.includes('capital') || groupLower.includes('reserve') || groupLower.includes('surplus')) && 
+      isCredit) {
+    return {
+      h1: 'Balance Sheet',
+      h2: 'Equity',
+      h3: groupLower.includes('capital') ? 'Share Capital' : 'Other Equity',
+      h4: groupLower.includes('reserve') ? 'Reserves and Surplus' : '',
+      h5: '',
+      technicalCode: 'BS_EQUITY',
+      headCode: 'EQUITY_HEAD',
+      sectionCode: 'EQUITY',
+      noteCode: 'NOTE_EQUITY'
+    };
+  }
+  
+  // PRIORITY 3: Business Type Specific Rules
   
   // Trading Business: Purchase Accounts → Purchase of Stock-in-Trade
   if (businessType === 'Trading' && tallyGroup === 'Purchase Accounts') {
