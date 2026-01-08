@@ -100,6 +100,45 @@ function registerIpcHandlers() {
       console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
 
       const query = `
+  try {
+    if (!odbcConnection) {
+      return { success: false, error: 'Not connected to Tally ODBC' };
+    }
+    
+    // Note: Tally ODBC doesn't directly support date filtering in SELECT queries
+    // The balances returned are as of the current Tally date setting
+    // To get period-specific balances, Tally's date should be set before querying
+    // For now, we fetch all ledgers - the balances reflect Tally's current date context
+    
+    // Convert dates to Tally format (DD-MMM-YYYY) for potential future use
+    const formatDateForTally = (dateStr) => {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = months[d.getMonth()];
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
+    
+    const toDateFormatted = formatDateForTally(toDate);
+    console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
+    console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
+    
+    // First, get company name
+    let companyName = '';
+    try {
+      const companyQuery = `SELECT $Name FROM Company`;
+      const companyResult = await odbcConnection.query(companyQuery);
+      if (companyResult && companyResult.length > 0) {
+        companyName = companyResult[0]['$Name'] || '';
+        console.log(`Trial Balance: Company Name - ${companyName}`);
+      }
+    } catch (err) {
+      console.warn('Could not fetch company name:', err.message);
+    }
+    
+    const query = `
       SELECT $Name, $_PrimaryGroup, $Parent, $IsRevenue, 
              $OpeningBalance, $ClosingBalance, $DebitTotals, $CreditTotals,
              $Code, $Branch
@@ -138,6 +177,38 @@ function registerIpcHandlers() {
       return { success: false, error: error.message };
     }
   });
+    
+    const result = await odbcConnection.query(query);
+    
+    // Process the data to match the Excel template format
+    // Parse numeric values properly - Tally may return strings
+    const parseNumeric = (val) => {
+      if (val === null || val === undefined || val === '') return 0;
+      const num = parseFloat(val);
+      return isNaN(num) ? 0 : num;
+    };
+    
+    const processedData = result.map(row => ({
+      accountHead: row['$Name'] || '',
+      openingBalance: parseNumeric(row['$OpeningBalance']),
+      totalDebit: parseNumeric(row['$DebitTotals']),
+      totalCredit: parseNumeric(row['$CreditTotals']),
+      closingBalance: parseNumeric(row['$ClosingBalance']),
+      accountCode: row['$Code'] || '',
+      branch: row['$Branch'] || 'HO',
+      // Add hierarchy data
+      primaryGroup: row['$_PrimaryGroup'] || '',
+      parent: row['$Parent'] || '',
+      isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
+    }));
+    
+    console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
+    
+    return { success: true, data: processedData, companyName: companyName };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
   ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) => {
     try {
@@ -702,6 +773,57 @@ function registerIpcHandlers() {
       return { success: false, error: error.message };
     }
   });
+    
+    return { success: true, lines };
+  } catch (error) {
+    console.error('Error fetching GST Not Feeded data:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('odbc-fetch-stock-items', async () => {
+  try {
+    if (!odbcConnection) {
+      return { success: false, error: 'Not connected to Tally ODBC' };
+    }
+    
+    // Query stock items from Tally
+    const query = `
+      SELECT 
+        $Name,
+        $Parent,
+        $_PrimaryGroup,
+        $OpeningValue,
+        $ClosingValue
+      FROM StockItem
+      ORDER BY $Parent, $Name
+    `;
+    
+    const result = await odbcConnection.query(query);
+    console.log(`Stock Items: Fetched ${result.length} stock items`);
+    
+    if (!result || result.length === 0) {
+      return { success: true, items: [] };
+    }
+    
+    // Process stock items
+    const items = result.map(row => ({
+      'Item Name': row['$Name'] || '',
+      'Stock Group': row['$Parent'] || '',
+      'Primary Group': row['$_PrimaryGroup'] || '',
+      'Opening Value': parseFloat(row['$OpeningValue']) || 0,
+      'Closing Value': parseFloat(row['$ClosingValue']) || 0,
+      'Stock Category': '', // Will be classified by user
+      'Composite Key': `STOCK|${row['$Name'] || ''}`
+    }));
+    
+    console.log(`Stock Items: Processed ${items.length} items`);
+    return { success: true, items };
+  } catch (error) {
+    console.error('Error fetching stock items:', error);
+    return { success: false, error: error.message };
+  }
+});
 }
 
 function createWindow() {
@@ -730,7 +852,8 @@ function createWindow() {
   // Load the app
   if (isDev) {
     // In development, load from Vite dev server
-    mainWindow.loadURL('http://localhost:8080');
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:8080';
+    mainWindow.loadURL(devServerUrl);
   } else {
     // In production, load the built files
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
