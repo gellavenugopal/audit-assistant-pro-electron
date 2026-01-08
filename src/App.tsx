@@ -16,6 +16,7 @@ import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
 import TrialBalance from "./pages/TrialBalance";
 import TrialBalanceNew from "./pages/TrialBalanceNew";
+import Appointment from "./pages/Appointment";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
 import AuditPrograms from "./pages/AuditPrograms";
@@ -35,6 +36,7 @@ import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from '@/pages/Gstr1Dashboard';
 import NotFound from "./pages/NotFound";
+import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
 
 import ComplianceApplicability from "./pages/ComplianceApplicability";
 
@@ -90,6 +92,26 @@ const App = () => (
                     <ProtectedEngagementRoute>
                       <MainLayout>
                         <TrialBalance />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/appointment"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Appointment />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/appointment/engagement-letter"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <EngagementLetterGenerator />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
