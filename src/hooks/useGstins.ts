@@ -11,17 +11,29 @@ import { gstzenKeys } from './useGstzenCustomer';
 /**
  * Hook to get all GSTINs for a customer
  */
-export function useGstins() {
+export function useGstins(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: gstzenKeys.gstins(),
     queryFn: async () => {
       const response = await gstzenApi.getGstins();
       if (!response.success) {
+        // Handle Stale Token (401)
+        if (typeof response.error === 'string' && (response.error.includes('token_not_valid') || response.error.includes('401') || response.error.includes('Authentication credentials were not provided'))) {
+           console.warn('[useGstins] Stale or missing token detected. Clearing auth and reloading.');
+           // Only clear and reload if we *thought* we were logged in/enabled
+           if (options.enabled !== false) {
+               gstzenApi.clearAuthToken();
+               window.location.reload();
+           }
+           return [];
+        }
         throw new Error(response.error || 'Failed to fetch GSTINs');
       }
       return response.data || [];
     },
+    retry: false, // Don't retry on 401s
     staleTime: 2 * 60 * 1000, // 2 minutes
+    enabled: options.enabled, // Pass enabled flag to React Query
   });
 }
 

@@ -65,6 +65,7 @@ class GstzenApiClient {
     // Check if running in Electron
     if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.login) {
       const result = await window.electronAPI.gstzen.login(credentials);
+      
       if (result.ok && result.data && result.data.access) {
         return { 
           success: true, 
@@ -79,19 +80,33 @@ class GstzenApiClient {
     }
 
     // Fallback to direct fetch
-    const apiUrl = (import.meta as any).env.VITE_GSTZEN_API_URL || 'http://localhost:9001';
+    const apiUrl = (import.meta as any).env.VITE_GSTZEN_API_URL || 'https://staging.gstzen.in';
+    const loginUrl = `${apiUrl}/accounts/api/login/token/`;
+    console.log('[API Request Check] Login Fallback:', loginUrl, credentials);
+
     try {
-        const response = await fetch(`${apiUrl}/accounts/api/login/token/`, {
+        const response = await fetch(loginUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(credentials),
         });
-        const data = await response.json();
+        const text = await response.text();
+        let data;
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (e) {
+            console.error('Failed to parse JSON response:', text.substring(0, 100));
+            data = { error: 'Invalid JSON response', raw: text.substring(0, 1000) };
+        }
+        
+        console.log(`[API Response Check] Login Fallback (${response.status}):`, data);
+
         if (response.ok && data.access) {
             return { success: true, data: { access: data.access, refresh: data.refresh || '' } };
         }
         return { success: false, error: data.detail || data.message || 'Login failed' };
     } catch (error) {
+        console.error('[API Exception Check] Login Fallback:', error);
         return { success: false, error: error instanceof Error ? error.message : 'Network error' };
     }
   }
@@ -118,15 +133,20 @@ class GstzenApiClient {
                  console.warn("Could not parse body for IPC", options.body);
              }
         }
+
+        console.log(`[API Request] Method: ${method}, Endpoint: ${endpoint}`, data ? { data } : 'No Data');
         
         try {
             const result = await window.electronAPI.gstzen.request(endpoint, method, data, this.authToken || '');
             if (result.ok) {
+                console.log(`[API Response] ${endpoint}:`, result.data);
                 return { success: true, data: result.data };
             } else {
+                console.error(`[API Error] ${endpoint}:`, result);
                 return { success: false, error: result.data?.message || `HTTP error ${result.status}` };
             }
         } catch (error) {
+             console.error(`[API Exception] ${endpoint}:`, error);
              return { success: false, error: error instanceof Error ? error.message : 'IPC Request Failed' };
         }
     }
@@ -143,6 +163,9 @@ class GstzenApiClient {
       headers['X-API-Key'] = this.apiKey;
     }
 
+    const method = options.method || 'GET';
+    console.log(`[API Request Fetch] Method: ${method}, Endpoint: ${endpoint}`, 'Headers:', headers);
+
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         ...options,
@@ -151,6 +174,7 @@ class GstzenApiClient {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error(`[API Error Fetch] ${endpoint}:`, errorData);
         throw new Error(errorData.message || `HTTP error ${response.status}`);
       }
 
@@ -158,6 +182,7 @@ class GstzenApiClient {
       try {
         const text = await response.text();
         data = text ? JSON.parse(text) : {};
+        console.log(`[API Response Fetch] ${endpoint}:`, data);
       } catch (e) {
         console.warn('Invalid JSON response:', e);
         throw new Error('Received invalid response from server');

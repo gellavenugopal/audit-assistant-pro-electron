@@ -18,7 +18,7 @@ type DialogType = "none" | "download" | "login" | "consolidated";
 // DEMO: Auto-login credentials
 const DEMO_CREDENTIALS = {
     username: "demo@cloudzen.in",
-    password: "demo" // Demonstration access
+    password: "gstzen!100Cr(^.^)S" // Demonstration access
 };
 
 export default function GstzenIntegration() {
@@ -61,7 +61,7 @@ export default function GstzenIntegration() {
 
 
     // Get GSTINs for this customer
-    const { data: gstins = [], isLoading: gstinsLoading } = useGstins();
+    const { data: gstins = [], isLoading: gstinsLoading } = useGstins({ enabled: isGstzenAuthenticated });
 
     const isLoading = gstinsLoading;
 

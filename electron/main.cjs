@@ -716,14 +716,14 @@ function registerIpcHandlers() {
     }
   });
 
-ipcMain.handle('odbc-fetch-stock-items', async () => {
-  try {
-    if (!odbcConnection) {
-      return { success: false, error: 'Not connected to Tally ODBC' };
-    }
-    
-    // Query stock items from Tally
-    const query = `
+  ipcMain.handle('odbc-fetch-stock-items', async () => {
+    try {
+      if (!odbcConnection) {
+        return { success: false, error: 'Not connected to Tally ODBC' };
+      }
+
+      // Query stock items from Tally
+      const query = `
       SELECT 
         $Name,
         $Parent,
@@ -733,32 +733,32 @@ ipcMain.handle('odbc-fetch-stock-items', async () => {
       FROM StockItem
       ORDER BY $Parent, $Name
     `;
-    
-    const result = await odbcConnection.query(query);
-    console.log(`Stock Items: Fetched ${result.length} stock items`);
-    
-    if (!result || result.length === 0) {
-      return { success: true, items: [] };
+
+      const result = await odbcConnection.query(query);
+      console.log(`Stock Items: Fetched ${result.length} stock items`);
+
+      if (!result || result.length === 0) {
+        return { success: true, items: [] };
+      }
+
+      // Process stock items
+      const items = result.map(row => ({
+        'Item Name': row['$Name'] || '',
+        'Stock Group': row['$Parent'] || '',
+        'Primary Group': row['$_PrimaryGroup'] || '',
+        'Opening Value': parseFloat(row['$OpeningValue']) || 0,
+        'Closing Value': parseFloat(row['$ClosingValue']) || 0,
+        'Stock Category': '', // Will be classified by user
+        'Composite Key': `STOCK|${row['$Name'] || ''}`
+      }));
+
+      console.log(`Stock Items: Processed ${items.length} items`);
+      return { success: true, items };
+    } catch (error) {
+      console.error('Error fetching stock items:', error);
+      return { success: false, error: error.message };
     }
-    
-    // Process stock items
-    const items = result.map(row => ({
-      'Item Name': row['$Name'] || '',
-      'Stock Group': row['$Parent'] || '',
-      'Primary Group': row['$_PrimaryGroup'] || '',
-      'Opening Value': parseFloat(row['$OpeningValue']) || 0,
-      'Closing Value': parseFloat(row['$ClosingValue']) || 0,
-      'Stock Category': '', // Will be classified by user
-      'Composite Key': `STOCK|${row['$Name'] || ''}`
-    }));
-    
-    console.log(`Stock Items: Processed ${items.length} items`);
-    return { success: true, items };
-  } catch (error) {
-    console.error('Error fetching stock items:', error);
-    return { success: false, error: error.message };
-  }
-});
+  });
 }
 
 function createWindow() {
@@ -821,12 +821,14 @@ app.on('window-all-closed', () => {
 // IPC Handlers for GSTZen API
 // Use localhost for development/testing as per user logs. 
 // For production, this should be 'https://app.gstzen.in'
-const API_BASE_URL = 'http://localhost:9001';
+const API_BASE_URL = 'https://staging.gstzen.in';
 
 async function handleApiRequest(endpoint, method, data, token) {
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    console.log(`[API Request] Method: ${method}, Endpoint: ${endpoint}`, data ? { data } : 'No Data');
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method,
@@ -852,6 +854,7 @@ async function handleApiRequest(endpoint, method, data, token) {
       }
     }
 
+    console.log(`[API Response] ${endpoint}:`, json);
     return { ok: response.ok, status: response.status, data: json };
   } catch (error) {
     console.error(`API Error [${endpoint}]:`, error);
