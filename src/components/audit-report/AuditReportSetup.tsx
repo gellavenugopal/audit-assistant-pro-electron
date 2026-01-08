@@ -517,7 +517,7 @@ export function AuditReportSetup({
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-success">
               <CheckCircle2 className="h-5 w-5" />
-              Setup Complete - Report Details
+              Audit Report- Setup- Initial
             </CardTitle>
             <CardDescription>
               Configure signing partner and report details for PDF generation
@@ -641,7 +641,7 @@ export function AuditReportSetup({
                   Save Details
                 </Button>
                 <Button onClick={onSetupComplete} className="gap-2">
-                  Proceed to CARO Reporting
+                  Proceed
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
