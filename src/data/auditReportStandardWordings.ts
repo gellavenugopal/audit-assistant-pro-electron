@@ -45,28 +45,24 @@ export function buildOpinionParagraph(params: {
     ? ` in which are included the Returns for the year ended on that date audited by the branch auditors of the Company's branches located at ${branchLocations || '________________'}`
     : '';
 
-  const ifcClause = ifcApplicable
-    ? `\n\nWe have also audited, in accordance with the Standards on Auditing (SAs) issued by the ICAI, as specified under Section 143(10) of the Act, the Company's internal financial controls with reference to standalone financial statements as at ${periodEndLabel} and our report in Annexure ${ifcAnnexureLetter || 'B'} expresses an unmodified opinion thereon.`
-    : '';
-
   switch (opinionType) {
     case 'unqualified':
-      return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.${ifcClause}
+      return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.
 
 In our opinion and to the best of our information and according to the explanations given to us, the aforesaid standalone financial statements give the information required by the Companies Act, 2013 ("the Act") in the manner so required and give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at ${periodEndLabel}, ${profitAndCashPhrase} for the year ended on that date.`;
 
     case 'qualified':
-      return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.${ifcClause}
+      return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.
 
 In our opinion and to the best of our information and according to the explanations given to us, except for the effects of the matter(s) described in the Basis for Qualified Opinion section of our report, the aforesaid standalone financial statements give the information required by the Act in the manner so required and give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at ${periodEndLabel}, ${profitAndCashPhrase} for the year ended on that date.`;
     
     case 'adverse':
-      return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.${ifcClause}
+      return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.
 
 In our opinion, because of the significance of the matter(s) discussed in the Basis for Adverse Opinion section of our report, the accompanying financial statements do not give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at ${periodEndLabel}, ${profitAndCashPhrase} for the year ended on that date.`;
 
     case 'disclaimer':
-      return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.${ifcClause}
+      return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.
 
 Because of the significance of the matter(s) described in the Basis for Disclaimer of Opinion section of our report, we have not been able to obtain sufficient appropriate audit evidence to provide a basis for an audit opinion. Accordingly, we do not express an opinion on the financial statements.`;
   }

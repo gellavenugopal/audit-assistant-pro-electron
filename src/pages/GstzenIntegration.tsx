@@ -6,22 +6,19 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Plus, Download, Settings, CheckCircle, XCircle, AlertCircle, Building, Mail, Phone, UserCircle, LogIn, LogOut, Loader2, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useGstzenCustomer } from "@/hooks/useGstzenCustomer";
 import { useGstins } from "@/hooks/useGstins";
-import { AddGstinDialog } from "@/components/gstin/AddGstinDialog";
-import { GstinCredentialsDialog } from "@/components/gstin/GstinCredentialsDialog";
 import { GstnLoginDialog } from "@/components/gstin/GstnLoginDialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { gstzenKeys } from "@/hooks/useGstzenCustomer";
 import { gstzenApi } from "@/services/gstzen-api";
 import type { Gstin } from "@/types/gstzen";
 
-type DialogType = "none" | "add-gstin" | "credentials" | "download" | "login" | "consolidated" | "settings";
+type DialogType = "none" | "download" | "login" | "consolidated";
 
 // DEMO: Auto-login credentials
 const DEMO_CREDENTIALS = {
     username: "demo@cloudzen.in",
-    password: "demo" // Demonstration access
+    password: "gstzen!100Cr(^.^)S" // Demonstration access
 };
 
 export default function GstzenIntegration() {
@@ -62,13 +59,11 @@ export default function GstzenIntegration() {
         autoLogin();
     }, [gstzenToken]);
 
-    // Get or create customer profile
-    const { customer, isLoading: customerLoading } = useGstzenCustomer(user?.email || null);
 
     // Get GSTINs for this customer
-    const { data: gstins = [], isLoading: gstinsLoading } = useGstins(customer?.uuid || null);
+    const { data: gstins = [], isLoading: gstinsLoading } = useGstins({ enabled: isGstzenAuthenticated });
 
-    const isLoading = customerLoading || gstinsLoading;
+    const isLoading = gstinsLoading;
 
     const [activeSessions, setActiveSessions] = useState<Record<string, boolean>>({});
 
@@ -83,31 +78,12 @@ export default function GstzenIntegration() {
                     Active
                 </Badge>
             );
-        } else if (hasCredentials) {
-            return (
-                <Badge variant="secondary">
-                    <AlertCircle className="w-3 h-3 mr-1" />
-                    Credentials Saved
-                </Badge>
-            );
         } else {
-            return (
-                <Badge variant="destructive">
-                    <XCircle className="w-3 h-3 mr-1" />
-                    Not Configured
-                </Badge>
-            );
+            return null;
         }
     };
 
-    const handleOpenAddGstin = () => {
-        setActiveDialog("add-gstin");
-    };
 
-    const handleOpenCredentials = (gstin: Gstin) => {
-        setSelectedGstin(gstin);
-        setActiveDialog("credentials");
-    };
 
     const handleOpenDownload = (gstin: Gstin) => {
         // Navigate to Gstr1Dashboard
@@ -121,10 +97,6 @@ export default function GstzenIntegration() {
         setActiveDialog("login");
     };
 
-    const handleOpenSettings = (gstin: Gstin) => {
-        setSelectedGstin(gstin);
-        setActiveDialog("settings");
-    };
 
     const handleCloseDialog = () => {
         setActiveDialog("none");
@@ -176,17 +148,10 @@ export default function GstzenIntegration() {
             {/* Customer Profile Section */}
             {isGstzenAuthenticated && (
                 <>
+                    {/* Customer Profile Section Hidden as requested 
                     <div className="grid gap-6 md:grid-cols-2 mb-8">
-                        {/* Customer Profile Card */}
                         <Card className="md:col-span-2 overflow-hidden">
                             <div className="bg-primary/5 p-6 md:p-8 flex flex-col md:flex-row gap-6 items-center md:items-start text-center md:text-left relative group">
-                                {/* DEMO: Sign Out button hidden as requested
-                                <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                    <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-destructive">
-                                        <LogOut className="h-4 w-4 md:mr-2" />
-                                        <span className="hidden md:inline">Sign Out</span>
-                                    </Button>
-                                </div> */}
                                 <div className="h-20 w-20 rounded-full bg-background shadow-sm flex items-center justify-center shrink-0">
                                     <UserCircle className="h-10 w-10 text-primary" />
                                 </div>
@@ -222,6 +187,8 @@ export default function GstzenIntegration() {
                             </div>
                         </Card>
                     </div>
+                    */}
+
 
                     {/* GSTINs Management Section */}
                     <div className="space-y-6">
@@ -230,11 +197,6 @@ export default function GstzenIntegration() {
                                 <h2 className="section-title">Registered GSTINs</h2>
                                 <p className="text-muted-foreground">Manage your GST identification numbers</p>
                             </div>
-                            {/* DEMO: Button hidden as requested
-                            <Button onClick={handleOpenAddGstin} disabled={!customer} className="shadow-sm">
-                                <Plus className="w-4 h-4 mr-2" />
-                                Add GSTIN
-                            </Button> */}
                         </div>
 
                         {gstinsLoading ? (
@@ -270,16 +232,11 @@ export default function GstzenIntegration() {
                                             <Button
                                                 className="w-full shadow-sm"
                                                 onClick={() => handleOpenDownload(gstin)}
-                                                disabled={!gstin.metadata?.gstn?.credentials?.username}
                                             >
                                                 <FileText className="mr-2 h-4 w-4" />
                                                 Manage GSTR-1
                                             </Button>
 
-                                            <Button variant="outline" size="sm" className="w-full" onClick={() => handleOpenCredentials(gstin)} title="Configure Credentials">
-                                                <Settings className="h-3.5 w-3.5 mr-2" />
-                                                Settings
-                                            </Button>
                                         </div>
                                     </Card>
                                 ))}
@@ -294,8 +251,8 @@ export default function GstzenIntegration() {
                                     <p className="text-muted-foreground max-w-sm mb-6">
                                         Add your first GSTIN to start managing returns and downloading reports.
                                     </p>
-                                    <Button onClick={handleOpenAddGstin}>
-                                        Add Your First GSTIN
+                                    <Button onClick={() => { }} disabled>
+                                        Contact Support to Add GSTIN
                                     </Button>
                                 </CardContent>
                             </Card>
@@ -303,40 +260,23 @@ export default function GstzenIntegration() {
                     </div>
 
                     {/* Dialogs */}
-                    {customer && (
+                    {isGstzenAuthenticated && (
                         <>
-                            <AddGstinDialog
-                                open={activeDialog === "add-gstin"}
+
+                            <GstnLoginDialog
+                                open={activeDialog === "login"}
                                 onOpenChange={handleCloseDialog}
-                                customerUuid={customer.uuid}
+                                gstin={selectedGstin}
+                                onSuccess={() => {
+                                    queryClient.invalidateQueries({ queryKey: gstzenKeys.gstins() });
+                                    if (selectedGstin) {
+                                        setActiveSessions(prev => ({
+                                            ...prev,
+                                            [selectedGstin.uuid]: true
+                                        }));
+                                    }
+                                }}
                             />
-
-                            {selectedGstin && (
-                                <>
-                                    <GstinCredentialsDialog
-                                        open={activeDialog === "credentials"}
-                                        onOpenChange={handleCloseDialog}
-                                        gstin={selectedGstin}
-                                    />
-
-                                    <GstnLoginDialog
-                                        open={activeDialog === "login"}
-                                        onOpenChange={handleCloseDialog}
-                                        gstin={selectedGstin}
-                                        onSuccess={() => {
-                                            if (customer) {
-                                                queryClient.invalidateQueries({ queryKey: gstzenKeys.gstins(customer.uuid) });
-                                            }
-                                            if (selectedGstin) {
-                                                setActiveSessions(prev => ({
-                                                    ...prev,
-                                                    [selectedGstin.uuid]: true
-                                                }));
-                                            }
-                                        }}
-                                    />
-                                </>
-                            )}
                         </>
                     )}
                 </>

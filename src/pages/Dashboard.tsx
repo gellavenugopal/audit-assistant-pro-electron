@@ -1,11 +1,14 @@
+import { useState } from 'react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { ProgressWidget } from '@/components/dashboard/ProgressWidget';
 import { RiskSummary } from '@/components/dashboard/RiskSummary';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
 import { StatusBadge, getStatusVariant } from '@/components/ui/status-badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDashboardStats } from '@/hooks/useDashboardStats';
 import { useTeamMembers } from '@/hooks/useTeamMembers';
+import { useEngagement } from '@/contexts/EngagementContext';
 import { 
   ClipboardCheck, 
   FileCheck, 
@@ -18,8 +21,13 @@ import {
 } from 'lucide-react';
 
 export default function Dashboard() {
-  const { stats, loading } = useDashboardStats();
-  const { members, loading: membersLoading } = useTeamMembers();
+  const { currentEngagement } = useEngagement();
+  const [view, setView] = useState<'engagement' | 'overall'>('engagement');
+  const scopedEngagementId = view === 'engagement' ? currentEngagement?.id : undefined;
+  const { stats, loading } = useDashboardStats(scopedEngagementId);
+  const { members, loading: membersLoading } = useTeamMembers(scopedEngagementId);
+  const activeEngagement = view === 'engagement' ? currentEngagement : null;
+  const materialitySource = view === 'engagement' ? activeEngagement : stats.latestEngagement;
   
   const proceduresDone = stats.procedures.completed + stats.procedures.reviewed;
   const totalProcedures = stats.procedures.total || 1; // Avoid division by zero
@@ -63,28 +71,38 @@ export default function Dashboard() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Engagement Dashboard</h1>
+          <h1 className="text-2xl font-bold text-foreground">
+            {view === 'overall' ? 'Overall Dashboard' : 'Engagement Dashboard'}
+          </h1>
           {loading ? (
             <Skeleton className="h-5 w-48 mt-1" />
-          ) : stats.latestEngagement ? (
+          ) : activeEngagement ? (
             <p className="text-muted-foreground mt-1">
-              {stats.latestEngagement.client_name} • {stats.latestEngagement.name}
+              {activeEngagement.client_name} - {activeEngagement.name}
             </p>
+          ) : view === 'overall' ? (
+            <p className="text-muted-foreground mt-1">All engagements</p>
           ) : (
             <p className="text-muted-foreground mt-1">No engagements yet</p>
           )}
         </div>
         <div className="flex items-center gap-3">
+          <Tabs value={view} onValueChange={(value) => setView(value as 'engagement' | 'overall')}>
+            <TabsList>
+              <TabsTrigger value="engagement" className="data-[state=active]:text-white">Engagement</TabsTrigger>
+              <TabsTrigger value="overall" className="data-[state=active]:text-white">Overall</TabsTrigger>
+            </TabsList>
+          </Tabs>
           {loading ? (
             <Skeleton className="h-6 w-20" />
-          ) : stats.latestEngagement ? (
+          ) : activeEngagement ? (
             <>
-              <StatusBadge variant={getStatusVariant(stats.latestEngagement.status)}>
-                {stats.latestEngagement.status.charAt(0).toUpperCase() + stats.latestEngagement.status.slice(1)}
+              <StatusBadge variant={getStatusVariant(activeEngagement.status)}>
+                {activeEngagement.status.charAt(0).toUpperCase() + activeEngagement.status.slice(1)}
               </StatusBadge>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Calendar className="h-4 w-4" />
-                <span>FY: {stats.latestEngagement.financial_year}</span>
+                <span>FY: {activeEngagement.financial_year}</span>
               </div>
             </>
           ) : null}
@@ -128,9 +146,9 @@ export default function Dashboard() {
               variant={stats.risks.high > 2 ? 'danger' : stats.risks.high > 0 ? 'warning' : 'success'}
             />
             <StatCard
-              title="Materiality"
-              value={formatCurrency(stats.latestEngagement?.materiality_amount || null)}
-              subtitle={`PM: ${formatCurrency(stats.latestEngagement?.performance_materiality || null)}`}
+              title={view === 'engagement' ? 'Materiality' : 'Latest Materiality'}
+              value={formatCurrency(materialitySource?.materiality_amount || null)}
+              subtitle={`PM: ${formatCurrency(materialitySource?.performance_materiality || null)}`}
               icon={TrendingUp}
               variant="success"
             />

@@ -1,24 +1,6 @@
 import { useState, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 
-// Extend the Window interface to include electronAPI
-declare global {
-  interface Window {
-    electronAPI: {
-      odbcFetchOldTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
-      odbcFetchNewTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
-      odbcCompareOpeningBalances: (data: { oldData: any[]; newData: any[] }) => Promise<{
-        success: boolean;
-        error?: string;
-        comparison?: {
-          balanceMismatches: any[];
-          nameMismatches: any[];
-        };
-        xml?: string;
-      }>;
-    };
-  }
-}
 
 export interface LedgerData {
   $Name: string;

@@ -78,6 +78,10 @@ export default function AuditReport() {
             <Settings className="h-4 w-4" />
             Setup
           </TabsTrigger>
+          <TabsTrigger value="main-report" className="gap-2" disabled={!setup?.setup_completed}>
+            <FileText className="h-4 w-4" />
+            Main Report
+          </TabsTrigger>
           <TabsTrigger value="caro" className="gap-2" disabled={!setup?.setup_completed}>
             <ClipboardCheck className="h-4 w-4" />
             CARO 2020
@@ -85,10 +89,6 @@ export default function AuditReport() {
           <TabsTrigger value="ifc" className="gap-2" disabled={!setup?.setup_completed || !setup?.ifc_applicable}>
             <FileText className="h-4 w-4" />
             IFC Report
-          </TabsTrigger>
-          <TabsTrigger value="main-report" className="gap-2" disabled={!setup?.setup_completed}>
-            <FileText className="h-4 w-4" />
-            Main Report
           </TabsTrigger>
           <TabsTrigger value="export" className="gap-2" disabled={!setup?.setup_completed}>
             <Download className="h-4 w-4" />
@@ -105,9 +105,25 @@ export default function AuditReport() {
             refetchSetup={refetch}
             onSetupComplete={() => {
               refetch();
-              setActiveTab('caro');
+              setActiveTab('main-report');
             }}
           />
+        </TabsContent>
+
+        <TabsContent value="main-report">
+          {setup?.setup_completed ? (
+            <MainReportEditor
+              engagementId={currentEngagement.id}
+              clientName={currentEngagement.client_name}
+              financialYear={formatFinancialYearAsReportDate(currentEngagement.financial_year)}
+            />
+          ) : (
+            <Card>
+              <CardContent className="py-10 text-center">
+                <p className="text-muted-foreground">Complete the setup first to access Main Report.</p>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="caro">
@@ -141,22 +157,6 @@ export default function AuditReport() {
                     ? 'Complete the setup first to access IFC reporting.'
                     : 'IFC reporting is not applicable for this engagement.'}
                 </p>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="main-report">
-          {setup?.setup_completed ? (
-            <MainReportEditor 
-              engagementId={currentEngagement.id}
-              clientName={currentEngagement.client_name}
-              financialYear={formatFinancialYearAsReportDate(currentEngagement.financial_year)}
-            />
-          ) : (
-            <Card>
-              <CardContent className="py-10 text-center">
-                <p className="text-muted-foreground">Complete the setup first to access the report editor.</p>
               </CardContent>
             </Card>
           )}
