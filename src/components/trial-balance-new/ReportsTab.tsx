@@ -20,6 +20,14 @@ import { CashFlowStatement } from '@/components/trial-balance/CashFlowStatement'
 import { ChangesInInventoriesNote } from '@/components/trial-balance/ChangesInInventoriesNote';
 import { CostOfMaterialsConsumedNote } from '@/components/trial-balance/CostOfMaterialsConsumedNote';
 import { NotesManagementTab } from '@/components/trial-balance/capital-notes/NotesManagementTab';
+import { 
+  RevenueFromOperationsNote,
+  OtherIncomeNote,
+  EmployeeBenefitsNote,
+  FinanceCostNote,
+  DepreciationNote,
+  OtherExpensesNote 
+} from '@/components/trial-balance/pl-notes';
 import { FormatSelector } from '@/components/trial-balance/FormatSelector';
 import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSettings';
 import { useAuth } from '@/contexts/AuthContext';
@@ -213,11 +221,18 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               Cash Flow
             </TabsTrigger>
             <TabsTrigger 
-              value="capital-notes" 
+              value="bs-notes" 
               className="h-6 px-3 text-xs font-medium rounded-sm data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-gray-600"
             >
               <Building2 className="w-3 h-3 mr-1.5" />
-              Capital Notes
+              BS Notes
+            </TabsTrigger>
+            <TabsTrigger 
+              value="pl-notes" 
+              className="h-6 px-3 text-xs font-medium rounded-sm data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-gray-600"
+            >
+              <FileText className="w-3 h-3 mr-1.5" />
+              PL Notes
             </TabsTrigger>
           </TabsList>
 
@@ -321,8 +336,53 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
           </div>
         </TabsContent>
 
-        <TabsContent value="capital-notes" className="mt-2">
+        <TabsContent value="bs-notes" className="mt-2">
           <div className="space-y-2">
+            {/* Other Balance Sheet Notes Management */}
+            <div className="bg-white rounded border p-3">
+              <NotesManagementTab 
+                lines={trialBalanceLines}
+                constitution={constitution}
+                financialYear={financialYear}
+                clientName={companyName}
+              />
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="pl-notes" className="mt-2">
+          <div className="space-y-3">
+            {/* Debug info */}
+            {(!plNoteLedgers || Object.keys(plNoteLedgers).length === 0) && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-800">
+                <strong>Note:</strong> No ledger data classified for P&L notes. Please ensure ledgers are properly classified with H2 classifications like "Revenue from Operations", "Other Income", "Employee benefits expense", etc.
+              </div>
+            )}
+
+            {/* Revenue from Operations */}
+            <div className="bg-white rounded border p-3">
+              <RevenueFromOperationsNote
+                noteNumber={String(plStartingNote)}
+                ledgers={plNoteLedgers?.revenueFromOperations || []}
+                reportingScale={reportingScale}
+              />
+              {(!plNoteLedgers?.revenueFromOperations || plNoteLedgers.revenueFromOperations.length === 0) && (
+                <p className="text-xs text-gray-500 mt-2">No ledgers classified under "Revenue from Operations". Please classify ledgers in the Classified TB.</p>
+              )}
+            </div>
+
+            {/* Other Income */}
+            <div className="bg-white rounded border p-3">
+              <OtherIncomeNote
+                noteNumber={String(plStartingNote + 1)}
+                ledgers={plNoteLedgers?.otherIncome || []}
+                reportingScale={reportingScale}
+              />
+              {(!plNoteLedgers?.otherIncome || plNoteLedgers.otherIncome.length === 0) && (
+                <p className="text-xs text-gray-500 mt-2">No ledgers classified under "Other Income". Please classify ledgers in the Classified TB.</p>
+              )}
+            </div>
+
             {/* Changes in Inventories Note - For P&L */}
             {stockData && Array.isArray(stockData) && stockData.length > 0 && (
               <div className="bg-white rounded border p-3">
@@ -345,15 +405,54 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 />
               </div>
             )}
-            
-            {/* Other Notes Management */}
+
+            {/* Employee Benefits Expense */}
             <div className="bg-white rounded border p-3">
-              <NotesManagementTab 
-                lines={trialBalanceLines}
-                constitution={constitution}
-                financialYear={financialYear}
-                clientName={companyName}
+              <EmployeeBenefitsNote
+                noteNumber={String(plStartingNote + 4)}
+                ledgers={plNoteLedgers?.employeeBenefits || []}
+                reportingScale={reportingScale}
               />
+              {(!plNoteLedgers?.employeeBenefits || plNoteLedgers.employeeBenefits.length === 0) && (
+                <p className="text-xs text-gray-500 mt-2">No ledgers classified under "Employee benefits expense". Please classify ledgers in the Classified TB.</p>
+              )}
+            </div>
+
+            {/* Finance Cost */}
+            <div className="bg-white rounded border p-3">
+              <FinanceCostNote
+                noteNumber={String(plStartingNote + 5)}
+                ledgers={plNoteLedgers?.financeCosts || []}
+                reportingScale={reportingScale}
+              />
+              {(!plNoteLedgers?.financeCosts || plNoteLedgers.financeCosts.length === 0) && (
+                <p className="text-xs text-gray-500 mt-2">No ledgers classified under "Finance costs". Please classify ledgers in the Classified TB.</p>
+              )}
+            </div>
+
+            {/* Depreciation and Amortization */}
+            <div className="bg-white rounded border p-3">
+              <DepreciationNote
+                noteNumber={String(plStartingNote + 6)}
+                ledgers={plNoteLedgers?.depreciation || []}
+                reportingScale={reportingScale}
+                fixedAssetsNoteNumber="3"
+              />
+              {(!plNoteLedgers?.depreciation || plNoteLedgers.depreciation.length === 0) && (
+                <p className="text-xs text-gray-500 mt-2">No ledgers classified under "Depreciation and amortization expense". Please classify ledgers in the Classified TB.</p>
+              )}
+            </div>
+
+            {/* Other Expenses */}
+            <div className="bg-white rounded border p-3">
+              <OtherExpensesNote
+                noteNumber={String(plStartingNote + 7)}
+                ledgers={plNoteLedgers?.otherExpenses || []}
+                reportingScale={reportingScale}
+              />
+              {(!plNoteLedgers?.otherExpenses || plNoteLedgers.otherExpenses.length === 0) && (
+                <p className="text-xs text-gray-500 mt-2">No ledgers classified under "Other expenses". Please classify ledgers in the Classified TB.</p>
+              )}
             </div>
           </div>
         </TabsContent>
