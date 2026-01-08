@@ -149,6 +149,7 @@ export default function AdminDashboard() {
         action,
         entity,
         entity_id: entityId,
+        engagement_id: null,
         details,
         metadata: metadata || {},
       });

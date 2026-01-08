@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Building2, Loader2, Lock, Mail } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { gstzenApi } from "@/services/gstzen-api"; // Import the singleton instance
 
 export default function GstzenLogin() {
     const navigate = useNavigate();
@@ -34,14 +35,24 @@ export default function GstzenLogin() {
                 result = await window.electronAPI.gstzen.login(credentials);
             } else {
                 // Fallback to direct fetch (requires CORS)
-                const apiUrl = (import.meta as any).env.VITE_GSTZEN_API_URL || 'http://localhost:9001';
-                const response = await fetch(`${apiUrl}/accounts/api/login/token/`, {
+                const apiUrl = (import.meta as any).env.VITE_GSTZEN_API_URL || 'https://staging.gstzen.in';
+                const loginUrl = `${apiUrl}/accounts/api/login/token/`;
+
+                const response = await fetch(loginUrl, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(credentials),
                 });
-                const data = await response.json();
-                result = { ok: response.ok, status: response.status, data };
+                const text = await response.text();
+                let data;
+                try {
+                    data = text ? JSON.parse(text) : {};
+                } catch (e) {
+                    console.error('Failed to parse JSON response:', text.substring(0, 100));
+                    data = { error: 'Invalid JSON response', raw: text.substring(0, 1000) };
+                }
+
+                result = { ok: response.ok, status: response.status, data: (response.ok && data.access) ? { access: data.access, refresh: data.refresh || '' } : data };
             }
 
             if (result.ok && result.data.access) {
@@ -50,6 +61,9 @@ export default function GstzenLogin() {
                 localStorage.setItem("gstzen_refresh_token", result.data.refresh || "");
                 localStorage.setItem("gstzen_user", JSON.stringify({ username: credentials.username }));
                 localStorage.setItem("gstzen_email", credentials.username); // Store email for customer lookup
+
+                // CRITICAL FIX: Update the singleton instance with the new token
+                gstzenApi.setAuthToken(result.data.access);
 
                 toast({
                     title: "Success",

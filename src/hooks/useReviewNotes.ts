@@ -42,7 +42,7 @@ export function useReviewNotes(engagementId?: string) {
   const [loading, setLoading] = useState(true);
   const { user, profile, role } = useAuth();
 
-  const logActivity = async (action: string, entity: string, details: string, entityId?: string) => {
+  const logActivity = async (action: string, entity: string, details: string, entityId?: string, logEngagementId?: string) => {
     if (!user || !profile) return;
     await supabase.from('activity_logs').insert([{
       user_id: user.id,
@@ -50,6 +50,7 @@ export function useReviewNotes(engagementId?: string) {
       action,
       entity,
       entity_id: entityId || null,
+      engagement_id: logEngagementId || null,
       details,
     }]);
   };
@@ -124,7 +125,7 @@ export function useReviewNotes(engagementId?: string) {
 
       if (error) throw error;
       
-      await logActivity('Created', 'Review Note', `Raised review note: ${note.title}`, data.id);
+      await logActivity('Created', 'Review Note', `Raised review note: ${note.title}`, data.id, note.engagement_id);
       
       // Send notification to assigned user
       if (note.assigned_to && note.assigned_to !== user.id) {
@@ -161,7 +162,8 @@ export function useReviewNotes(engagementId?: string) {
         : updates.response 
           ? 'Responded' 
           : 'Updated';
-      await logActivity(action, 'Review Note', `${action} review note`, id);
+      const note = notes.find(n => n.id === id);
+      await logActivity(action, 'Review Note', `${action} review note`, id, note?.engagement_id);
       
       toast.success(`Review note ${action.toLowerCase()}`);
       await fetchNotes();
@@ -223,7 +225,7 @@ export function useReviewNotes(engagementId?: string) {
 
       if (error) throw error;
       
-      await logActivity('Deleted', 'Review Note', `Deleted review note: ${note?.title || 'Unknown'}`, id);
+      await logActivity('Deleted', 'Review Note', `Deleted review note: ${note?.title || 'Unknown'}`, id, note?.engagement_id);
       toast.success('Review note deleted');
       await fetchNotes();
     } catch (error: any) {
@@ -246,7 +248,7 @@ export function useReviewNotes(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('review_note', id, 'marked_prepared', note.approval_stage, 'prepared');
-      await logActivity('Prepared', 'Review Note', `Marked note as prepared: ${note.title}`, id);
+      await logActivity('Prepared', 'Review Note', `Marked note as prepared: ${note.title}`, id, note.engagement_id);
       
       toast.success('Note marked as prepared');
       await fetchNotes();
@@ -274,7 +276,7 @@ export function useReviewNotes(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('review_note', id, 'marked_reviewed', note.approval_stage, 'reviewed');
-      await logActivity('Reviewed', 'Review Note', `Marked note as reviewed: ${note.title}`, id);
+      await logActivity('Reviewed', 'Review Note', `Marked note as reviewed: ${note.title}`, id, note.engagement_id);
       
       toast.success('Note marked as reviewed');
       await fetchNotes();
@@ -302,7 +304,7 @@ export function useReviewNotes(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('review_note', id, 'approved', note.approval_stage, 'approved');
-      await logActivity('Approved', 'Review Note', `Approved note: ${note.title}`, id);
+      await logActivity('Approved', 'Review Note', `Approved note: ${note.title}`, id, note.engagement_id);
       
       toast.success('Note approved and locked');
       await fetchNotes();
@@ -339,7 +341,7 @@ export function useReviewNotes(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('review_note', id, 'unlocked', 'locked', 'unlocked', reason);
-      await logActivity('Unlocked', 'Review Note', `Unlocked note: ${note.title}. Reason: ${reason}`, id);
+      await logActivity('Unlocked', 'Review Note', `Unlocked note: ${note.title}. Reason: ${reason}`, id, note.engagement_id);
       
       toast.success('Note unlocked');
       await fetchNotes();
