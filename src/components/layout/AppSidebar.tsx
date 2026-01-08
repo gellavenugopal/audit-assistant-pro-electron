@@ -40,6 +40,7 @@ const engagementDependentItems = [
   { name: 'Materiality', href: '/materiality', icon: Calculator },
   { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
   { name: 'Audit Programs', href: '/programs', icon: ClipboardList },
+  { name: 'Audit Program New', href: '/programs-new', icon: FileText },
   { name: 'Evidence Vault', href: '/evidence', icon: FileCheck },
   { name: 'Review Notes', href: '/review-notes', icon: MessageSquare },
   { name: 'Misstatements', href: '/misstatements', icon: AlertCircle },
