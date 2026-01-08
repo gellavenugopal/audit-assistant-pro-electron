@@ -212,13 +212,6 @@ class GstzenApiClient {
 
   // ===== Customer Management =====
 
-  /**
-   * Create a new customer in gstzen
-   */
-  async createCustomer(data: CreateCustomerRequest): Promise<ApiResponse<GstzenCustomer>> {
-    return this.post<GstzenCustomer>('/api/customer/create/', data);
-  }
-
 
   /**
    * Update customer details

@@ -17,45 +17,6 @@ export const gstzenKeys = {
 
 
 /**
- * Hook to create a new customer
- */
-export function useCreateCustomer() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  return useMutation({
-    mutationFn: async (data: CreateCustomerRequest) => {
-      const response = await gstzenApi.createCustomer(data);
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to create customer');
-      }
-      return response.data;
-    },
-    onSuccess: (data) => {
-      // Invalidate customer queries
-      queryClient.invalidateQueries({ queryKey: gstzenKeys.customers() });
-      
-      // Update the specific customer cache
-      if (data) {
-        queryClient.setQueryData(gstzenKeys.customer(), data);
-      }
-
-      toast({
-        title: 'Success',
-        description: 'Customer profile created successfully',
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to create customer',
-        variant: 'destructive',
-      });
-    },
-  });
-}
-
-/**
  * Hook to update customer details
  */
 export function useUpdateCustomer() {
