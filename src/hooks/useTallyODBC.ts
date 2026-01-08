@@ -2,6 +2,48 @@ import { useState, useCallback, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { TallyMonthWiseLine } from "@/contexts/TallyContext";
 
+      // Extend the Window interface to include electronAPI
+declare global {
+  interface Window {
+    electronAPI: {
+      odbcCheckConnection: () => Promise<{ success: boolean; isConnected?: boolean; error?: string }>;
+      odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
+      odbcFetchTrialBalance: (fromDate: string, toDate: string) => Promise<{ success: boolean; error?: string; data?: any[]; companyName?: string }>;
+      odbcFetchMonthWise: (fyStartYear: number, targetMonth: string) => Promise<{ success: boolean; error?: string; data?: { plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[]; fyStartYear: number; targetMonth: string } }>;
+      odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
+      // Opening Balance Matching methods
+      odbcFetchOldTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcFetchNewTallyLedgers: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
+      odbcCompareOpeningBalances: (data: { oldData: any[]; newData: any[] }) => Promise<{
+        success: boolean;
+        error?: string;
+        comparison?: {
+          balanceMismatches: any[];
+          nameMismatches: any[];
+        };
+        xml?: string;
+      }>;
+      // Month wise and GST methods
+      odbcFetchMonthWiseData: (data: { fyStartYear: number; targetMonth: string }) => Promise<{
+        success: boolean;
+        error?: string;
+        lines?: any[];
+        months?: string[];
+      }>;
+      odbcFetchGSTNotFeeded: () => Promise<{
+        success: boolean;
+        error?: string;
+        lines?: any[];
+      }>;
+      // Stock Items methods
+      odbcFetchStockItems: () => Promise<{
+        success: boolean;
+        error?: string;
+        items?: any[];
+      }>;
+    };
+  }
+}
 
 interface TallyCompanyInfo {
   companyName: string;
@@ -132,23 +174,66 @@ export const useTallyODBC = () => {
     }
   }, [toast]);
 
-  const fetchTrialBalance = useCallback(async (): Promise<{ data: any[]; companyName: string }> => {
+  const fetchTrialBalance = useCallback(async (fromDate: string, toDate: string): Promise<TallyTrialBalanceLine[]> => {
     try {
-      const result = await window.electronAPI.odbcFetchTrialBalance();
+      if (!fromDate || !toDate) {
+        throw new Error("Please select both 'From' and 'To' dates");
+      }
+
+      console.log(`Fetching Trial Balance: ${fromDate} to ${toDate}`);
+      const result = await window.electronAPI.odbcFetchTrialBalance(fromDate, toDate);
 
       if (result.success && result.data) {
-        return { data: result.data, companyName: result.companyName || '' };
+        if (result.data.length === 0) {
+          toast({
+            title: "No Data Found",
+            description: "No trial balance data was returned. This might indicate:\n- Tally is not set to the correct date\n- No transactions exist for the selected period\n- Connection issue with Tally",
+            variant: "destructive",
+          });
+          return [];
+        }
+        
+        // Check for warning from backend
+        if ((result as any).warning) {
+          toast({
+            title: "Data Warning",
+            description: (result as any).warning,
+            variant: "destructive",
+          });
+        }
+        
+        // Check if all accounts have zero balances
+        const accountsWithData = result.data.filter(line => 
+          Math.abs(line.openingBalance) > 0.01 || 
+          Math.abs(line.totalDebit) > 0.01 || 
+          Math.abs(line.totalCredit) > 0.01 || 
+          Math.abs(line.closingBalance) > 0.01
+        );
+        
+        if (accountsWithData.length === 0 && result.data.length > 0) {
+          toast({
+            title: "All Zero Balances",
+            description: `All ${result.data.length} accounts show zero balances. Please ensure Tally's date is set to the 'To Date' (${toDate}) before fetching.`,
+            variant: "destructive",
+          });
+        }
+        
+        console.log(`Successfully fetched ${result.data.length} ledger accounts (${accountsWithData.length} with non-zero balances)`);
+        return result.data;
       } else {
-        throw new Error(result.error || "Failed to fetch trial balance");
+        const errorMsg = result.error || "Failed to fetch trial balance";
+        console.error("Trial Balance fetch failed:", errorMsg);
+        throw new Error(errorMsg);
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.error("Trial Balance error:", err);
       toast({
         title: "Failed to Fetch Trial Balance",
         description: errorMessage,
         variant: "destructive",
       });
-      return { data: [], companyName: '' };
+      throw err; // Re-throw to let the caller handle it
     }
   }, [toast]);
 
