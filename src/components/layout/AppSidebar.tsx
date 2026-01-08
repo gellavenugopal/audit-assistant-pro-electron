@@ -31,7 +31,6 @@ const alwaysActiveItems = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Engagements', href: '/engagements', icon: Briefcase },
   { name: 'Compliance Applicability', href: '/compliance-applicability', icon: Shield },
-  { name: 'Feedback', href: '/feedback', icon: MessageSquare },
 ];
 
 // Items that require an engagement to be selected
@@ -46,6 +45,7 @@ const engagementDependentItems = [
   { name: 'Misstatements', href: '/misstatements', icon: AlertCircle },
   { name: 'Audit Report', href: '/audit-report', icon: FileText },
   { name: 'Audit Tools', href: '/audit-tools', icon: Wrench },
+  { name: 'Feedback', href: '/feedback', icon: MessageSquare },
 ];
 
 const secondaryNavItems = [
