@@ -16,6 +16,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog';
 import {
   Select,
@@ -24,6 +25,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Label } from '@/components/ui/label';
+import { ColumnFilter } from '@/components/ui/column-filter';
 import {
   Database,
   FileSpreadsheet,
@@ -44,10 +55,14 @@ import {
   Plus,
   Edit,
   Trash,
+  X,
+  ChevronDown,
+  Calendar,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTallyODBC } from '@/hooks/useTallyODBC';
 import { useEngagement } from '@/contexts/EngagementContext';
+import { useTrialBalance, TrialBalanceLineInput } from '@/hooks/useTrialBalance';
 import { classifyDataframeBatch, LedgerRow, generateLedgerKey } from '@/services/trialBalanceNewClassification';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -55,8 +70,10 @@ import { StockItemsTab } from '@/components/trial-balance-new/StockItemsTab';
 import { ReportsTab } from '@/components/trial-balance-new/ReportsTab';
 import { BulkUpdateDialog } from '@/components/trial-balance-new/BulkUpdateDialog';
 import { ClassificationManager } from '@/components/trial-balance-new/ClassificationManager';
-import { Ribbon } from '@/components/trial-balance-new/Ribbon';
+import { FilterModal } from '@/components/trial-balance-new/FilterModal';
 import { ClassificationResult } from '@/services/trialBalanceNewClassification';
+import { DEFAULT_GROUP_RULES, DEFAULT_KEYWORD_RULES, DEFAULT_OVERRIDE_RULES } from '@/data/scheduleIIIDefaultRules';
+import { H1_OPTIONS, getH2Options, getH3Options, getH4Options } from '@/data/classificationOptions';
 
 // Entity Types
 const ENTITY_TYPES = [
@@ -73,19 +90,55 @@ const ENTITY_TYPES = [
 
 // Business Types
 const BUSINESS_TYPES = [
-  "Trading",
+  "Trading - Wholesale and Retail",
   "Manufacturing",
   "Service",
   "Construction",
-  "Retail",
-  "Wholesale",
   "Others"
 ];
+
+// Disabled entity types (not supported in this phase)
+const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
+
+// Helper function to automatically classify H1 and H2 based on Is Revenue and Closing Balance
+function applyAutoH1H2Classification(rows: LedgerRow[]): LedgerRow[] {
+  return rows.map(row => {
+    // Skip classification for "Profit & Loss A/c" ledger when parent group contains "Primary"
+    const ledgerName = (row['Ledger Name'] || '').toLowerCase();
+    const parentGroup = (row['Parent Group'] || '').toLowerCase();
+    
+    if (ledgerName.includes('profit') && ledgerName.includes('loss') && ledgerName.includes('a/c') && parentGroup.includes('primary')) {
+      return row; // Return unchanged
+    }
+    
+    const isRevenue = row['Is Revenue'] === 'Yes';
+    const closingBalance = row['Closing Balance'] || 0;
+    const isNegative = closingBalance < 0;
+    
+    // H1: Determine if Profit and Loss or Balance Sheet
+    const h1 = isRevenue ? 'Profit and Loss' : 'Balance Sheet';
+    
+    // H2: Determine sub-category based on H1 and closing balance sign
+    let h2 = '';
+    if (h1 === 'Balance Sheet') {
+      h2 = isNegative ? 'Assets' : 'Liabilities';
+    } else { // Profit and Loss
+      h2 = isNegative ? 'Expenses' : 'Income';
+    }
+    
+    return {
+      ...row,
+      'H1': h1,
+      'H2': h2
+    };
+  });
+}
 
 export default function TrialBalanceNew() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
   const odbcConnection = useTallyODBC();
+  const trialBalanceDB = useTrialBalance(currentEngagement?.id);
   
   // Entity and Business Info
   const [entityType, setEntityType] = useState<string>('');
@@ -93,18 +146,57 @@ export default function TrialBalanceNew() {
   const [businessType, setBusinessType] = useState<string>('');
   const [includeStockItems, setIncludeStockItems] = useState<boolean>(false);
   const [isBusinessDialogOpen, setIsBusinessDialogOpen] = useState(false);
-  const [isStockPreferenceDialogOpen, setIsStockPreferenceDialogOpen] = useState(false);
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  
+  // Derive constitution from entity type
+  const constitution = useMemo(() => {
+    const et = entityType.toLowerCase();
+    if (et.includes('company') || et.includes('opc')) return 'company';
+    if (et.includes('llp') || et.includes('limited liability')) return 'llp';
+    if (et.includes('partnership')) return 'partnership';
+    if (et.includes('proprietorship') || et.includes('sole') || et.includes('individual')) return 'proprietorship';
+    if (et.includes('trust')) return 'trust';
+    if (et.includes('society')) return 'society';
+    return 'company'; // default
+  }, [entityType]);
   
   // Data State
-  const [currentData, setCurrentData] = useState<LedgerRow[]>([]);
+  const [actualData, setActualData] = useState<LedgerRow[]>([]); // NEW: Unclassified actual data
+  const [currentData, setCurrentData] = useState<LedgerRow[]>([]); // Classified data
+  const [previousData, setPreviousData] = useState<LedgerRow[]>([]);
   const [currentStockData, setCurrentStockData] = useState<any[]>([]);
   const [savedMappings, setSavedMappings] = useState<Record<string, ClassificationResult>>({});
+  const [importPeriodType, setImportPeriodType] = useState<'current' | 'previous'>('current');
+  const [isPeriodDialogOpen, setIsPeriodDialogOpen] = useState(false);
+  const [isAddLineDialogOpen, setIsAddLineDialogOpen] = useState(false);
+  const [isSigningDialogOpen, setIsSigningDialogOpen] = useState(false);
+  const [pendingImportData, setPendingImportData] = useState<LedgerRow[] | null>(null);
+  const [signingDetails, setSigningDetails] = useState({
+    date: '',
+    place: '',
+    partnerName: '',
+    firmName: ''
+  });
+  const [newLineForm, setNewLineForm] = useState({
+    ledgerName: '',
+    primaryGroup: '',
+    openingBalance: 0,
+    debit: 0,
+    credit: 0,
+    closingBalance: 0,
+    periodType: 'current' as 'current' | 'previous'
+  });
+  const [selectedRuleSet, setSelectedRuleSet] = useState<string>('schedule-iii');
   
   // UI State
-  const [activeTab, setActiveTab] = useState('data');
+  const [activeTab, setActiveTab] = useState('actual-tb'); // Start with Actual TB tab
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [h1Filter, setH1Filter] = useState<string>('all');
   const [h2Filter, setH2Filter] = useState<string>('all');
+  const [h3Filter, setH3Filter] = useState<string>('all');
+  const [groupFilter, setGroupFilter] = useState<string>('all');
+  const [balanceFilter, setBalanceFilter] = useState<string>('all'); // all, positive, negative, zero
   const [fromDate, setFromDate] = useState<string>('2024-04-01');
   const [toDate, setToDate] = useState<string>('2025-03-31');
   const [odbcPort, setOdbcPort] = useState<string>('9000');
@@ -112,9 +204,140 @@ export default function TrialBalanceNew() {
   const [isEntityDialogOpen, setIsEntityDialogOpen] = useState(false);
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
+  const [isSingleEditDialogOpen, setIsSingleEditDialogOpen] = useState(false);
+  const [editingLedger, setEditingLedger] = useState<LedgerRow | null>(null);
+  const [editingLedgerIndex, setEditingLedgerIndex] = useState<number>(-1);
   const [isClassificationManagerOpen, setIsClassificationManagerOpen] = useState(false);
+  const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
+  const [editingRuleKey, setEditingRuleKey] = useState<string | null>(null);
+  const [isRuleTemplateDialogOpen, setIsRuleTemplateDialogOpen] = useState(false);
+  const [isResetConfirmDialogOpen, setIsResetConfirmDialogOpen] = useState(false);
+  const [ruleTemplateName, setRuleTemplateName] = useState<string>('');
   
-  // Filtered data
+  // Compute stock item counts and totals directly via useMemo (avoids infinite loop from callbacks)
+  const { stockItemCount, stockTotals } = useMemo(() => {
+    // Safety check for array
+    if (!currentStockData || !Array.isArray(currentStockData)) {
+      return {
+        stockItemCount: { filtered: 0, total: 0 },
+        stockTotals: { opening: 0, closing: 0 }
+      };
+    }
+    
+    // Filter out items where both opening AND closing are 0
+    const nonZeroItems = currentStockData.filter(item => {
+      if (!item) return false;
+      const opening = Math.abs(item['Opening Value'] || 0);
+      const closing = Math.abs(item['Closing Value'] || 0);
+      return !(opening === 0 && closing === 0);
+    });
+    
+    // Apply search filter with null safety
+    const filtered = searchTerm
+      ? nonZeroItems.filter(item => {
+          if (!item) return false;
+          const itemName = (item['Item Name'] || '').toLowerCase();
+          const stockGroup = (item['Stock Group'] || '').toLowerCase();
+          const primaryGroup = (item['Primary Group'] || '').toLowerCase();
+          const search = searchTerm.toLowerCase();
+          return itemName.includes(search) || stockGroup.includes(search) || primaryGroup.includes(search);
+        })
+      : nonZeroItems;
+    
+    // Calculate totals from filtered items - use Math.abs since stock values are assets (Dr)
+    const totals = filtered.reduce((acc, item) => ({
+      opening: acc.opening + Math.abs(item?.['Opening Value'] || 0),
+      closing: acc.closing + Math.abs(item?.['Closing Value'] || 0),
+    }), { opening: 0, closing: 0 });
+    
+    return {
+      stockItemCount: { filtered: filtered.length, total: nonZeroItems.length },
+      stockTotals: totals
+    };
+  }, [currentStockData, searchTerm]);
+  
+  // Column filters and sorting state for Actual TB
+  const [actualTbColumnFilters, setActualTbColumnFilters] = useState<Record<string, Set<string | number>>>({});
+  const [actualTbSortColumn, setActualTbSortColumn] = useState<string | null>(null);
+  const [actualTbSortDirection, setActualTbSortDirection] = useState<'asc' | 'desc' | null>(null);
+  
+  // Column filters and sorting state for Classified TB
+  const [classifiedTbColumnFilters, setClassifiedTbColumnFilters] = useState<Record<string, Set<string | number>>>({});
+  const [classifiedTbSortColumn, setClassifiedTbSortColumn] = useState<string | null>(null);
+  const [classifiedTbSortDirection, setClassifiedTbSortDirection] = useState<'asc' | 'desc' | null>(null);
+  
+  const [ruleForm, setRuleForm] = useState({
+    conditionType: 'Primary Group',
+    conditionValue: '',
+    h1: '',
+    h2: '',
+    h3: '',
+    h4: '',
+    h5: ''
+  });
+  
+  // Filtered data for Actual TB
+  const filteredActualData = useMemo(() => {
+    let filtered = actualData;
+    
+    // Search filter
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = filtered.filter(row => 
+        (row['Ledger Name'] || '').toLowerCase().includes(searchLower) ||
+        (row['Primary Group'] || '').toLowerCase().includes(searchLower) ||
+        (row['Parent Group'] || '').toLowerCase().includes(searchLower)
+      );
+    }
+    
+    // Group filter
+    if (groupFilter !== 'all') {
+      filtered = filtered.filter(row => (row['Primary Group'] || '') === groupFilter);
+    }
+    
+    // Balance filter
+    if (balanceFilter !== 'all') {
+      filtered = filtered.filter(row => {
+        const balance = row['Closing Balance'] || 0;
+        if (balanceFilter === 'positive') return balance > 0;
+        if (balanceFilter === 'negative') return balance < 0;
+        if (balanceFilter === 'zero') return balance === 0;
+        return true;
+      });
+    }
+    
+    // Apply column filters
+    Object.entries(actualTbColumnFilters).forEach(([column, selectedValues]) => {
+      if (selectedValues.size > 0) {
+        filtered = filtered.filter(row => {
+          const value = row[column as keyof LedgerRow];
+          return selectedValues.has(value as string | number);
+        });
+      }
+    });
+    
+    // Apply sorting
+    if (actualTbSortColumn && actualTbSortDirection) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[actualTbSortColumn as keyof LedgerRow];
+        const bVal = b[actualTbSortColumn as keyof LedgerRow];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return actualTbSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal || '');
+        const bStr = String(bVal || '');
+        return actualTbSortDirection === 'asc' 
+          ? aStr.localeCompare(bStr) 
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
+    return filtered;
+  }, [actualData, searchTerm, groupFilter, balanceFilter, actualTbColumnFilters, actualTbSortColumn, actualTbSortDirection]);
+  
+  // Filtered data for Classified TB
   const filteredData = useMemo(() => {
     let filtered = currentData;
     
@@ -134,24 +357,111 @@ export default function TrialBalanceNew() {
       filtered = filtered.filter(row => (row['Status'] || 'Unmapped') === statusFilter);
     }
     
+    // H1 filter
+    if (h1Filter !== 'all') {
+      filtered = filtered.filter(row => (row['H1'] || '') === h1Filter);
+    }
+    
     // H2 filter
     if (h2Filter !== 'all') {
       filtered = filtered.filter(row => (row['H2'] || '') === h2Filter);
     }
     
+    // H3 filter
+    if (h3Filter !== 'all') {
+      filtered = filtered.filter(row => (row['H3'] || '') === h3Filter);
+    }
+    
+    // Apply column filters
+    Object.entries(classifiedTbColumnFilters).forEach(([column, selectedValues]) => {
+      if (selectedValues.size > 0) {
+        filtered = filtered.filter(row => {
+          const value = row[column as keyof LedgerRow];
+          return selectedValues.has(value as string | number);
+        });
+      }
+    });
+    
+    // Apply sorting
+    if (classifiedTbSortColumn && classifiedTbSortDirection) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[classifiedTbSortColumn as keyof LedgerRow];
+        const bVal = b[classifiedTbSortColumn as keyof LedgerRow];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return classifiedTbSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal || '');
+        const bStr = String(bVal || '');
+        return classifiedTbSortDirection === 'asc' 
+          ? aStr.localeCompare(bStr) 
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
     return filtered;
-  }, [currentData, searchTerm, statusFilter, h2Filter]);
+  }, [currentData, searchTerm, statusFilter, h1Filter, h2Filter, h3Filter, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection]);
   
-  // Totals calculation
+  // Totals calculation - based on active tab
   const totals = useMemo(() => {
-    return filteredData.reduce((acc, row) => {
-      acc.opening += row['Opening Balance'] || 0;
-      acc.debit += row['Debit'] || 0;
-      acc.credit += row['Credit'] || 0;
-      acc.closing += row['Closing Balance'] || 0;
-      return acc;
-    }, { opening: 0, debit: 0, credit: 0, closing: 0 });
-  }, [filteredData]);
+    if (activeTab === 'actual-tb') {
+      // Calculate from actual TB filtered data
+      return filteredActualData.reduce((acc, row) => {
+        acc.opening += row['Opening Balance'] || 0;
+        acc.debit += row['Debit'] || 0;
+        acc.credit += row['Credit'] || 0;
+        acc.closing += row['Closing Balance'] || 0;
+        return acc;
+      }, { opening: 0, debit: 0, credit: 0, closing: 0 });
+    } else if (activeTab === 'stock-items') {
+      // Use filtered stock totals from StockItemsTab
+      return { 
+        opening: stockTotals.opening, 
+        debit: 0, 
+        credit: 0, 
+        closing: stockTotals.closing 
+      };
+    } else {
+      // Default to classified TB filtered data
+      return filteredData.reduce((acc, row) => {
+        acc.opening += row['Opening Balance'] || 0;
+        acc.debit += row['Debit'] || 0;
+        acc.credit += row['Credit'] || 0;
+        acc.closing += row['Closing Balance'] || 0;
+        return acc;
+      }, { opening: 0, debit: 0, credit: 0, closing: 0 });
+    }
+  }, [activeTab, filteredActualData, filteredData, stockTotals]);
+  
+  // Helper to get unique column values for filters
+  const getActualTbColumnValues = useCallback((column: string) => {
+    return actualData.map(row => row[column as keyof LedgerRow]).filter(v => v !== null && v !== undefined) as (string | number)[];
+  }, [actualData]);
+  
+  const getClassifiedTbColumnValues = useCallback((column: string) => {
+    return currentData.map(row => row[column as keyof LedgerRow]).filter(v => v !== null && v !== undefined) as (string | number)[];
+  }, [currentData]);
+  
+  // Handlers for actual TB column filter changes
+  const handleActualTbFilterChange = useCallback((column: string, values: Set<string | number>) => {
+    setActualTbColumnFilters(prev => ({ ...prev, [column]: values }));
+  }, []);
+  
+  const handleActualTbSort = useCallback((column: string, direction: 'asc' | 'desc' | null) => {
+    setActualTbSortColumn(direction ? column : null);
+    setActualTbSortDirection(direction);
+  }, []);
+  
+  // Handlers for classified TB column filter changes
+  const handleClassifiedTbFilterChange = useCallback((column: string, values: Set<string | number>) => {
+    setClassifiedTbColumnFilters(prev => ({ ...prev, [column]: values }));
+  }, []);
+  
+  const handleClassifiedTbSort = useCallback((column: string, direction: 'asc' | 'desc' | null) => {
+    setClassifiedTbSortColumn(direction ? column : null);
+    setClassifiedTbSortDirection(direction);
+  }, []);
   
   // Connect to Tally
   const handleConnectTally = useCallback(async () => {
@@ -161,6 +471,9 @@ export default function TrialBalanceNew() {
         return;
       }
     }
+    
+    // Set default stock items to true
+    setIncludeStockItems(true);
     
     // Check if entity type is selected
     if (!entityType) {
@@ -174,22 +487,16 @@ export default function TrialBalanceNew() {
       return;
     }
     
-    // For Trading/Manufacturing, ask about stock items preference
-    if ((businessType === 'Trading' || businessType === 'Manufacturing')) {
-      setIsStockPreferenceDialogOpen(true);
-      return;
-    }
-    
     // If all checks passed, entity dialog should trigger the fetch
     setIsEntityDialogOpen(true);
   }, [odbcConnection, entityType, businessType]);
   
   // Fetch data from Tally after entity selection
   const handleFetchFromTally = useCallback(async () => {
-    if (!entityType) {
+    if (!entityType || !businessType) {
       toast({
-        title: 'Entity Type Required',
-        description: 'Please select an entity type first',
+        title: 'Setup Required',
+        description: 'Please complete entity type and business type selection',
         variant: 'destructive'
       });
       return;
@@ -197,7 +504,12 @@ export default function TrialBalanceNew() {
     
     setIsFetching(true);
     try {
-      const lines = await odbcConnection.fetchTrialBalance(fromDate, toDate);
+      const { data: lines, companyName } = await odbcConnection.fetchTrialBalance(fromDate, toDate);
+      
+      // Set company name
+      if (companyName) {
+        setEntityName(companyName);
+      }
       
       if (!lines || lines.length === 0) {
         toast({
@@ -209,13 +521,17 @@ export default function TrialBalanceNew() {
         return;
       }
       
-      // Convert to LedgerRow format and filter out zero balance rows
+      // Convert to LedgerRow format - NEW LOGIC: show row only if NOT all 5 columns are zero
       const processedData: LedgerRow[] = lines
         .filter(line => {
-          // Filter out rows where both opening and closing balances are 0
+          // Show row ONLY IF at least one column is non-zero
           const opening = line.openingBalance || 0;
+          const debit = Math.abs(line.totalDebit || 0);
+          const credit = Math.abs(line.totalCredit || 0);
           const closing = line.closingBalance || 0;
-          return opening !== 0 || closing !== 0;
+          
+          // Hide only if ALL are zero
+          return !(opening === 0 && debit === 0 && credit === 0 && closing === 0);
         })
         .map(line => ({
           'Ledger Name': line.accountHead,
@@ -230,41 +546,207 @@ export default function TrialBalanceNew() {
           'Sheet Name': 'TB CY'
         }));
       
-      // Auto-classify
-      const classified = classifyDataframeBatch(processedData, savedMappings);
-      setCurrentData(classified);
+      // Store actual data (unclassified)
+      setActualData(processedData);
+      
+      // For classification: Exclude rows where BOTH Opening=0 AND Closing=0
+      const dataToClassify = processedData.filter(row => {
+        const opening = row['Opening Balance'] || 0;
+        const closing = row['Closing Balance'] || 0;
+        // Include if either opening or closing is non-zero
+        return !(opening === 0 && closing === 0);
+      });
+      
+      // Auto-classify the filtered data
+      let classified = classifyDataframeBatch(dataToClassify, savedMappings, businessType, constitution);
+      
+      // Apply automatic H1 and H2 classification based on Is Revenue and Closing Balance
+      classified = applyAutoH1H2Classification(classified);
+      
+      // Import directly based on selected period type
+      if (importPeriodType === 'current') {
+        setCurrentData(classified);
+      } else {
+        setPreviousData(classified);
+      }
       
       // Fetch stock items if required
-      if (includeStockItems && (businessType === 'Trading' || businessType === 'Manufacturing')) {
+      if (includeStockItems && (businessType === 'Trading - Wholesale and Retail' || businessType === 'Manufacturing')) {
         try {
-          // TODO: Implement stock items fetch from Tally ODBC
-          // const stockItems = await odbcConnection.fetchStockItems();
-          // setCurrentStockData(stockItems);
-          toast({
-            title: 'Stock Items',
-            description: 'Stock items fetching not yet implemented',
-            variant: 'default'
-          });
+          const stockItems = await odbcConnection.fetchStockItems();
+          const transformedStockItems = stockItems.map((item: any) => ({
+            'Item Name': item['Item Name'] || '',
+            'Stock Group': item['Stock Group'] || '',
+            'Primary Group': item['Primary Group'] || '',
+            'Opening Value': parseFloat(item['Opening Value'] || 0),
+            'Closing Value': parseFloat(item['Closing Value'] || 0),
+            'Stock Category': item['Stock Category'] || '',
+            'Composite Key': item['Composite Key'] || `STOCK|${item['Item Name']}`
+          }));
+          setCurrentStockData(transformedStockItems);
         } catch (error) {
           console.error('Failed to fetch stock items:', error);
         }
       }
       
+      // Save to database if engagement exists
+      if (currentEngagement?.id) {
+        const dbLines: TrialBalanceLineInput[] = classified.map(row => ({
+          account_code: row['Composite Key'] || '',
+          account_name: row['Ledger Name'] || '',
+          ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+          ledger_primary_group: row['Primary Group'] || null,
+          opening_balance: row['Opening Balance'] || 0,
+          debit: row['Debit'] || 0,
+          credit: row['Credit'] || 0,
+          closing_balance: row['Closing Balance'] || 0,
+          line_item_h1: row['H1'] || null,
+          line_item_h2: row['H2'] || null,
+          line_item_h3: row['H3'] || null,
+          line_item_h4: row['H4'] || null,
+          line_item_h5: row['H5'] || null,
+          is_revenue: row['Is Revenue'] === 'Yes',
+          engagement_id: currentEngagement.id,
+          user_id: currentEngagement.created_by || '',
+          period: importPeriodType,
+          period_end_date: toDate,
+          sheet_name: 'TB CY'
+        }));
+
+        await trialBalanceDB.importLines(dbLines, false);
+      }
+      
+      setIsFetching(false);
+      setIsEntityDialogOpen(false);
+      
       toast({
-        title: 'Success',
-        description: `Imported and classified ${classified.length} ledgers from Tally`
+        title: 'Import Successful',
+        description: `Imported ${classified.length} ledgers as ${importPeriodType} period`,
       });
+      
     } catch (error) {
       toast({
         title: 'Error',
         description: error instanceof Error ? error.message : 'Failed to fetch from Tally',
         variant: 'destructive'
       });
-    } finally {
       setIsFetching(false);
       setIsEntityDialogOpen(false);
     }
-  }, [entityType, fromDate, toDate, odbcConnection, savedMappings, toast]);
+  }, [entityType, businessType, fromDate, toDate, odbcConnection, savedMappings, constitution, importPeriodType, currentEngagement, trialBalanceDB, toast]);
+  
+  // Handle period selection confirmation
+  const handlePeriodConfirm = useCallback(async () => {
+    if (!pendingImportData) return;
+    
+    if (importPeriodType === 'current') {
+      setCurrentData(pendingImportData);
+    } else {
+      setPreviousData(pendingImportData);
+    }
+    
+    // Save to database
+    if (currentEngagement?.id) {
+      const dbLines: TrialBalanceLineInput[] = pendingImportData.map(row => ({
+        account_code: row['Composite Key'] || '',
+        account_name: row['Ledger Name'] || '',
+        ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+        ledger_primary_group: row['Primary Group'] || null,
+        opening_balance: row['Opening Balance'] || 0,
+        debit: row['Debit'] || 0,
+        credit: row['Credit'] || 0,
+        closing_balance: row['Closing Balance'] || 0,
+        balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+        period_type: importPeriodType,
+        period_ending: toDate || null,
+        face_group: row.H1 || null,
+        note_group: row.H2 || null,
+        sub_note: row.H3 || null,
+        level4_group: row.H4 || null,
+        level5_detail: row.H5 || null,
+      }));
+      
+      await trialBalanceDB.importLines(dbLines, false);
+    }
+    
+    // Fetch stock items if required
+    if (includeStockItems && (businessType === 'Trading' || businessType === 'Manufacturing')) {
+      try {
+        const stockItems = await odbcConnection.fetchStockItems();
+        const transformedStockItems = stockItems.map((item: any) => ({
+          'Item Name': item['Item Name'] || '',
+          'Stock Group': item['Stock Group'] || '',
+          'Primary Group': item['Primary Group'] || '',
+          'Opening Value': parseFloat(item['Opening Value'] || 0),
+          'Closing Value': parseFloat(item['Closing Value'] || 0),
+          'Stock Category': item['Stock Category'] || '',
+          'Composite Key': item['Composite Key'] || `STOCK|${item['Item Name']}`
+        }));
+        setCurrentStockData(transformedStockItems);
+      } catch (error) {
+        console.error('Failed to fetch stock items:', error);
+      }
+    }
+    
+    toast({
+      title: 'Success',
+      description: `Imported ${pendingImportData.length} ledgers as ${importPeriodType === 'current' ? 'Current' : 'Previous'} Period`
+    });
+    
+    setPendingImportData(null);
+    setIsPeriodDialogOpen(false);
+  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, includeStockItems, businessType, odbcConnection, trialBalanceDB, toast]);
+  
+  // Handle adding a new line item
+  const handleAddLineItem = useCallback(() => {
+    const newLine: LedgerRow = {
+      'Ledger Name': newLineForm.ledgerName,
+      'Primary Group': newLineForm.primaryGroup,
+      'Parent Group': '',
+      'Composite Key': generateLedgerKey(newLineForm.ledgerName, newLineForm.primaryGroup),
+      'Opening Balance': newLineForm.openingBalance,
+      'Debit': newLineForm.debit,
+      'Credit': newLineForm.credit,
+      'Closing Balance': newLineForm.closingBalance,
+      'Is Revenue': 'No',
+      'Sheet Name': newLineForm.periodType === 'current' ? 'TB CY' : 'TB PY',
+      'H1': '',
+      'H2': '',
+      'H3': '',
+      'H4': '',
+      'H5': '',
+      'Status': 'Unmapped'
+    };
+    
+    // Classify the new line
+    let classified = classifyDataframeBatch([newLine], savedMappings, businessType, constitution);
+    
+    // Apply automatic H1 and H2 classification
+    classified = applyAutoH1H2Classification(classified);
+    
+    if (newLineForm.periodType === 'current') {
+      setCurrentData(prev => [...prev, classified[0]]);
+    } else {
+      setPreviousData(prev => [...prev, classified[0]]);
+    }
+    
+    toast({
+      title: 'Line Added',
+      description: `Added "${newLineForm.ledgerName}" to ${newLineForm.periodType === 'current' ? 'Current' : 'Previous'} Period`
+    });
+    
+    // Reset form
+    setNewLineForm({
+      ledgerName: '',
+      primaryGroup: '',
+      openingBalance: 0,
+      debit: 0,
+      credit: 0,
+      closingBalance: 0,
+      periodType: 'current'
+    });
+    setIsAddLineDialogOpen(false);
+  }, [newLineForm, savedMappings, businessType, toast]);
   
   // Auto-classify existing data
   const handleAutoClassify = useCallback(() => {
@@ -277,7 +759,11 @@ export default function TrialBalanceNew() {
       return;
     }
     
-    const classified = classifyDataframeBatch(currentData, savedMappings);
+    let classified = classifyDataframeBatch(currentData, savedMappings, businessType, constitution);
+    
+    // Apply automatic H1 and H2 classification
+    classified = applyAutoH1H2Classification(classified);
+    
     setCurrentData(classified);
     
     const mappedCount = classified.filter(row => row['Status'] === 'Mapped').length;
@@ -387,6 +873,168 @@ export default function TrialBalanceNew() {
 
   // Excel-like keyboard navigation
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
+  const [focusedClassifiedRowIndex, setFocusedClassifiedRowIndex] = useState<number | null>(null);
+  
+  // Load default rules and engagement-specific rules on mount
+  useEffect(() => {
+    // Initialize with default rules
+    const defaultMappings: Record<string, ClassificationResult> = {};
+    
+    // Convert DEFAULT_GROUP_RULES to mapping format
+    DEFAULT_GROUP_RULES.forEach(rule => {
+      const key = `${rule.tallyGroupName}`;
+      defaultMappings[key] = {
+        h1: rule.mapsToCode.split('-')[0] || '',
+        h2: rule.mapsToCode.split('-')[1] || '',
+        h3: rule.mapsToCode.split('-')[2] || '',
+        h4: rule.mapsToCode.split('-')[3] || '',
+        h5: rule.mapsToCode.split('-')[4] || '',
+        compositeKey: `${rule.tallyGroupName}_DEFAULT`,
+        confidence: 'High'
+      };
+    });
+    
+    // Load engagement-specific rules if available
+    if (currentEngagement?.id) {
+      const savedTemplateKey = `trialbalance_rules_${currentEngagement.id}`;
+      const savedTemplate = localStorage.getItem(savedTemplateKey);
+      if (savedTemplate) {
+        try {
+          const parsed = JSON.parse(savedTemplate);
+          setSavedMappings({ ...defaultMappings, ...parsed });
+        } catch (error) {
+          console.error('Failed to parse saved rules:', error);
+          setSavedMappings(defaultMappings);
+        }
+      } else {
+        setSavedMappings(defaultMappings);
+      }
+    } else {
+      setSavedMappings(defaultMappings);
+    }
+  }, [currentEngagement?.id]);
+  
+  // Load data from database when engagement changes or database lines are loaded
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    
+    // Load saved entity info from localStorage
+    const savedEntityInfo = localStorage.getItem(`tb_entity_${currentEngagement.id}`);
+    if (savedEntityInfo) {
+      try {
+        const { entityType: savedEntityType, entityName: savedEntityName, businessType: savedBusinessType } = JSON.parse(savedEntityInfo);
+        if (savedEntityType) setEntityType(savedEntityType);
+        if (savedEntityName) setEntityName(savedEntityName);
+        if (savedBusinessType) setBusinessType(savedBusinessType);
+      } catch (e) {
+        console.error('Failed to load entity info:', e);
+      }
+    }
+    
+    // Load saved stock data from localStorage
+    const savedStockData = localStorage.getItem(`tb_stock_${currentEngagement.id}`);
+    if (savedStockData) {
+      try {
+        const parsedStock = JSON.parse(savedStockData);
+        if (Array.isArray(parsedStock) && parsedStock.length > 0) {
+          setCurrentStockData(parsedStock);
+        }
+      } catch (e) {
+        console.error('Failed to load stock data:', e);
+      }
+    }
+    
+    // Convert database lines to LedgerRow format
+    if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0 && currentData.length === 0) {
+      const loadedData: LedgerRow[] = trialBalanceDB.lines.map(line => ({
+        'Ledger Name': line.account_name,
+        'Primary Group': line.ledger_primary_group || '',
+        'Parent Group': line.ledger_parent || '',
+        'Composite Key': line.account_code,
+        'Opening Balance': line.opening_balance,
+        'Debit': line.debit,
+        'Credit': line.credit,
+        'Closing Balance': line.closing_balance,
+        'Is Revenue': line.aile === 'Income' || line.aile === 'Expense' ? 'Yes' : 'No',
+        'Sheet Name': 'TB CY',
+        'H1': line.face_group || '',
+        'H2': line.note_group || '',
+        'H3': line.sub_note || '',
+        'H4': line.level4_group || '',
+        'H5': line.level5_detail || '',
+        'Status': (line.face_group || line.note_group) ? 'Mapped' : 'Unmapped'
+      }));
+      
+      // Set both actualData and currentData
+      setActualData(loadedData);
+      setCurrentData(loadedData);
+      
+      toast({
+        title: 'Data Loaded',
+        description: `Loaded ${loadedData.length} ledgers from saved data`,
+      });
+    }
+  }, [currentEngagement?.id, trialBalanceDB.lines]);
+  
+  // Save entity info to localStorage when it changes
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    if (entityType || entityName || businessType) {
+      localStorage.setItem(`tb_entity_${currentEngagement.id}`, JSON.stringify({
+        entityType,
+        entityName,
+        businessType
+      }));
+    }
+  }, [currentEngagement?.id, entityType, entityName, businessType]);
+  
+  // Save stock data to localStorage when it changes
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    if (currentStockData.length > 0) {
+      localStorage.setItem(`tb_stock_${currentEngagement.id}`, JSON.stringify(currentStockData));
+    }
+  }, [currentEngagement?.id, currentStockData]);
+  
+  // Auto-save currentData to database when it changes (debounced)
+  useEffect(() => {
+    if (!currentEngagement?.id || currentData.length === 0) return;
+    
+    // Skip if this is just loaded data (already in database)
+    if (trialBalanceDB.loading) return;
+    
+    // Debounce the save operation
+    const saveTimeout = setTimeout(async () => {
+      try {
+        const dbLines: TrialBalanceLineInput[] = currentData.map(row => ({
+          account_code: row['Composite Key'] || '',
+          account_name: row['Ledger Name'] || '',
+          ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+          ledger_primary_group: row['Primary Group'] || null,
+          opening_balance: row['Opening Balance'] || 0,
+          debit: row['Debit'] || 0,
+          credit: row['Credit'] || 0,
+          closing_balance: row['Closing Balance'] || 0,
+          balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+          period_type: 'current',
+          period_ending: toDate || null,
+          face_group: row['H1'] || null,
+          note_group: row['H2'] || null,
+          sub_note: row['H3'] || null,
+          level4_group: row['H4'] || null,
+          level5_detail: row['H5'] || null,
+        }));
+        
+        // Use upsert mode to avoid duplicates
+        await trialBalanceDB.importLines(dbLines, true);
+        console.log('Auto-saved trial balance data');
+      } catch (error) {
+        console.error('Failed to auto-save trial balance:', error);
+      }
+    }, 2000); // 2 second debounce
+    
+    return () => clearTimeout(saveTimeout);
+  }, [currentData, currentEngagement?.id, toDate]);
   
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -396,72 +1044,130 @@ export default function TrialBalanceNew() {
         return;
       }
 
-      if (filteredData.length === 0) return;
-
-      // Arrow keys for navigation
-      if (e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        setFocusedRowIndex(prev => {
-          const current = prev !== null ? prev : -1;
-          const next = Math.min(current + 1, filteredData.length - 1);
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[next]?.['Composite Key']
-          );
-          if (originalIndex !== -1 && !e.shiftKey) {
-            setSelectedRowIndices(new Set([originalIndex]));
+      // Handle keyboard navigation based on active tab
+      if (activeTab === 'actual-tb' && filteredData.length > 0) {
+        // ACTUAL TB Navigation
+        if (e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setFocusedRowIndex(prev => {
+            const current = prev !== null ? prev : -1;
+            const next = Math.min(current + 1, filteredData.length - 1);
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[next]?.['Composite Key']
+            );
+            if (originalIndex !== -1 && !e.shiftKey) {
+              setSelectedRowIndices(new Set([originalIndex]));
+            }
+            return next;
+          });
+        } else if (e.key === 'ArrowUp' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setFocusedRowIndex(prev => {
+            const current = prev !== null ? prev : filteredData.length;
+            const next = Math.max(current - 1, 0);
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[next]?.['Composite Key']
+            );
+            if (originalIndex !== -1 && !e.shiftKey) {
+              setSelectedRowIndices(new Set([originalIndex]));
+            }
+            return next;
+          });
+        } else if (e.key === 'Home' && e.ctrlKey) {
+          e.preventDefault();
+          if (filteredData.length > 0) {
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[0]?.['Composite Key']
+            );
+            if (originalIndex !== -1) {
+              setFocusedRowIndex(0);
+              setSelectedRowIndices(new Set([originalIndex]));
+            }
           }
-          return next;
-        });
-      } else if (e.key === 'ArrowUp' && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        setFocusedRowIndex(prev => {
-          const current = prev !== null ? prev : filteredData.length;
-          const next = Math.max(current - 1, 0);
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[next]?.['Composite Key']
-          );
-          if (originalIndex !== -1 && !e.shiftKey) {
-            setSelectedRowIndices(new Set([originalIndex]));
+        } else if (e.key === 'End' && e.ctrlKey) {
+          e.preventDefault();
+          if (filteredData.length > 0) {
+            const lastIndex = filteredData.length - 1;
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[lastIndex]?.['Composite Key']
+            );
+            if (originalIndex !== -1) {
+              setFocusedRowIndex(lastIndex);
+              setSelectedRowIndices(new Set([originalIndex]));
+            }
           }
-          return next;
-        });
-      } else if (e.key === 'Home' && e.ctrlKey) {
-        e.preventDefault();
-        if (filteredData.length > 0) {
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[0]?.['Composite Key']
-          );
-          if (originalIndex !== -1) {
-            setFocusedRowIndex(0);
-            setSelectedRowIndices(new Set([originalIndex]));
+        } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          setSelectedRowIndices(new Set(filteredData.map((_, i) => {
+            const originalIndex = currentData.findIndex(r => 
+              r['Composite Key'] === filteredData[i]?.['Composite Key']
+            );
+            return originalIndex;
+          }).filter(i => i !== -1)));
+        }
+      } else if (activeTab === 'classified-tb' && currentData.length > 0) {
+        // CLASSIFIED TB Navigation with Spacebar support
+        if (e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setFocusedClassifiedRowIndex(prev => {
+            const current = prev !== null ? prev : -1;
+            const next = Math.min(current + 1, currentData.length - 1);
+            if (!e.shiftKey) {
+              setSelectedRowIndices(new Set([next]));
+            }
+            return next;
+          });
+        } else if (e.key === 'ArrowUp' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          setFocusedClassifiedRowIndex(prev => {
+            const current = prev !== null ? prev : currentData.length;
+            const next = Math.max(current - 1, 0);
+            if (!e.shiftKey) {
+              setSelectedRowIndices(new Set([next]));
+            }
+            return next;
+          });
+        } else if (e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          if (focusedClassifiedRowIndex !== null && focusedClassifiedRowIndex >= 0) {
+            setSelectedRowIndices(prev => {
+              const newSet = new Set(prev);
+              if (newSet.has(focusedClassifiedRowIndex)) {
+                newSet.delete(focusedClassifiedRowIndex);
+              } else {
+                newSet.add(focusedClassifiedRowIndex);
+              }
+              return newSet;
+            });
+          }
+        } else if (e.key === 'Home' && e.ctrlKey) {
+          e.preventDefault();
+          setFocusedClassifiedRowIndex(0);
+          setSelectedRowIndices(new Set([0]));
+        } else if (e.key === 'End' && e.ctrlKey) {
+          e.preventDefault();
+          const lastIndex = currentData.length - 1;
+          setFocusedClassifiedRowIndex(lastIndex);
+          setSelectedRowIndices(new Set([lastIndex]));
+        } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          setSelectedRowIndices(new Set(currentData.map((_, i) => i)));
+        } else if (e.key === 'Enter' && focusedClassifiedRowIndex !== null) {
+          e.preventDefault();
+          // Open single edit dialog for focused row
+          const ledger = currentData[focusedClassifiedRowIndex];
+          if (ledger) {
+            setEditingLedger(ledger);
+            setEditingLedgerIndex(focusedClassifiedRowIndex);
+            setIsSingleEditDialogOpen(true);
           }
         }
-      } else if (e.key === 'End' && e.ctrlKey) {
-        e.preventDefault();
-        if (filteredData.length > 0) {
-          const lastIndex = filteredData.length - 1;
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[lastIndex]?.['Composite Key']
-          );
-          if (originalIndex !== -1) {
-            setFocusedRowIndex(lastIndex);
-            setSelectedRowIndices(new Set([originalIndex]));
-          }
-        }
-      } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        setSelectedRowIndices(new Set(filteredData.map((_, i) => {
-          const originalIndex = currentData.findIndex(r => 
-            r['Composite Key'] === filteredData[i]?.['Composite Key']
-          );
-          return originalIndex;
-        }).filter(i => i !== -1)));
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [filteredData, currentData]);
+  }, [filteredData, currentData, activeTab, focusedClassifiedRowIndex]);
   
   // Format number for display
   const formatNumber = (num: number): string => {
@@ -471,6 +1177,100 @@ export default function TrialBalanceNew() {
     }).format(num);
   };
 
+  // Export Template for Excel Import
+  const handleExportTemplate = useCallback(() => {
+    try {
+      const templateData = [
+        {
+          'Ledger Name': 'Cash',
+          'Primary Group': 'Cash-in-Hand',
+          'Parent Group': 'Current Assets',
+          'Opening Balance': 50000,
+          'Debit': 200000,
+          'Credit': 150000,
+          'Closing Balance': 100000,
+          'Is Revenue': 'No',
+          'Sheet Name': 'TB CY'
+        },
+        {
+          'Ledger Name': 'Sales',
+          'Primary Group': 'Sales Accounts',
+          'Parent Group': 'Primary',
+          'Opening Balance': 0,
+          'Debit': 0,
+          'Credit': 500000,
+          'Closing Balance': -500000,
+          'Is Revenue': 'Yes',
+          'Sheet Name': 'TB CY'
+        },
+        {
+          'Ledger Name': 'Purchase',
+          'Primary Group': 'Purchase Accounts',
+          'Parent Group': 'Primary',
+          'Opening Balance': 0,
+          'Debit': 300000,
+          'Credit': 0,
+          'Closing Balance': 300000,
+          'Is Revenue': 'No',
+          'Sheet Name': 'TB CY'
+        }
+      ];
+      
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(templateData);
+      
+      // Set column widths
+      worksheet['!cols'] = [
+        { wch: 30 }, // Ledger Name
+        { wch: 20 }, // Primary Group
+        { wch: 20 }, // Parent Group
+        { wch: 15 }, // Opening Balance
+        { wch: 15 }, // Debit
+        { wch: 15 }, // Credit
+        { wch: 15 }, // Closing Balance
+        { wch: 12 }, // Is Revenue
+        { wch: 12 }  // Sheet Name
+      ];
+      
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Trial Balance Template');
+      
+      // Add instructions sheet
+      const instructions = [
+        { 'Column Name': 'Ledger Name', 'Description': 'Name of the ledger account', 'Required': 'Yes', 'Example': 'Cash, Bank, Sales, Purchase' },
+        { 'Column Name': 'Primary Group', 'Description': 'Primary group from Tally', 'Required': 'Yes', 'Example': 'Current Assets, Sales Accounts' },
+        { 'Column Name': 'Parent Group', 'Description': 'Parent of the primary group', 'Required': 'No', 'Example': 'Primary, Current Assets' },
+        { 'Column Name': 'Opening Balance', 'Description': 'Opening balance (numeric)', 'Required': 'Yes', 'Example': '50000, -20000' },
+        { 'Column Name': 'Debit', 'Description': 'Total debit amount', 'Required': 'Yes', 'Example': '100000' },
+        { 'Column Name': 'Credit', 'Description': 'Total credit amount', 'Required': 'Yes', 'Example': '50000' },
+        { 'Column Name': 'Closing Balance', 'Description': 'Closing balance (numeric)', 'Required': 'Yes', 'Example': '100000, -75000' },
+        { 'Column Name': 'Is Revenue', 'Description': 'Whether this is a revenue account', 'Required': 'No', 'Example': 'Yes, No' },
+        { 'Column Name': 'Sheet Name', 'Description': 'Always use "TB CY" for current year', 'Required': 'Yes', 'Example': 'TB CY' }
+      ];
+      
+      const instructionsSheet = XLSX.utils.json_to_sheet(instructions);
+      instructionsSheet['!cols'] = [
+        { wch: 20 },
+        { wch: 50 },
+        { wch: 10 },
+        { wch: 30 }
+      ];
+      XLSX.utils.book_append_sheet(workbook, instructionsSheet, 'Instructions');
+      
+      XLSX.writeFile(workbook, 'Trial_Balance_Import_Template.xlsx');
+      
+      toast({
+        title: 'Template Downloaded',
+        description: 'Trial Balance import template has been downloaded. Fill it with your data and import.'
+      });
+    } catch (error) {
+      toast({
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export template',
+        variant: 'destructive'
+      });
+    }
+  }, [toast]);
+  
   // Excel Import
   const handleExcelImport = useCallback(() => {
     const input = document.createElement('input');
@@ -514,8 +1314,36 @@ export default function TrialBalanceNew() {
             return row['Opening Balance'] !== 0 || row['Closing Balance'] !== 0;
           });
         
-        const classified = classifyDataframeBatch(processedData, savedMappings);
+        let classified = classifyDataframeBatch(processedData, savedMappings, businessType, constitution);
+        
+        // Apply automatic H1 and H2 classification
+        classified = applyAutoH1H2Classification(classified);
+        
         setCurrentData(classified);
+        
+        // Save to database
+        if (currentEngagement?.id) {
+          const dbLines: TrialBalanceLineInput[] = classified.map(row => ({
+            account_code: row['Composite Key'] || '',
+            account_name: row['Ledger Name'] || '',
+            ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+            ledger_primary_group: row['Primary Group'] || null,
+            opening_balance: row['Opening Balance'] || 0,
+            debit: row['Debit'] || 0,
+            credit: row['Credit'] || 0,
+            closing_balance: row['Closing Balance'] || 0,
+            balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+            period_type: 'current',
+            period_ending: toDate || null,
+            face_group: row.H1 || null,
+            note_group: row.H2 || null,
+            sub_note: row.H3 || null,
+            level4_group: row.H4 || null,
+            level5_detail: row.H5 || null,
+          }));
+          
+          await trialBalanceDB.importLines(dbLines, false);
+        }
         
         toast({
           title: 'Import Successful',
@@ -580,6 +1408,16 @@ export default function TrialBalanceNew() {
     });
   }, [toast]);
 
+  // Reset all filters
+  const handleResetFilters = useCallback(() => {
+    setStatusFilter('all');
+    setH1Filter('all');
+    setH2Filter('all');
+    setH3Filter('all');
+    setGroupFilter('all');
+    setBalanceFilter('all');
+  }, []);
+
   // Clear Data
   const handleClear = useCallback(() => {
     if (confirm('Are you sure you want to clear all data?')) {
@@ -592,210 +1430,729 @@ export default function TrialBalanceNew() {
     }
   }, [toast]);
   
+  // Rule Engine Handlers
+  const handleAddRule = useCallback(() => {
+    setEditingRuleKey(null);
+    setRuleForm({
+      conditionType: 'Primary Group',
+      conditionValue: '',
+      h1: '',
+      h2: '',
+      h3: '',
+      h4: '',
+      h5: ''
+    });
+    setIsRuleDialogOpen(true);
+  }, []);
+  
+  const handleEditRule = useCallback((key: string, mapping: ClassificationResult) => {
+    setEditingRuleKey(key);
+    setRuleForm({
+      conditionType: 'Primary Group',
+      conditionValue: key.split('|')[1] || key,
+      h1: mapping.h1 || '',
+      h2: mapping.h2 || '',
+      h3: mapping.h3 || '',
+      h4: mapping.h4 || '',
+      h5: mapping.h5 || ''
+    });
+    setIsRuleDialogOpen(true);
+  }, []);
+  
+  const handleSaveRule = useCallback(() => {
+    if (!ruleForm.conditionValue) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a condition value',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    const key = `*|${ruleForm.conditionValue}`;
+    const newMapping: ClassificationResult = {
+      h1: ruleForm.h1,
+      h2: ruleForm.h2,
+      h3: ruleForm.h3,
+      h4: ruleForm.h4,
+      h5: ruleForm.h5,
+      status: 'Mapped'
+    };
+    
+    handleSaveMapping(key, newMapping);
+    setIsRuleDialogOpen(false);
+    
+    toast({
+      title: editingRuleKey ? 'Rule Updated' : 'Rule Added',
+      description: `Classification rule ${editingRuleKey ? 'updated' : 'created'} successfully`
+    });
+  }, [ruleForm, editingRuleKey, handleSaveMapping, toast]);
+  
+  const handleImportRules = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        
+        const newMappings: Record<string, ClassificationResult> = {};
+        jsonData.forEach((row: any) => {
+          const key = `*|${row['Condition Value'] || row['condition_value'] || ''}`;
+          if (key !== '*|') {
+            newMappings[key] = {
+              h1: row['H1'] || '',
+              h2: row['H2'] || '',
+              h3: row['H3'] || '',
+              h4: row['H4'] || '',
+              h5: row['H5'] || '',
+              status: 'Mapped'
+            };
+          }
+        });
+        
+        setSavedMappings(prev => ({ ...prev, ...newMappings }));
+        
+        toast({
+          title: 'Import Successful',
+          description: `Imported ${Object.keys(newMappings).length} rules from Excel`
+        });
+      } catch (error) {
+        toast({
+          title: 'Import Failed',
+          description: error instanceof Error ? error.message : 'Failed to import rules',
+          variant: 'destructive'
+        });
+      }
+    };
+    input.click();
+  }, [toast]);
+  
+  const handleExportRules = useCallback(() => {
+    if (Object.keys(savedMappings).length === 0) {
+      toast({
+        title: 'No Rules',
+        description: 'No rules to export',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    try {
+      const rulesData = Object.entries(savedMappings).map(([key, mapping]) => ({
+        'Condition Type': 'Primary Group',
+        'Condition Value': key.split('|')[1] || key,
+        'H1': mapping.h1 || '',
+        'H2': mapping.h2 || '',
+        'H3': mapping.h3 || '',
+        'H4': mapping.h4 || '',
+        'H5': mapping.h5 || ''
+      }));
+      
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(rulesData);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Classification Rules');
+      XLSX.writeFile(workbook, `Classification_Rules_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      toast({
+        title: 'Export Successful',
+        description: `Exported ${rulesData.length} rules to Excel`
+      });
+    } catch (error) {
+      toast({
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export rules',
+        variant: 'destructive'
+      });
+    }
+  }, [savedMappings, toast]);
+  
+  // Save Rule Template
+  const handleSaveRuleTemplate = useCallback(() => {
+    if (!ruleTemplateName.trim()) {
+      toast({
+        title: 'Template Name Required',
+        description: 'Please enter a name for this rule template',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    if (currentEngagement?.id) {
+      try {
+        const templateKey = `trialbalance_rules_${currentEngagement.id}`;
+        localStorage.setItem(templateKey, JSON.stringify(savedMappings));
+        
+        // Save template metadata
+        const metadataKey = `trialbalance_rules_metadata_${currentEngagement.id}`;
+        const metadata = {
+          name: ruleTemplateName,
+          savedAt: new Date().toISOString(),
+          engagementId: currentEngagement.id,
+          engagementName: currentEngagement.client_name
+        };
+        localStorage.setItem(metadataKey, JSON.stringify(metadata));
+        
+        toast({
+          title: 'Template Saved',
+          description: `Rule template "${ruleTemplateName}" saved successfully`
+        });
+        
+        setIsRuleTemplateDialogOpen(false);
+        setRuleTemplateName('');
+      } catch (error) {
+        toast({
+          title: 'Save Failed',
+          description: error instanceof Error ? error.message : 'Failed to save rule template',
+          variant: 'destructive'
+        });
+      }
+    } else {
+      toast({
+        title: 'No Engagement',
+        description: 'Please select an engagement first',
+        variant: 'destructive'
+      });
+    }
+  }, [ruleTemplateName, currentEngagement, savedMappings, toast]);
+  
+  // Modified handleClear to prompt for saving rules first
+  const handleClearWithConfirmation = useCallback(() => {
+    setIsResetConfirmDialogOpen(true);
+  }, []);
+  
+  const handleConfirmReset = useCallback((saveTemplate: boolean) => {
+    if (saveTemplate) {
+      setIsResetConfirmDialogOpen(false);
+      setIsRuleTemplateDialogOpen(true);
+    } else {
+      setCurrentData([]);
+      setCurrentStockData([]);
+      setIsResetConfirmDialogOpen(false);
+      toast({
+        title: 'Data Cleared',
+        description: 'All data has been cleared'
+      });
+    }
+  }, [toast]);
+
+  // Helper function to safely format dates
+  const formatDateRange = useCallback(() => {
+    try {
+      if (!fromDate || !toDate) return 'Set Date Range';
+      
+      const from = new Date(fromDate);
+      const to = new Date(toDate);
+      
+      const fromStr = from.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+      const toStr = to.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      
+      return `${fromStr} - ${toStr}`;
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return 'Invalid Date Range';
+    }
+  }, [fromDate, toDate]);
+  
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      {/* Excel-style Ribbon */}
-      <Ribbon
-        odbcPort={odbcPort}
-        onOdbcPortChange={setOdbcPort}
-        fromDate={fromDate}
-        onFromDateChange={setFromDate}
-        toDate={toDate}
-        onToDateChange={setToDate}
-        onTallyImport={handleConnectTally}
-        onExcelImport={handleExcelImport}
-        isConnecting={isFetching || odbcConnection.isConnecting}
-        isConnected={odbcConnection.isConnected}
-        onAutoClassify={handleAutoClassify}
-        onBulkUpdate={() => {
-          if (selectedRowIndices.size === 0) {
-            toast({
-              title: 'No Selection',
-              description: 'Please select rows to update',
-              variant: 'destructive'
-            });
-            return;
-          }
-          setIsBulkUpdateDialogOpen(true);
-        }}
-        onClassificationManager={() => setIsClassificationManagerOpen(true)}
-        hasData={currentData.length > 0}
-        selectedCount={selectedRowIndices.size}
-        onFinancialStatements={() => setActiveTab('reports')}
-        onExcelExport={handleExcelExport}
-        onSave={handleSave}
-        onClear={handleClear}
-      />
+      {/* Consolidated Header - Two Compact Rows */}
+      
+      {/* Row 1: Actions + Date + Status */}
+      <div className="flex items-center justify-between px-2 py-1 bg-white border-b" style={{ minHeight: '32px' }}>
+        {/* Left: Action Buttons */}
+        <div className="flex items-center gap-1">
+          {/* Import Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-6 text-xs px-2">
+                <Upload className="w-3 h-3 mr-1.5" />
+                Import
+                <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={handleConnectTally} disabled={isFetching || odbcConnection.isConnecting}>
+                <Database className="w-3 h-3 mr-2" />
+                {isFetching || odbcConnection.isConnecting ? 'Connecting...' : 'From Tally (ODBC)'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExcelImport}>
+                <Upload className="w-3 h-3 mr-2" />
+                From Excel
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleExportTemplate}>
+                <Download className="w-3 h-3 mr-2" />
+                Download Template
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-      {/* Entity Information Bar (Compact) */}
-      <div className="flex items-center gap-6 px-4 py-2 bg-gray-50 border-b text-sm">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground font-medium">Entity:</span>
-          <button
-            onClick={() => setIsEntityDialogOpen(true)}
-            className={cn(
-              "px-2 py-1 rounded hover:bg-gray-200 transition-colors",
-              entityType ? "text-primary font-medium" : "text-muted-foreground"
-            )}
+          {/* Auto-Classify */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleAutoClassify}
+            disabled={currentData.length === 0}
+            className="h-8"
           >
-            {entityType || 'Select Entity Type'}
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground font-medium">Business:</span>
-          <button
-            onClick={() => setIsBusinessDialogOpen(true)}
-            className={cn(
-              "px-2 py-1 rounded hover:bg-gray-200 transition-colors",
-              businessType ? "text-primary font-medium" : "text-muted-foreground"
-            )}
+            <RefreshCw className="w-3 h-3 mr-1.5" />
+            Auto-Classify
+          </Button>
+
+          {/* Update (with count) */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (selectedRowIndices.size === 0) {
+                toast({
+                  title: 'No Selection',
+                  description: 'Please select rows to update',
+                  variant: 'destructive'
+                });
+                return;
+              }
+              setIsBulkUpdateDialogOpen(true);
+            }}
+            disabled={currentData.length === 0 || selectedRowIndices.size === 0}
+            className="h-8"
           >
-            {businessType || 'Select Business Type'}
-          </button>
+            <Settings className="w-3 h-3 mr-1.5" />
+            Update {selectedRowIndices.size > 0 && `(${selectedRowIndices.size})`}
+          </Button>
+
+          {/* Export Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="default"
+                size="sm"
+                disabled={currentData.length === 0}
+                className="h-8"
+              >
+                <Download className="w-3 h-3 mr-1.5" />
+                Export
+                <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => setIsSigningDialogOpen(true)}>
+                <FileText className="w-3 h-3 mr-2" />
+                Generate Financial Statements
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExcelExport}>
+                <Download className="w-3 h-3 mr-2" />
+                Export to Excel
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+
+        {/* Center: Date Range */}
+        <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded border text-sm">
+          <Calendar className="w-3 h-3 text-gray-500" />
+          <Dialog>
+            <DialogTrigger asChild>
+              <button className="font-medium text-gray-700 hover:text-blue-600">
+                {formatDateRange()}
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Financial Year Period</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="from-date">From Date</Label>
+                  <Input
+                    id="from-date"
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="to-date">To Date</Label>
+                  <Input
+                    id="to-date"
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                  />
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {/* Right: Tally Status + Settings */}
         <div className="flex items-center gap-2">
-          <span className="text-muted-foreground font-medium">Company:</span>
-          <span className="text-foreground">{entityName || 'Not Imported'}</span>
+          <div className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium",
+            odbcConnection.isConnected 
+              ? "bg-green-50 text-green-700" 
+              : "bg-gray-100 text-gray-500"
+          )}>
+            <Database className="w-3 h-3" />
+            {odbcConnection.isConnected ? 'Tally Connected' : 'Not Connected'}
+          </div>
+
+          {/* Settings Menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                <Settings className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => setIsEntityDialogOpen(true)}>
+                <Cog className="w-4 h-4 mr-2" />
+                Configure Entity
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setIsClassificationManagerOpen(true)} disabled={currentData.length === 0}>
+                <Settings className="w-4 h-4 mr-2" />
+                Classification Manager
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleSave} disabled={currentData.length === 0}>
+                <Save className="w-4 h-4 mr-2" />
+                Save Data
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                onClick={handleClearWithConfirmation} 
+                disabled={currentData.length === 0}
+                className="text-destructive"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Clear All Data
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Filter Bar (Compact) */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-white border-b">
-          <Input
-            placeholder="Search (Ctrl+F)..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-8 w-64 text-sm"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setSearchTerm('');
-              }
-            }}
-          />
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-[130px] text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="Mapped">Mapped</SelectItem>
-              <SelectItem value="Unmapped">Unmapped</SelectItem>
-              <SelectItem value="Error">Error</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={h2Filter} onValueChange={setH2Filter}>
-            <SelectTrigger className="h-8 w-[130px] text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All H2</SelectItem>
-              <SelectItem value="Assets">Assets</SelectItem>
-              <SelectItem value="Liabilities">Liabilities</SelectItem>
-              <SelectItem value="Equity">Equity</SelectItem>
-              <SelectItem value="Income">Income</SelectItem>
-              <SelectItem value="Expenses">Expenses</SelectItem>
-            </SelectContent>
-          </Select>
-          <div className="flex-1" />
-          <div className="flex gap-4 text-xs text-muted-foreground">
-            <span>Opening: <strong className="text-foreground">{formatNumber(totals.opening)}</strong></span>
-            <span>Debit: <strong className="text-foreground">{formatNumber(totals.debit)}</strong></span>
-            <span>Credit: <strong className="text-foreground">{formatNumber(totals.credit)}</strong></span>
-            <span>Closing: <strong className="text-foreground">{formatNumber(totals.closing)}</strong></span>
+        {/* Modern Filter Bar */}
+        <div className="flex items-center gap-2 px-2 py-1 bg-white border-b" style={{ minHeight: '32px' }}>
+          {/* Search */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+            <Input
+              placeholder="Search ledgers, groups, classifications..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="h-6 pl-7 text-xs"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setSearchTerm('');
+                }
+              }}
+            />
+          </div>
+
+          {/* Filter Button with Active Count */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsFilterModalOpen(true)}
+            className="h-9"
+          >
+            <Settings className="w-4 h-4 mr-2" />
+            Filters
+            {(() => {
+              const activeCount = [
+                statusFilter !== 'all',
+                h1Filter !== 'all',
+                h2Filter !== 'all',
+                h3Filter !== 'all',
+                groupFilter !== 'all',
+                balanceFilter !== 'all',
+              ].filter(Boolean).length;
+              return activeCount > 0 ? (
+                <Badge variant="secondary" className="ml-2 h-5 px-1.5">
+                  {activeCount}
+                </Badge>
+              ) : null;
+            })()}
+          </Button>
+
+          {/* Active Filter Chips */}
+          <div className="flex items-center gap-2 flex-1">
+            {statusFilter !== 'all' && (
+              <Badge variant="secondary" className="gap-1">
+                Status: {statusFilter}
+                <button
+                  onClick={() => setStatusFilter('all')}
+                  className="hover:bg-gray-300 rounded-full p-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            )}
+            {h1Filter !== 'all' && (
+              <Badge variant="secondary" className="gap-1">
+                {h1Filter}
+                <button
+                  onClick={() => setH1Filter('all')}
+                  className="hover:bg-gray-300 rounded-full p-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            )}
+            {h2Filter !== 'all' && (
+              <Badge variant="secondary" className="gap-1">
+                {h2Filter}
+                <button
+                  onClick={() => setH2Filter('all')}
+                  className="hover:bg-gray-300 rounded-full p-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            )}
+            {h3Filter !== 'all' && (
+              <Badge variant="secondary" className="gap-1">
+                {h3Filter}
+                <button
+                  onClick={() => setH3Filter('all')}
+                  className="hover:bg-gray-300 rounded-full p-0.5"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            )}
+          </div>
+
+          {/* Selection Info & Add Line */}
+          <div className="flex items-center gap-2">
+            {selectedRowIndices.size > 0 && (
+              <Badge variant="default" className="h-9 px-3">
+                {selectedRowIndices.size} selected
+              </Badge>
+            )}
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={() => setIsAddLineDialogOpen(true)}
+              className="h-9"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              Add Line
+            </Button>
           </div>
         </div>
+        
+        {/* Totals Bar */}
+        <div className="flex items-center justify-end gap-4 px-2 py-0.5 bg-gray-50 border-b text-[10px]" style={{ minHeight: '20px' }}>
+          <span className="text-muted-foreground">Opening: <strong className="text-foreground font-semibold">{formatNumber(totals.opening)}</strong></span>
+          <span className="text-muted-foreground">Debit: <strong className="text-foreground font-semibold">{formatNumber(totals.debit)}</strong></span>
+          <span className="text-muted-foreground">Credit: <strong className="text-foreground font-semibold">{formatNumber(totals.credit)}</strong></span>
+          <span className="text-muted-foreground">Closing: <strong className="text-foreground font-semibold">{formatNumber(totals.closing)}</strong></span>
+        </div>
       
-        {/* Sheet Tabs (Excel-style) */}
-        <div className="flex items-center border-b bg-gray-50 px-2">
+        {/* Modern Tabs Navigation */}
+        <div className="bg-white border-b">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="bg-transparent h-8 p-0">
+            <TabsList className="h-7 bg-transparent border-b-0 px-2 gap-0 rounded-none justify-start">
               <TabsTrigger 
-                value="trial-balance"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                value="actual-tb"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <FileSpreadsheet className="w-3 h-3 mr-1.5" />
-                Trial Balance
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
+                Actual TB
+              </TabsTrigger>
+              <TabsTrigger 
+                value="classified-tb"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+              >
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
+                Classified TB
               </TabsTrigger>
               <TabsTrigger 
                 value="stock-items"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <Package className="w-3 h-3 mr-1.5" />
+                <Package className="w-3 h-3 mr-1" />
                 Stock Items
-              </TabsTrigger>
-              <TabsTrigger 
-                value="hierarchy"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
-              >
-                <Layers className="w-3 h-3 mr-1.5" />
-                Hierarchy
+                {stockItemCount.total > 0 && (
+                  <span className="ml-1 text-[10px] text-gray-500">
+                    ({stockItemCount.filtered}/{stockItemCount.total})
+                  </span>
+                )}
               </TabsTrigger>
               <TabsTrigger 
                 value="reports"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <FileText className="w-3 h-3 mr-1.5" />
-                Reports
+                <FileText className="w-3 h-3 mr-1" />
+                Financial Statements
               </TabsTrigger>
               <TabsTrigger 
-                value="rule-engine"
-                className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none h-8 px-4"
+                value="notes"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <Cog className="w-3 h-3 mr-1.5" />
-                Rule Engine
+                <FileText className="w-3 h-3 mr-1" />
+                Notes
               </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-auto">
+        {/* Content Area - Maximized for table display */}
+        <div className="flex-1 overflow-auto" style={{ height: 'calc(100vh - 160px)' }}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsContent value="trial-balance" className="mt-0 p-4">
-              <div className="border rounded-lg overflow-hidden">
+            
+            {/* ACTUAL TRIAL BALANCE TAB */}
+            <TabsContent value="actual-tb" className="mt-0 p-1">
+              <div className="border rounded overflow-hidden" style={{ height: 'calc(100vh - 180px)' }}>
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
-                  <TableHead className="w-12">
+                  <TableHead className="w-12 sticky top-0 bg-white">
                     <input
                       type="checkbox"
-                      checked={selectedRowIndices.size === filteredData.length && filteredData.length > 0}
+                      checked={selectedRowIndices.size === actualData.length && actualData.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedRowIndices(new Set(filteredData.map((_, i) => i)));
+                          setSelectedRowIndices(new Set(actualData.map((_, i) => i)));
                         } else {
                           setSelectedRowIndices(new Set());
                         }
                       }}
+                      title="Select All / Deselect All"
                     />
                   </TableHead>
-                  <TableHead>Ledger Name</TableHead>
-                  <TableHead>Primary Group</TableHead>
-                  <TableHead className="text-right">Opening</TableHead>
-                  <TableHead className="text-right">Debit</TableHead>
-                  <TableHead className="text-right">Credit</TableHead>
-                  <TableHead className="text-right">Closing</TableHead>
-                  <TableHead>H1</TableHead>
-                  <TableHead>H2</TableHead>
-                  <TableHead>H3</TableHead>
-                  <TableHead>H4</TableHead>
-                  <TableHead>H5</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Ledger Name
+                      <ColumnFilter
+                        column="Ledger Name"
+                        values={getActualTbColumnValues('Ledger Name')}
+                        selectedValues={actualTbColumnFilters['Ledger Name'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Ledger Name', values)}
+                        sortDirection={actualTbSortColumn === 'Ledger Name' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Ledger Name', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Parent Group
+                      <ColumnFilter
+                        column="Parent Group"
+                        values={getActualTbColumnValues('Parent Group')}
+                        selectedValues={actualTbColumnFilters['Parent Group'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Parent Group', values)}
+                        sortDirection={actualTbSortColumn === 'Parent Group' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Parent Group', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Primary Group
+                      <ColumnFilter
+                        column="Primary Group"
+                        values={getActualTbColumnValues('Primary Group')}
+                        selectedValues={actualTbColumnFilters['Primary Group'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Primary Group', values)}
+                        sortDirection={actualTbSortColumn === 'Primary Group' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Primary Group', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Opening
+                      <ColumnFilter
+                        column="Opening Balance"
+                        values={getActualTbColumnValues('Opening Balance')}
+                        selectedValues={actualTbColumnFilters['Opening Balance'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Opening Balance', values)}
+                        sortDirection={actualTbSortColumn === 'Opening Balance' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Opening Balance', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Debit
+                      <ColumnFilter
+                        column="Debit"
+                        values={getActualTbColumnValues('Debit')}
+                        selectedValues={actualTbColumnFilters['Debit'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Debit', values)}
+                        sortDirection={actualTbSortColumn === 'Debit' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Debit', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Credit
+                      <ColumnFilter
+                        column="Credit"
+                        values={getActualTbColumnValues('Credit')}
+                        selectedValues={actualTbColumnFilters['Credit'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Credit', values)}
+                        sortDirection={actualTbSortColumn === 'Credit' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Credit', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Closing
+                      <ColumnFilter
+                        column="Closing Balance"
+                        values={getActualTbColumnValues('Closing Balance')}
+                        selectedValues={actualTbColumnFilters['Closing Balance'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Closing Balance', values)}
+                        sortDirection={actualTbSortColumn === 'Closing Balance' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Closing Balance', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Is Revenue
+                      <ColumnFilter
+                        column="Is Revenue"
+                        values={getActualTbColumnValues('Is Revenue')}
+                        selectedValues={actualTbColumnFilters['Is Revenue'] || new Set()}
+                        onFilterChange={(values) => handleActualTbFilterChange('Is Revenue', values)}
+                        sortDirection={actualTbSortColumn === 'Is Revenue' ? actualTbSortDirection : null}
+                        onSort={(dir) => handleActualTbSort('Is Revenue', dir)}
+                      />
+                    </div>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredData.length === 0 ? (
+                {filteredActualData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                       No data loaded. Import from Tally or Excel to get started.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredData.map((row, index) => {
-                    // Find the original index in currentData
-                    const originalIndex = currentData.findIndex(r => 
+                  filteredActualData.map((row, index) => {
+                    const originalIndex = actualData.findIndex(r => 
                       r['Composite Key'] === row['Composite Key']
                     );
                     const isSelected = originalIndex !== -1 && selectedRowIndices.has(originalIndex);
@@ -805,44 +2162,317 @@ export default function TrialBalanceNew() {
                         key={row['Composite Key'] || index}
                         className={cn(
                           isSelected && "bg-blue-100/50",
-                          focusedRowIndex === index && "ring-2 ring-blue-500 ring-inset",
-                          "cursor-pointer hover:bg-muted/30"
+                          "cursor-pointer hover:bg-gray-50"
                         )}
                         onClick={(e) => {
-                          if (originalIndex !== -1) {
-                            setFocusedRowIndex(index);
-                            toggleRowSelection(originalIndex, e);
+                          if (e.ctrlKey || e.metaKey) {
+                            // Ctrl+Click: Toggle selection
+                            const newSelection = new Set(selectedRowIndices);
+                            if (isSelected) {
+                              newSelection.delete(originalIndex);
+                            } else {
+                              newSelection.add(originalIndex);
+                            }
+                            setSelectedRowIndices(newSelection);
+                          } else if (e.shiftKey && selectedRowIndices.size > 0) {
+                            // Shift+Click: Range selection
+                            const indices = Array.from(selectedRowIndices);
+                            const lastSelected = Math.max(...indices);
+                            const start = Math.min(lastSelected, originalIndex);
+                            const end = Math.max(lastSelected, originalIndex);
+                            const newSelection = new Set(selectedRowIndices);
+                            for (let i = start; i <= end; i++) {
+                              newSelection.add(i);
+                            }
+                            setSelectedRowIndices(newSelection);
+                          } else {
+                            // Regular click: Single selection
+                            setSelectedRowIndices(new Set([originalIndex]));
                           }
                         }}
+                      >
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">{row['Ledger Name']}</TableCell>
+                        <TableCell className="text-sm text-gray-600">{row['Parent Group']}</TableCell>
+                        <TableCell className="text-sm">{row['Primary Group']}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Opening Balance'])}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Debit'])}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Credit'])}</TableCell>
+                        <TableCell className="text-right text-sm font-medium">{formatNumber(row['Closing Balance'])}</TableCell>
+                        <TableCell className="text-sm">{row['Is Revenue']}</TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+              </div>
+            </TabsContent>
+
+            {/* CLASSIFIED TRIAL BALANCE TAB */}
+            <TabsContent value="classified-tb" className="mt-0 p-4">
+              <div className="border rounded-lg overflow-hidden">
+            <Table>
+              <TableHeader className="sticky top-0 bg-white z-10">
+                <TableRow>
+                  <TableHead className="w-12 sticky top-0 bg-white">
+                    <input
+                      type="checkbox"
+                      checked={selectedRowIndices.size === currentData.length && currentData.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          // Select all original indices
+                          setSelectedRowIndices(new Set(currentData.map((_, i) => i)));
+                        } else {
+                          setSelectedRowIndices(new Set());
+                        }
+                      }}
+                      title="Select All / Deselect All"
+                    />
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Ledger Name
+                      <ColumnFilter
+                        column="Ledger Name"
+                        values={getClassifiedTbColumnValues('Ledger Name')}
+                        selectedValues={classifiedTbColumnFilters['Ledger Name'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Ledger Name', values)}
+                        sortDirection={classifiedTbSortColumn === 'Ledger Name' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Ledger Name', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Parent Group
+                      <ColumnFilter
+                        column="Parent Group"
+                        values={getClassifiedTbColumnValues('Parent Group')}
+                        selectedValues={classifiedTbColumnFilters['Parent Group'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Parent Group', values)}
+                        sortDirection={classifiedTbSortColumn === 'Parent Group' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Parent Group', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Primary Group
+                      <ColumnFilter
+                        column="Primary Group"
+                        values={getClassifiedTbColumnValues('Primary Group')}
+                        selectedValues={classifiedTbColumnFilters['Primary Group'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Primary Group', values)}
+                        sortDirection={classifiedTbSortColumn === 'Primary Group' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Primary Group', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Opening
+                      <ColumnFilter
+                        column="Opening Balance"
+                        values={getClassifiedTbColumnValues('Opening Balance')}
+                        selectedValues={classifiedTbColumnFilters['Opening Balance'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Opening Balance', values)}
+                        sortDirection={classifiedTbSortColumn === 'Opening Balance' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Opening Balance', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Debit
+                      <ColumnFilter
+                        column="Debit"
+                        values={getClassifiedTbColumnValues('Debit')}
+                        selectedValues={classifiedTbColumnFilters['Debit'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Debit', values)}
+                        sortDirection={classifiedTbSortColumn === 'Debit' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Debit', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Credit
+                      <ColumnFilter
+                        column="Credit"
+                        values={getClassifiedTbColumnValues('Credit')}
+                        selectedValues={classifiedTbColumnFilters['Credit'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Credit', values)}
+                        sortDirection={classifiedTbSortColumn === 'Credit' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Credit', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-right sticky top-0 bg-white">
+                    <div className="flex items-center justify-end gap-1">
+                      Closing
+                      <ColumnFilter
+                        column="Closing Balance"
+                        values={getClassifiedTbColumnValues('Closing Balance')}
+                        selectedValues={classifiedTbColumnFilters['Closing Balance'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Closing Balance', values)}
+                        sortDirection={classifiedTbSortColumn === 'Closing Balance' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Closing Balance', dir)}
+                        isNumeric
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H1
+                      <ColumnFilter
+                        column="H1"
+                        values={getClassifiedTbColumnValues('H1')}
+                        selectedValues={classifiedTbColumnFilters['H1'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H1', values)}
+                        sortDirection={classifiedTbSortColumn === 'H1' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H1', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H2
+                      <ColumnFilter
+                        column="H2"
+                        values={getClassifiedTbColumnValues('H2')}
+                        selectedValues={classifiedTbColumnFilters['H2'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H2', values)}
+                        sortDirection={classifiedTbSortColumn === 'H2' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H2', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H3
+                      <ColumnFilter
+                        column="H3"
+                        values={getClassifiedTbColumnValues('H3')}
+                        selectedValues={classifiedTbColumnFilters['H3'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H3', values)}
+                        sortDirection={classifiedTbSortColumn === 'H3' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H3', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H4
+                      <ColumnFilter
+                        column="H4"
+                        values={getClassifiedTbColumnValues('H4')}
+                        selectedValues={classifiedTbColumnFilters['H4'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H4', values)}
+                        sortDirection={classifiedTbSortColumn === 'H4' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H4', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      H5
+                      <ColumnFilter
+                        column="H5"
+                        values={getClassifiedTbColumnValues('H5')}
+                        selectedValues={classifiedTbColumnFilters['H5'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('H5', values)}
+                        sortDirection={classifiedTbSortColumn === 'H5' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('H5', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="sticky top-0 bg-white">
+                    <div className="flex items-center gap-1">
+                      Status
+                      <ColumnFilter
+                        column="Status"
+                        values={getClassifiedTbColumnValues('Status')}
+                        selectedValues={classifiedTbColumnFilters['Status'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Status', values)}
+                        sortDirection={classifiedTbSortColumn === 'Status' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Status', dir)}
+                      />
+                    </div>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={14} className="text-center text-muted-foreground py-8">
+                      {currentData.length === 0 
+                        ? "No classified data. Import from Tally to get started."
+                        : "No results match your search criteria."}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredData.map((row, index) => {
+                    // Find the original index in currentData for selection
+                    const originalIndex = currentData.findIndex(r => 
+                      r['Composite Key'] === row['Composite Key']
+                    );
+                    const isSelected = originalIndex !== -1 && selectedRowIndices.has(originalIndex);
+                    const isFocused = focusedClassifiedRowIndex === originalIndex;
+                    
+                    return (
+                      <TableRow 
+                        key={row['Composite Key'] || index}
+                        className={cn(
+                          isSelected && "bg-blue-50",
+                          isFocused && "ring-2 ring-blue-400 ring-inset",
+                          "cursor-pointer hover:bg-gray-50 transition-colors"
+                        )}
+                        onClick={(e) => {
+                          setFocusedClassifiedRowIndex(originalIndex);
+                          toggleRowSelection(originalIndex, e);
+                        }}
+                        onDoubleClick={() => {
+                          setEditingLedger(row);
+                          setEditingLedgerIndex(originalIndex);
+                          setIsSingleEditDialogOpen(true);
+                        }}
                         tabIndex={0}
-                        onFocus={() => setFocusedRowIndex(index)}
+                        onFocus={() => setFocusedClassifiedRowIndex(originalIndex)}
                       >
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => {
-                              if (originalIndex !== -1) {
-                                toggleRowSelection(originalIndex);
-                              }
-                            }}
+                            onChange={() => toggleRowSelection(originalIndex)}
                             onClick={(e) => e.stopPropagation()}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{row['Ledger Name']}</TableCell>
-                        <TableCell>{row['Primary Group']}</TableCell>
-                        <TableCell className="text-right">{formatNumber(row['Opening Balance'])}</TableCell>
-                        <TableCell className="text-right">{formatNumber(row['Debit'])}</TableCell>
-                        <TableCell className="text-right">{formatNumber(row['Credit'])}</TableCell>
-                        <TableCell className="text-right">{formatNumber(row['Closing Balance'])}</TableCell>
-                        <TableCell>{row['H1'] || '-'}</TableCell>
-                        <TableCell>{row['H2'] || '-'}</TableCell>
-                        <TableCell>{row['H3'] || '-'}</TableCell>
-                        <TableCell>{row['H4'] || '-'}</TableCell>
-                        <TableCell>{row['H5'] || '-'}</TableCell>
+                        <TableCell className="font-medium text-sm">{row['Ledger Name']}</TableCell>
+                        <TableCell className="text-xs text-gray-600">{row['Parent Group'] || row['Primary Group'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['Primary Group']}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Opening Balance'])}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Debit'])}</TableCell>
+                        <TableCell className="text-right text-sm">{formatNumber(row['Credit'])}</TableCell>
+                        <TableCell className="text-right text-sm font-medium">{formatNumber(row['Closing Balance'])}</TableCell>
+                        <TableCell className="text-xs">{row['H1'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['H2'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['H3'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['H4'] || '-'}</TableCell>
+                        <TableCell className="text-xs">{row['H5'] || '-'}</TableCell>
                         <TableCell>
                           <span className={cn(
-                            "px-2 py-1 rounded text-xs",
+                            "px-2 py-1 rounded text-xs font-medium",
                             row['Status'] === 'Mapped' ? "bg-green-100 text-green-800" :
                             row['Status'] === 'Unmapped' ? "bg-yellow-100 text-yellow-800" :
                             "bg-red-100 text-red-800"
@@ -863,6 +2493,8 @@ export default function TrialBalanceNew() {
               <StockItemsTab 
                 stockData={currentStockData} 
                 onUpdateStockData={setCurrentStockData}
+                businessType={businessType}
+                searchTerm={searchTerm}
               />
             </TabsContent>
             
@@ -911,7 +2543,203 @@ export default function TrialBalanceNew() {
                 companyName={entityName}
                 toDate={toDate}
                 entityType={entityType}
+                signingDetails={signingDetails}
               />
+            </TabsContent>
+            
+            <TabsContent value="notes" className="mt-0 p-4">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-lg font-semibold">Notes to Account</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Detailed notes grouped by Schedule III classifications from Rule Engine
+                    </p>
+                  </div>
+                  <Button 
+                    onClick={() => {
+                      try {
+                        // Group data by H3 and H4 for detailed notes
+                        const notesData = currentData.filter(row => row.H3 && row.H3.trim() !== '');
+                        
+                        const grouped = notesData.reduce((acc: any, row) => {
+                          const noteSection = `${row.H2 || 'Unmapped'} - ${row.H3 || 'Unmapped'}`;
+                          if (!acc[noteSection]) acc[noteSection] = [];
+                          acc[noteSection].push({
+                            'Ledger Name': row['Ledger Name'] || '',
+                            'Parent': row['Primary Group'] || '',
+                            'H2': row.H2 || '',
+                            'H3': row.H3 || '',
+                            'H4': row.H4 || '',
+                            'H5': row.H5 || '',
+                            'Opening Balance': row['Opening Balance'] || 0,
+                            'Closing Balance': row['Closing Balance'] || 0
+                          });
+                          return acc;
+                        }, {});
+                        
+                        const workbook = XLSX.utils.book_new();
+                        
+                        Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
+                          const worksheet = XLSX.utils.json_to_sheet(rows);
+                          XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+                        });
+                        
+                        XLSX.writeFile(workbook, `Notes_to_Account_${entityName}_${new Date().toISOString().split('T')[0]}.xlsx`);
+                        
+                        toast({
+                          title: 'Downloaded',
+                          description: 'Notes to Account exported successfully'
+                        });
+                      } catch (error) {
+                        toast({
+                          title: 'Export Failed',
+                          description: error instanceof Error ? error.message : 'Failed to export Notes',
+                          variant: 'destructive'
+                        });
+                      }
+                    }}
+                    variant="outline"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Download Notes
+                  </Button>
+                </div>
+                
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Note Category</TableHead>
+                        <TableHead>Ledger Name</TableHead>
+                        <TableHead>H3 Classification</TableHead>
+                        <TableHead>H4 Classification</TableHead>
+                        <TableHead className="text-right">Opening</TableHead>
+                        <TableHead className="text-right">Closing</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentData.filter(row => row.H3 && row.H3.trim() !== '').length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                            No notes available. Ensure data is properly classified with H3 level in Rule Engine.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        currentData
+                          .filter(row => row.H3 && row.H3.trim() !== '')
+                          .map((row, index) => (
+                            <TableRow key={index}>
+                              <TableCell className="font-medium">{row.H2 || '-'}</TableCell>
+                              <TableCell>{row['Ledger Name']}</TableCell>
+                              <TableCell>{row.H3}</TableCell>
+                              <TableCell>{row.H4 || '-'}</TableCell>
+                              <TableCell className="text-right">{formatNumber(row['Opening Balance'])}</TableCell>
+                              <TableCell className="text-right">{formatNumber(row['Closing Balance'])}</TableCell>
+                            </TableRow>
+                          ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </TabsContent>
+            
+            <TabsContent value="annexures" className="mt-0 p-4">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-lg font-semibold">Annexures to Notes</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Detailed annexures grouped by H4 and H5 classifications
+                    </p>
+                  </div>
+                  <Button 
+                    onClick={() => {
+                      try {
+                        // Group data by H4 and H5 for annexures
+                        const annexuresData = currentData.filter(row => row.H4 && row.H4.trim() !== '');
+                        
+                        const grouped = annexuresData.reduce((acc: any, row) => {
+                          const annexureSection = `${row.H3 || 'Unmapped'} - ${row.H4 || 'Unmapped'}`;
+                          if (!acc[annexureSection]) acc[annexureSection] = [];
+                          acc[annexureSection].push({
+                            'Ledger Name': row['Ledger Name'] || '',
+                            'Parent': row['Primary Group'] || '',
+                            'H3': row.H3 || '',
+                            'H4': row.H4 || '',
+                            'H5': row.H5 || '',
+                            'Opening Balance': row['Opening Balance'] || 0,
+                            'Closing Balance': row['Closing Balance'] || 0
+                          });
+                          return acc;
+                        }, {});
+                        
+                        const workbook = XLSX.utils.book_new();
+                        
+                        Object.entries(grouped).forEach(([section, rows]: [string, any]) => {
+                          const worksheet = XLSX.utils.json_to_sheet(rows);
+                          XLSX.utils.book_append_sheet(workbook, worksheet, section.substring(0, 31));
+                        });
+                        
+                        XLSX.writeFile(workbook, `Annexures_${entityName}_${new Date().toISOString().split('T')[0]}.xlsx`);
+                        
+                        toast({
+                          title: 'Downloaded',
+                          description: 'Annexures exported successfully'
+                        });
+                      } catch (error) {
+                        toast({
+                          title: 'Export Failed',
+                          description: error instanceof Error ? error.message : 'Failed to export Annexures',
+                          variant: 'destructive'
+                        });
+                      }
+                    }}
+                    variant="outline"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Download Annexures
+                  </Button>
+                </div>
+                
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Annexure Group</TableHead>
+                        <TableHead>Ledger Name</TableHead>
+                        <TableHead>H4 Classification</TableHead>
+                        <TableHead>H5 Classification</TableHead>
+                        <TableHead className="text-right">Opening</TableHead>
+                        <TableHead className="text-right">Closing</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentData.filter(row => row.H4 && row.H4.trim() !== '').length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                            No annexures available. Ensure data is properly classified with H4 level in Rule Engine.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        currentData
+                          .filter(row => row.H4 && row.H4.trim() !== '')
+                          .map((row, index) => (
+                            <TableRow key={index}>
+                              <TableCell className="font-medium">{row.H3 || '-'}</TableCell>
+                              <TableCell>{row['Ledger Name']}</TableCell>
+                              <TableCell>{row.H4}</TableCell>
+                              <TableCell>{row.H5 || '-'}</TableCell>
+                              <TableCell className="text-right">{formatNumber(row['Opening Balance'])}</TableCell>
+                              <TableCell className="text-right">{formatNumber(row['Closing Balance'])}</TableCell>
+                            </TableRow>
+                          ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
             </TabsContent>
             
             <TabsContent value="rule-engine" className="mt-0 p-4">
@@ -923,10 +2751,34 @@ export default function TrialBalanceNew() {
                       Manage automatic classification rules for trial balance items
                     </p>
                   </div>
-                  <Button onClick={() => toast({ title: 'Add Rule', description: 'Rule creation dialog coming soon' })}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add New Rule
-                  </Button>
+                  <div className="flex gap-2 items-center">
+                    <Select value={selectedRuleSet} onValueChange={setSelectedRuleSet}>
+                      <SelectTrigger className="w-[220px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="schedule-iii">Schedule III (Corporate)</SelectItem>
+                        <SelectItem value="non-corporate">Non-Corporate Entity (ICAI)</SelectItem>
+                        <SelectItem value="custom">Custom Rules</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button size="sm" variant="outline" onClick={() => setIsRuleTemplateDialogOpen(true)}>
+                      <Save className="w-4 h-4 mr-2" />
+                      Save as Template
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleImportRules}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Import Rules
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleExportRules}>
+                      <Download className="w-4 h-4 mr-2" />
+                      Export Rules
+                    </Button>
+                    <Button onClick={handleAddRule}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New Rule
+                    </Button>
+                  </div>
                 </div>
                 
                 <div className="border rounded-lg">
@@ -944,7 +2796,7 @@ export default function TrialBalanceNew() {
                       {Object.entries(savedMappings).length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                            No rules defined yet. Create rules to automate classification.
+                            No rules defined yet. Click "Add New Rule" or import from Excel to get started.
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -962,6 +2814,8 @@ export default function TrialBalanceNew() {
                                 <div><strong>H1:</strong> {mapping.h1}</div>
                                 <div><strong>H2:</strong> {mapping.h2}</div>
                                 <div><strong>H3:</strong> {mapping.h3}</div>
+                                {mapping.h4 && <div><strong>H4:</strong> {mapping.h4}</div>}
+                                {mapping.h5 && <div><strong>H5:</strong> {mapping.h5}</div>}
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
@@ -969,7 +2823,7 @@ export default function TrialBalanceNew() {
                                 <Button 
                                   size="sm" 
                                   variant="ghost"
-                                  onClick={() => toast({ title: 'Edit Rule', description: 'Edit functionality coming soon' })}
+                                  onClick={() => handleEditRule(key, mapping)}
                                 >
                                   <Edit className="w-4 h-4" />
                                 </Button>
@@ -1015,135 +2869,119 @@ export default function TrialBalanceNew() {
         </div>
       </div>
       
-      {/* Entity Type Dialog */}
+      {/* Consolidated Setup Dialog - Entity Type + Business Type + Period + Stock Items */}
       <Dialog open={isEntityDialogOpen} onOpenChange={setIsEntityDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Select Entity Type</DialogTitle>
+            <DialogTitle>Setup Trial Balance Import</DialogTitle>
             <DialogDescription>
-              Select the type of entity for this Trial Balance
+              Configure entity details and import settings
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-6 py-4">
+            {/* Entity Type */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Entity Type</label>
+              <label className="text-sm font-medium">Entity Type *</label>
               <Select value={entityType} onValueChange={setEntityType}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select entity type" />
                 </SelectTrigger>
                 <SelectContent>
                   {ENTITY_TYPES.map(type => (
+                    <SelectItem 
+                      key={type} 
+                      value={type}
+                      disabled={DISABLED_ENTITY_TYPES.includes(type)}
+                      className={DISABLED_ENTITY_TYPES.includes(type) ? "text-gray-400" : ""}
+                    >
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Business Type */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Business Type *</label>
+              <Select value={businessType} onValueChange={setBusinessType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select business type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {BUSINESS_TYPES.map(type => (
                     <SelectItem key={type} value={type}>{type}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Entity Name</label>
-              <Input
-                value={entityName}
-                onChange={(e) => setEntityName(e.target.value)}
-                placeholder="Will be Auto Imported from Tally"
-              />
+
+            {/* Import Period Selection */}
+            <div className="space-y-3">
+              <label className="text-sm font-medium">Import Period *</label>
+              <div className="grid grid-cols-2 gap-3">
+                <div
+                  onClick={() => setImportPeriodType('current')}
+                  className={cn(
+                    "p-4 border-2 rounded-lg cursor-pointer transition-all",
+                    importPeriodType === 'current'
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 hover:border-gray-400"
+                  )}
+                >
+                  <p className="font-semibold text-sm">Current Period</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {fromDate && toDate ? `${fromDate} to ${toDate}` : 'Set date range first'}
+                  </p>
+                </div>
+                <div
+                  onClick={() => setImportPeriodType('previous')}
+                  className={cn(
+                    "p-4 border-2 rounded-lg cursor-pointer transition-all",
+                    importPeriodType === 'previous'
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 hover:border-gray-400"
+                  )}
+                >
+                  <p className="font-semibold text-sm">Previous Period</p>
+                  <p className="text-xs text-muted-foreground mt-1">For comparison</p>
+                </div>
+              </div>
             </div>
-            <div className="flex justify-end gap-2">
+
+            {/* Stock Items Checkbox */}
+            {(businessType === 'Trading - Wholesale and Retail' || businessType === 'Manufacturing') && (
+              <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="includeStock"
+                  checked={includeStockItems}
+                  onChange={(e) => setIncludeStockItems(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 rounded"
+                />
+                <label htmlFor="includeStock" className="text-sm font-medium cursor-pointer flex-1">
+                  Import Stock Items from Tally
+                </label>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-2 pt-4 border-t">
               <Button variant="outline" onClick={() => setIsEntityDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleFetchFromTally} disabled={!entityType || isFetching}>
-                {isFetching ? 'Fetching...' : 'Confirm & Fetch'}
+              <Button 
+                onClick={handleFetchFromTally} 
+                disabled={!entityType || !businessType || isFetching}
+              >
+                {isFetching ? 'Importing...' : 'Confirm & Import'}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
       
-      {/* Business Type Dialog */}
-      <Dialog open={isBusinessDialogOpen} onOpenChange={setIsBusinessDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Select Business Type</DialogTitle>
-            <DialogDescription>
-              Select the business type for stock classification
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Select value={businessType} onValueChange={setBusinessType}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select business type" />
-              </SelectTrigger>
-              <SelectContent>
-                {BUSINESS_TYPES.map(type => (
-                  <SelectItem key={type} value={type}>{type}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsBusinessDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => {
-                setIsBusinessDialogOpen(false);
-                // If Trading or Manufacturing, show stock preference dialog
-                if (businessType === 'Trading' || businessType === 'Manufacturing') {
-                  setIsStockPreferenceDialogOpen(true);
-                } else {
-                  handleFetchFromTally();
-                }
-              }} disabled={!businessType}>
-                Confirm
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
-      {/* Stock Items Preference Dialog */}
-      <Dialog open={isStockPreferenceDialogOpen} onOpenChange={setIsStockPreferenceDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Stock Items Handling</DialogTitle>
-            <DialogDescription>
-              How would you like to handle stock items for Financial Statement verification?
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="stockPreference"
-                  checked={includeStockItems}
-                  onChange={() => setIncludeStockItems(true)}
-                  className="w-4 h-4"
-                />
-                <span>Import stock items from Tally and include in FS verification</span>
-              </label>
-              <label className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  name="stockPreference"
-                  checked={!includeStockItems}
-                  onChange={() => setIncludeStockItems(false)}
-                  className="w-4 h-4"
-                />
-                <span>I will manually enter stock items later</span>
-              </label>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsStockPreferenceDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => {
-                setIsStockPreferenceDialogOpen(false);
-                handleFetchFromTally();
-              }}>
-                Confirm & Fetch
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Bulk Update Dialog */}
       <BulkUpdateDialog
@@ -1155,6 +2993,158 @@ export default function TrialBalanceNew() {
         onUpdate={handleBulkUpdate}
       />
 
+      {/* Single Ledger Edit Dialog */}
+      <Dialog open={isSingleEditDialogOpen} onOpenChange={setIsSingleEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Classification</DialogTitle>
+            <DialogDescription>
+              Update classification for: <strong>{editingLedger?.['Ledger Name']}</strong>
+            </DialogDescription>
+          </DialogHeader>
+          {editingLedger && (
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs text-gray-500">Primary Group</Label>
+                  <div className="text-sm font-medium">{editingLedger['Primary Group']}</div>
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">Closing Balance</Label>
+                  <div className="text-sm font-medium">{formatNumber(editingLedger['Closing Balance'])}</div>
+                </div>
+              </div>
+
+              <div className="space-y-3 border-t pt-4">
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H1</Label>
+                  <Select
+                    value={editingLedger['H1'] || ''}
+                    onValueChange={(val) => setEditingLedger({...editingLedger, 'H1': val, 'H2': '', 'H3': '', 'H4': ''})}
+                  >
+                    <SelectTrigger className="col-span-3">
+                      <SelectValue placeholder="Select Statement Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {H1_OPTIONS.map(opt => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H2</Label>
+                  <Select
+                    value={editingLedger['H2'] || ''}
+                    onValueChange={(val) => setEditingLedger({...editingLedger, 'H2': val, 'H3': '', 'H4': ''})}
+                    disabled={!editingLedger['H1']}
+                  >
+                    <SelectTrigger className="col-span-3">
+                      <SelectValue placeholder={!editingLedger['H1'] ? "Select H1 first" : "Select Category"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getH2Options(editingLedger['H1'] || '').map(opt => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H3</Label>
+                  <Select
+                    value={editingLedger['H3'] || ''}
+                    onValueChange={(val) => setEditingLedger({...editingLedger, 'H3': val, 'H4': ''})}
+                    disabled={!editingLedger['H2']}
+                  >
+                    <SelectTrigger className="col-span-3">
+                      <SelectValue placeholder={!editingLedger['H2'] ? "Select H2 first" : "Select Note/Section"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getH3Options(editingLedger['H2'] || '').map(opt => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H4</Label>
+                  <Select
+                    value={editingLedger['H4'] || ''}
+                    onValueChange={(val) => setEditingLedger({...editingLedger, 'H4': val})}
+                    disabled={!editingLedger['H3'] || getH4Options(editingLedger['H3'] || '').length === 0}
+                  >
+                    <SelectTrigger className="col-span-3">
+                      <SelectValue placeholder={
+                        !editingLedger['H3'] ? "Select H3 first" : 
+                        getH4Options(editingLedger['H3'] || '').length === 0 ? "No sub-items available" :
+                        "Select Line Item"
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getH4Options(editingLedger['H3'] || '').map(opt => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <Label className="text-sm font-medium">H5</Label>
+                  <Input
+                    value={editingLedger['H5'] || ''}
+                    onChange={(e) => setEditingLedger({...editingLedger, 'H5': e.target.value})}
+                    className="col-span-3"
+                    placeholder="e.g., Cash-in-Hand (optional detail)"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t pt-4">
+                <Button variant="outline" onClick={() => setIsSingleEditDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={() => {
+                  if (editingLedger && editingLedgerIndex >= 0) {
+                    const updatedData = [...currentData];
+                    updatedData[editingLedgerIndex] = editingLedger;
+                    setCurrentData(updatedData);
+                    toast({
+                      title: 'Updated',
+                      description: `Classification updated for "${editingLedger['Ledger Name']}"`
+                    });
+                    setIsSingleEditDialogOpen(false);
+                  }
+                }}>
+                  Save Changes
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Filter Modal */}
+      <FilterModal
+        open={isFilterModalOpen}
+        onOpenChange={setIsFilterModalOpen}
+        statusFilter={statusFilter}
+        h1Filter={h1Filter}
+        h2Filter={h2Filter}
+        h3Filter={h3Filter}
+        groupFilter={groupFilter}
+        balanceFilter={balanceFilter}
+        onStatusFilterChange={setStatusFilter}
+        onH1FilterChange={setH1Filter}
+        onH2FilterChange={setH2Filter}
+        onH3FilterChange={setH3Filter}
+        onGroupFilterChange={setGroupFilter}
+        onBalanceFilterChange={setBalanceFilter}
+        onResetFilters={handleResetFilters}
+      />
+
       {/* Classification Manager Dialog */}
       <ClassificationManager
         open={isClassificationManagerOpen}
@@ -1163,6 +3153,337 @@ export default function TrialBalanceNew() {
         onSaveMapping={handleSaveMapping}
         onDeleteMapping={handleDeleteMapping}
       />
+
+      {/* Rule Add/Edit Dialog */}
+      <Dialog open={isRuleDialogOpen} onOpenChange={setIsRuleDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingRuleKey ? 'Edit Classification Rule' : 'Add New Classification Rule'}</DialogTitle>
+            <DialogDescription>
+              Define a rule to automatically classify trial balance items based on Tally Primary Group
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Condition Type</label>
+              <Select value={ruleForm.conditionType} onValueChange={(val) => setRuleForm(prev => ({ ...prev, conditionType: val }))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Primary Group">Tally Primary Group</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Condition Value *</label>
+              <Input
+                value={ruleForm.conditionValue}
+                onChange={(e) => setRuleForm(prev => ({ ...prev, conditionValue: e.target.value }))}
+                placeholder="e.g., Current Assets, Bank Accounts"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H1 Classification</label>
+                <Input
+                  value={ruleForm.h1}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h1: e.target.value }))}
+                  placeholder="e.g., Balance Sheet"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H2 Classification</label>
+                <Input
+                  value={ruleForm.h2}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h2: e.target.value }))}
+                  placeholder="e.g., Assets"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H3 Classification</label>
+                <Input
+                  value={ruleForm.h3}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h3: e.target.value }))}
+                  placeholder="e.g., Current Assets"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H4 Classification</label>
+                <Input
+                  value={ruleForm.h4}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h4: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">H5 Classification</label>
+                <Input
+                  value={ruleForm.h5}
+                  onChange={(e) => setRuleForm(prev => ({ ...prev, h5: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setIsRuleDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveRule}>
+                {editingRuleKey ? 'Update Rule' : 'Create Rule'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Rule Template Save Dialog */}
+      <Dialog open={isRuleTemplateDialogOpen} onOpenChange={setIsRuleTemplateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Rule Template</DialogTitle>
+            <DialogDescription>
+              Save the current mapping rules as a named template for this engagement
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Template Name *</label>
+              <Input
+                value={ruleTemplateName}
+                onChange={(e) => setRuleTemplateName(e.target.value)}
+                placeholder="e.g., Manufacturing Company - Standard, Retail Business - Q1 2024"
+              />
+            </div>
+            
+            <div className="text-sm text-muted-foreground bg-muted p-3 rounded">
+              <p>This template will be saved for engagement: <strong>{currentEngagement?.client_name}</strong></p>
+              <p className="mt-1">Total rules: <strong>{Object.keys(savedMappings).length}</strong></p>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => {
+                setIsRuleTemplateDialogOpen(false);
+                setRuleTemplateName('');
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveRuleTemplate}>
+                Save Template
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Reset Confirmation Dialog */}
+      <Dialog open={isResetConfirmDialogOpen} onOpenChange={setIsResetConfirmDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear Trial Balance Data</DialogTitle>
+            <DialogDescription>
+              Would you like to save the current mapping rules as a template before clearing the data?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm bg-yellow-50 border border-yellow-200 p-3 rounded">
+              <p className="font-medium text-yellow-900">⚠️ Warning</p>
+              <p className="mt-1 text-yellow-800">All trial balance data and stock items will be cleared. This action cannot be undone.</p>
+            </div>
+            
+            <div className="text-sm text-muted-foreground">
+              <p>Current mapping rules: <strong>{Object.keys(savedMappings).length} rules</strong></p>
+              <p>Ledger rows: <strong>{currentData.length} rows</strong></p>
+              {currentStockData.length > 0 && (
+                <p>Stock items: <strong>{currentStockData.length} items</strong></p>
+              )}
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setIsResetConfirmDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="secondary" onClick={() => handleConfirmReset(true)}>
+                Save Template & Clear
+              </Button>
+              <Button variant="destructive" onClick={() => handleConfirmReset(false)}>
+                Clear Without Saving
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+
+      
+      {/* Add New Line Item Dialog */}
+      <Dialog open={isAddLineDialogOpen} onOpenChange={setIsAddLineDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add New Line Item</DialogTitle>
+            <DialogDescription>
+              Manually add a new ledger line item to the trial balance
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 space-y-2">
+                <label className="text-sm font-medium">Ledger Name *</label>
+                <Input
+                  value={newLineForm.ledgerName}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, ledgerName: e.target.value }))}
+                  placeholder="e.g., Cash in Hand"
+                />
+              </div>
+              <div className="col-span-2 space-y-2">
+                <label className="text-sm font-medium">Primary Group *</label>
+                <Input
+                  value={newLineForm.primaryGroup}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, primaryGroup: e.target.value }))}
+                  placeholder="e.g., Cash-in-hand, Bank Accounts"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Opening Balance</label>
+                <Input
+                  type="number"
+                  value={newLineForm.openingBalance}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, openingBalance: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Closing Balance</label>
+                <Input
+                  type="number"
+                  value={newLineForm.closingBalance}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, closingBalance: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Debit</label>
+                <Input
+                  type="number"
+                  value={newLineForm.debit}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, debit: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Credit</label>
+                <Input
+                  type="number"
+                  value={newLineForm.credit}
+                  onChange={(e) => setNewLineForm(prev => ({ ...prev, credit: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="col-span-2 space-y-2">
+                <label className="text-sm font-medium">Period</label>
+                <Select 
+                  value={newLineForm.periodType} 
+                  onValueChange={(value: 'current' | 'previous') => setNewLineForm(prev => ({ ...prev, periodType: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current">Current Period</SelectItem>
+                    <SelectItem value="previous">Previous Period</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setIsAddLineDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleAddLineItem}
+                disabled={!newLineForm.ledgerName || !newLineForm.primaryGroup}
+              >
+                Add Line Item
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Signing Details Dialog */}
+      <Dialog open={isSigningDialogOpen} onOpenChange={setIsSigningDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Financial Statement Signing Details</DialogTitle>
+            <DialogDescription>
+              Optionally provide signing details to print on financial statement footer. All fields are optional.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Date (DD/MM/YYYY)</label>
+                <Input
+                  placeholder="DD/MM/YYYY"
+                  value={signingDetails.date}
+                  onChange={(e) => setSigningDetails(prev => ({ ...prev, date: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Place</label>
+                <Input
+                  placeholder="City name"
+                  value={signingDetails.place}
+                  onChange={(e) => setSigningDetails(prev => ({ ...prev, place: e.target.value }))}
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Signatory Partner Name</label>
+              <Input
+                placeholder="Partner name"
+                value={signingDetails.partnerName}
+                onChange={(e) => setSigningDetails(prev => ({ ...prev, partnerName: e.target.value }))}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Firm Name</label>
+              <Input
+                placeholder="Firm name"
+                value={signingDetails.firmName}
+                onChange={(e) => setSigningDetails(prev => ({ ...prev, firmName: e.target.value }))}
+              />
+            </div>
+            
+            <div className="text-sm text-muted-foreground bg-blue-50 border border-blue-200 p-3 rounded">
+              <p><strong>Note:</strong> All fields are optional. Leave blank to skip signing details on the report.</p>
+            </div>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setIsSigningDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => {
+                setIsSigningDialogOpen(false);
+                toast({
+                  title: 'Signing Details Saved',
+                  description: 'Your signing details will be printed on financial statements'
+                });
+                // Navigate to reports tab
+                setActiveTab('reports');
+              }}>
+                Save & Proceed to Reports
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

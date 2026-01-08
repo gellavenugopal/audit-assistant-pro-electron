@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { TrialBalanceLine } from '@/hooks/useTrialBalance';
 import {
   Table,
@@ -14,6 +14,25 @@ import {
   getFormatLabel,
   FSLineItem,
 } from '@/data/financialStatementFormats';
+import { LedgerAnnexureDialog } from './LedgerAnnexureDialog';
+import { FileText } from 'lucide-react';
+
+// Types for note values and ledger data
+interface NoteLedgerItem {
+  ledgerName: string;
+  groupName: string;
+  openingBalance: number;
+  closingBalance: number;
+  classification?: string;
+}
+
+type NoteLedgersMap = {
+  [noteKey: string]: NoteLedgerItem[];
+};
+
+type BSNoteValues = {
+  [key: string]: number | undefined;
+};
 
 interface Props {
   currentLines: TrialBalanceLine[];
@@ -21,12 +40,15 @@ interface Props {
   reportingScale?: string;
   constitution?: string;
   startingNoteNumber?: number;
+  noteValues?: BSNoteValues;
+  noteLedgers?: NoteLedgersMap;
 }
 
 interface DisplayLineItem extends FSLineItem {
   currentAmount: number;
   previousAmount: number;
   displayNoteNo?: string;
+  noteKey?: string;
 }
 
 export function ScheduleIIIBalanceSheet({ 
@@ -34,8 +56,14 @@ export function ScheduleIIIBalanceSheet({
   previousLines = [], 
   reportingScale = 'auto',
   constitution = 'company',
-  startingNoteNumber = 3
+  startingNoteNumber = 3,
+  noteValues = {},
+  noteLedgers = {}
 }: Props) {
+  // State for annexure dialog
+  const [annexureOpen, setAnnexureOpen] = useState(false);
+  const [selectedNote, setSelectedNote] = useState<string | null>(null);
+
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
     const sign = amount < 0 ? '-' : '';
@@ -77,15 +105,45 @@ export function ScheduleIIIBalanceSheet({
     }
   };
 
-  const hasPreviousPeriod = previousLines.length > 0;
+  const hasPreviousPeriod = previousLines && previousLines.length > 0;
   const formatLabel = getFormatLabel(constitution);
   const bsFormat = getBalanceSheetFormat(constitution);
 
+  // Map fsArea to noteKey
+  const fsAreaToNoteKey: Record<string, string> = {
+    'Equity': 'equity',
+    'Reserves': 'reserves',
+    'Share Warrants': 'shareWarrants',
+    'Share Application': 'shareApplication',
+    'Borrowings': 'borrowings',
+    'Deferred Tax': 'deferredTax',
+    'Other Long Term': 'otherLongTerm',
+    'Provisions': 'provisions',
+    'Short Term Borrowings': 'shortTermBorrowings',
+    'Payables MSME': 'payablesMSME',
+    'Payables': 'payables',
+    'Other Current Liabilities': 'otherCurrentLiabilities',
+    'Provisions Current': 'provisionsCurrent',
+    'Fixed Assets': 'fixedAssets',
+    'Intangible Assets': 'intangibleAssets',
+    'CWIP': 'cwip',
+    'Intangible Under Dev': 'intangibleUnderDev',
+    'Investments': 'investments',
+    'Deferred Tax Asset': 'deferredTaxAsset',
+    'Other Non-Current': 'otherNonCurrent',
+    'Current Investments': 'currentInvestments',
+    'Inventory': 'inventory',
+    'Receivables': 'receivables',
+    'Cash': 'cash',
+    'Other Current': 'otherCurrent',
+  };
+
   // Helper to get amount from lines by fs_area
   const getAmountByFsArea = (lines: TrialBalanceLine[], fsArea: string): number => {
+    if (!lines || !Array.isArray(lines)) return 0;
     return lines
-      .filter(l => l.fs_area === fsArea)
-      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+      .filter(l => l && l.fs_area === fsArea)
+      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   };
 
   // Build display items with amounts and note numbers
@@ -94,12 +152,21 @@ export function ScheduleIIIBalanceSheet({
     let noteCounter = startingNoteNumber;
 
     bsFormat.forEach(formatItem => {
-      const currentAmount = formatItem.fsArea 
-        ? getAmountByFsArea(currentLines, formatItem.fsArea) 
-        : 0;
-      const previousAmount = formatItem.fsArea 
-        ? getAmountByFsArea(previousLines, formatItem.fsArea) 
-        : 0;
+      let currentAmount = 0;
+      let previousAmount = 0;
+      let noteKey: string | undefined;
+
+      if (formatItem.fsArea) {
+        noteKey = fsAreaToNoteKey[formatItem.fsArea];
+        
+        // Use noteValues if available, otherwise fall back to trial balance calculation
+        if (noteKey && noteValues[noteKey] !== undefined) {
+          currentAmount = noteValues[noteKey] as number;
+        } else {
+          currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
+        }
+        previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
+      }
       
       // Only assign note number if there's a value in either period and it has an fsArea
       let displayNoteNo: string | undefined;
@@ -113,32 +180,41 @@ export function ScheduleIIIBalanceSheet({
         currentAmount,
         previousAmount,
         displayNoteNo,
+        noteKey,
       });
     });
 
     return items;
-  }, [bsFormat, currentLines, previousLines, startingNoteNumber]);
+  }, [bsFormat, currentLines, previousLines, startingNoteNumber, noteValues]);
 
   // Calculate totals
-  const totalAssets = currentLines
-    .filter(l => l.aile === 'Asset')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const totalAssets = (currentLines || [])
+    .filter(l => l && l.aile === 'Asset')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   
-  const totalLiabilities = currentLines
-    .filter(l => l.aile === 'Liability')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const totalLiabilities = (currentLines || [])
+    .filter(l => l && l.aile === 'Liability')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
 
-  const prevTotalAssets = previousLines
-    .filter(l => l.aile === 'Asset')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const prevTotalAssets = (previousLines || [])
+    .filter(l => l && l.aile === 'Asset')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   
-  const prevTotalLiabilities = previousLines
-    .filter(l => l.aile === 'Liability')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const prevTotalLiabilities = (previousLines || [])
+    .filter(l => l && l.aile === 'Liability')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+
+  const handleNoteClick = (noteKey: string) => {
+    if (noteKey && noteLedgers[noteKey] && noteLedgers[noteKey].length > 0) {
+      setSelectedNote(noteKey);
+      setAnnexureOpen(true);
+    }
+  };
 
   const renderRow = (item: DisplayLineItem, index: number) => {
     const isHeader = item.level === 0 || item.level === 1;
     const showAmount = item.fsArea || item.isTotal;
+    const hasAnnexure = item.noteKey && noteLedgers[item.noteKey] && noteLedgers[item.noteKey].length > 0;
     
     return (
       <TableRow key={index} className={cn(
@@ -155,7 +231,18 @@ export function ScheduleIIIBalanceSheet({
           {item.particulars}
         </TableCell>
         <TableCell className="text-center w-16">
-          {item.displayNoteNo}
+          {item.displayNoteNo && hasAnnexure ? (
+            <button
+              onClick={() => handleNoteClick(item.noteKey!)}
+              className="inline-flex items-center gap-1 text-primary hover:text-primary/80 hover:underline font-medium"
+              title="Click to view ledger-wise annexure"
+            >
+              {item.displayNoteNo}
+              <FileText className="h-3 w-3" />
+            </button>
+          ) : (
+            item.displayNoteNo
+          )}
         </TableCell>
         <TableCell className="text-right font-mono w-32">
           {showAmount ? formatCurrency(item.currentAmount) : ''}
@@ -170,16 +257,16 @@ export function ScheduleIIIBalanceSheet({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h2 className="text-xl font-bold">Balance Sheet</h2>
-        <p className="text-sm text-muted-foreground">{formatLabel}</p>
+    <div className="space-y-2">
+      <div className="text-center mb-2">
+        <h2 className="text-base font-semibold">Balance Sheet</h2>
+        <p className="text-xs text-muted-foreground">{formatLabel}</p>
         {reportingScale !== 'auto' && (
-          <p className="text-xs text-muted-foreground mt-1">{getScaleLabel()}</p>
+          <p className="text-[10px] text-muted-foreground">{getScaleLabel()}</p>
         )}
       </div>
 
-      <div className="audit-card p-0 overflow-hidden">
+      <div className="border rounded overflow-hidden">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -216,6 +303,14 @@ export function ScheduleIIIBalanceSheet({
           Total Assets: {formatCurrency(totalAssets)} | Total Liabilities: {formatCurrency(totalLiabilities)}
         </p>
       </div>
+
+      {/* Ledger Annexure Dialog */}
+      <LedgerAnnexureDialog
+        open={annexureOpen}
+        onOpenChange={setAnnexureOpen}
+        noteKey={selectedNote}
+        ledgers={selectedNote ? noteLedgers[selectedNote] || [] : []}
+      />
     </div>
   );
 }

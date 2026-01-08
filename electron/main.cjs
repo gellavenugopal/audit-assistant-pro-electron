@@ -99,13 +99,26 @@ function registerIpcHandlers() {
       console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
       console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
 
+      // First, get company name
+      let companyName = '';
+      try {
+        const companyQuery = `SELECT $Name FROM Company`;
+        const companyResult = await odbcConnection.query(companyQuery);
+        if (companyResult && companyResult.length > 0) {
+          companyName = companyResult[0]['$Name'] || '';
+          console.log(`Trial Balance: Company Name - ${companyName}`);
+        }
+      } catch (err) {
+        console.warn('Could not fetch company name:', err.message);
+      }
+
       const query = `
-      SELECT $Name, $_PrimaryGroup, $Parent, $IsRevenue, 
-             $OpeningBalance, $ClosingBalance, $DebitTotals, $CreditTotals,
-             $Code, $Branch
-      FROM Ledger
-      ORDER BY $_PrimaryGroup, $Name
-    `;
+        SELECT $Name, $_PrimaryGroup, $Parent, $IsRevenue, 
+               $OpeningBalance, $ClosingBalance, $DebitTotals, $CreditTotals,
+               $Code, $Branch
+        FROM Ledger
+        ORDER BY $_PrimaryGroup, $Name
+      `;
 
       const result = await odbcConnection.query(query);
 
@@ -133,7 +146,7 @@ function registerIpcHandlers() {
 
       console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
 
-      return { success: true, data: processedData };
+      return { success: true, data: processedData, companyName };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -702,6 +715,50 @@ function registerIpcHandlers() {
       return { success: false, error: error.message };
     }
   });
+
+ipcMain.handle('odbc-fetch-stock-items', async () => {
+  try {
+    if (!odbcConnection) {
+      return { success: false, error: 'Not connected to Tally ODBC' };
+    }
+    
+    // Query stock items from Tally
+    const query = `
+      SELECT 
+        $Name,
+        $Parent,
+        $_PrimaryGroup,
+        $OpeningValue,
+        $ClosingValue
+      FROM StockItem
+      ORDER BY $Parent, $Name
+    `;
+    
+    const result = await odbcConnection.query(query);
+    console.log(`Stock Items: Fetched ${result.length} stock items`);
+    
+    if (!result || result.length === 0) {
+      return { success: true, items: [] };
+    }
+    
+    // Process stock items
+    const items = result.map(row => ({
+      'Item Name': row['$Name'] || '',
+      'Stock Group': row['$Parent'] || '',
+      'Primary Group': row['$_PrimaryGroup'] || '',
+      'Opening Value': parseFloat(row['$OpeningValue']) || 0,
+      'Closing Value': parseFloat(row['$ClosingValue']) || 0,
+      'Stock Category': '', // Will be classified by user
+      'Composite Key': `STOCK|${row['$Name'] || ''}`
+    }));
+    
+    console.log(`Stock Items: Processed ${items.length} items`);
+    return { success: true, items };
+  } catch (error) {
+    console.error('Error fetching stock items:', error);
+    return { success: false, error: error.message };
+  }
+});
 }
 
 function createWindow() {
@@ -730,7 +787,8 @@ function createWindow() {
   // Load the app
   if (isDev) {
     // In development, load from Vite dev server
-    mainWindow.loadURL('http://localhost:8080');
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:8080';
+    mainWindow.loadURL(devServerUrl);
   } else {
     // In production, load the built files
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));

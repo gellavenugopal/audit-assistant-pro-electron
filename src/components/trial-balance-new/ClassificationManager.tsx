@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/table';
 import { ClassificationResult, generateLedgerKey } from '@/services/trialBalanceNewClassification';
 import { Trash2, Plus, Search } from 'lucide-react';
+import { H1_OPTIONS, getH2Options, getH3Options, getH4Options } from '@/data/classificationOptions';
 
 interface Props {
   open: boolean;
@@ -34,107 +35,6 @@ interface Props {
   onSaveMapping: (compositeKey: string, classification: ClassificationResult) => void;
   onDeleteMapping: (compositeKey: string) => void;
 }
-
-// H1 Options
-const H1_OPTIONS = ['Balance Sheet', 'P&L Account'];
-
-// H2 Options based on H1
-const H2_OPTIONS: Record<string, string[]> = {
-  'Balance Sheet': ['Assets', 'Liabilities', 'Equity'],
-  'P&L Account': ['Income', 'Expenses'],
-};
-
-// H3 Options based on H2
-const H3_OPTIONS: Record<string, string[]> = {
-  'Assets': [
-    'PPE & IA (Net)',
-    'Investments',
-    'Deferred Tax (Net)',
-    'Loans and Advances',
-    'Trade Receivables',
-    'Cash and Bank Balance',
-    'Other Current Assets',
-    'Other Non-Current Assets',
-  ],
-  'Liabilities': [
-    'Borrowings',
-    'Deferred Tax (Net)',
-    'Trade Payables',
-    'Provisions',
-    'Other Current Liabilities',
-    'Other Non-Current Liabilities',
-  ],
-  'Equity': [
-    'Share Capital',
-    'Reserves and Surplus',
-  ],
-  'Income': [
-    'Revenue from Operations',
-    'Other Income',
-  ],
-  'Expenses': [
-    'Cost of Goods Sold',
-    'Employee Benefits Expenses',
-    'Finance Costs',
-    'Depreciation and Amortization Expense',
-    'Other Expenses',
-    'Other Profit and Loss Items',
-  ],
-};
-
-// H4 Options based on H3
-const H4_OPTIONS: Record<string, string[]> = {
-  'Trade Receivables': [
-    'Secured Considered Good',
-    'Unsecured Considered Good',
-    'Doubtful',
-  ],
-  'Cash and Bank Balance': [
-    'Cash on Hand',
-    'Balances with Scheduled Banks in Current Account',
-    'Balances with Scheduled Banks in Savings Account',
-  ],
-  'Borrowings': [
-    'Secured Term Loans from Banks',
-    'Unsecured Term Loans from Banks',
-    'Working Capital Loan from Banks',
-  ],
-  'Trade Payables': [
-    'MSME',
-    'Non-MSME',
-  ],
-  'Share Capital': [
-    'Equity Share Capital',
-    'Preference Share Capital',
-  ],
-  'Reserves and Surplus': [
-    'Capital Reserve',
-    'Securities Premium',
-    'General Reserve',
-    'Retained Earnings',
-  ],
-  'Revenue from Operations': [
-    'Sale of Products',
-    'Sale of Services',
-    'Other Operating Revenues (specify nature)',
-  ],
-  'Other Income': [
-    'Interest Income',
-    'Dividend Income',
-    'Profit on Sale of Investments',
-  ],
-  'Other Expenses': [
-    'Rent',
-    'Rates and Taxes',
-    'Repairs and Maintenance - Building',
-    'Insurance',
-    'Telephone and Internet',
-    'Legal and Professional Fees',
-    'Advertisement and Publicity',
-    'Travelling and Conveyance',
-    'Miscellaneous Expenses',
-  ],
-};
 
 export function ClassificationManager({ 
   open, 
@@ -170,9 +70,9 @@ export function ClassificationManager({
     );
   }, [savedMappings, searchTerm]);
 
-  const availableH2Options = h1 ? (H2_OPTIONS[h1] || []) : [];
-  const availableH3Options = h2 ? (H3_OPTIONS[h2] || []) : [];
-  const availableH4Options = h3 ? (H4_OPTIONS[h3] || []) : [];
+  const availableH2Options = h1 ? getH2Options(h1) : [];
+  const availableH3Options = h2 ? getH3Options(h2) : [];
+  const availableH4Options = h3 ? getH4Options(h3) : [];
 
   const handleAdd = () => {
     if (!ledgerName || !primaryGroup || !h1 || !h2) {

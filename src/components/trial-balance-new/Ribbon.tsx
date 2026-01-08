@@ -31,6 +31,7 @@ interface RibbonProps {
   onToDateChange: (date: string) => void;
   onTallyImport: () => void;
   onExcelImport: () => void;
+  onExportTemplate: () => void;
   isConnecting: boolean;
   isConnected: boolean;
   
@@ -57,6 +58,7 @@ export function Ribbon({
   onToDateChange,
   onTallyImport,
   onExcelImport,
+  onExportTemplate,
   isConnecting,
   isConnected,
   onAutoClassify,
@@ -133,7 +135,7 @@ export function Ribbon({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [hasData, selectedCount, onExcelImport, onSave, onExcelExport, onAutoClassify, onBulkUpdate, onClassificationManager, onFinancialStatements]);
+  }, [hasData, selectedCount, onExcelImport, onExportTemplate, onSave, onExcelExport, onAutoClassify, onBulkUpdate, onClassificationManager, onFinancialStatements]);
 
   return (
     <div className="border-b bg-white shadow-sm">
@@ -195,6 +197,16 @@ export function Ribbon({
                 <Button
                   variant="ghost"
                   size="sm"
+                  onClick={onExportTemplate}
+                  className="h-8 px-3"
+                  title="Download Import Template"
+                >
+                  <Download className="w-4 h-4 mr-1" />
+                  Template
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={onExcelExport}
                   disabled={!hasData}
                   className="h-8 px-3"
@@ -249,39 +261,10 @@ export function Ribbon({
               </div>
             </div>
 
-            {/* Reports Group */}
-            <div className="flex flex-col border-r pr-4">
-              <Label className="text-xs text-gray-500 mb-1 px-2">Reports</Label>
-              <div className="flex gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onFinancialStatements}
-                  disabled={!hasData}
-                  className="h-8 px-3"
-                  title="Financial Statements (Ctrl+F)"
-                >
-                  <BarChart3 className="w-4 h-4 mr-1" />
-                  Fin. Statements
-                </Button>
-              </div>
-            </div>
-
             {/* File Group */}
             <div className="flex flex-col">
               <Label className="text-xs text-gray-500 mb-1 px-2">File</Label>
               <div className="flex gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onSave}
-                  disabled={!hasData}
-                  className="h-8 px-3"
-                  title="Save (Ctrl+S)"
-                >
-                  <Save className="w-4 h-4 mr-1" />
-                  Save
-                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -379,6 +362,16 @@ export function Ribbon({
                 >
                   <Upload className="w-3 h-3 mr-1" />
                   Excel
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onExportTemplate}
+                  className="h-7 px-3"
+                  title="Download Import Template"
+                >
+                  <Download className="w-3 h-3 mr-1" />
+                  Template
                 </Button>
               </div>
             </div>

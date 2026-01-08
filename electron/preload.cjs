@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Month wise and GST methods
   odbcFetchMonthWiseData: (data) => ipcRenderer.invoke('odbc-fetch-month-wise-data', data),
   odbcFetchGSTNotFeeded: () => ipcRenderer.invoke('odbc-fetch-gst-not-feeded'),
+  // Stock Items methods
+  odbcFetchStockItems: () => ipcRenderer.invoke('odbc-fetch-stock-items'),
 });
 
 // Log when preload script is loaded

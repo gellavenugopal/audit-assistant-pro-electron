@@ -7,6 +7,8 @@ import { FileText, ClipboardCheck, Settings, Download, AlertTriangle } from 'luc
 import { AuditReportSetup } from '@/components/audit-report/AuditReportSetup';
 import { CARONavigator } from '@/components/audit-report/CARONavigator';
 import { MainReportEditor } from '@/components/audit-report/MainReportEditor';
+import { IFCNavigator } from '@/components/audit-report/IFCNavigator';
+import { IFCReportEditor } from '@/components/audit-report/IFCReportEditor';
 import { ReportExport } from '@/components/audit-report/ReportExport';
 import { useAuditReportSetup } from '@/hooks/useAuditReportSetup';
 import { formatFinancialYearAsReportDate } from '@/utils/dateFormatting';
@@ -71,7 +73,7 @@ export default function AuditReport() {
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="setup" className="gap-2">
             <Settings className="h-4 w-4" />
             Setup
@@ -79,6 +81,10 @@ export default function AuditReport() {
           <TabsTrigger value="caro" className="gap-2" disabled={!setup?.setup_completed}>
             <ClipboardCheck className="h-4 w-4" />
             CARO 2020
+          </TabsTrigger>
+          <TabsTrigger value="ifc" className="gap-2" disabled={!setup?.setup_completed || !setup?.ifc_applicable}>
+            <FileText className="h-4 w-4" />
+            IFC Report
           </TabsTrigger>
           <TabsTrigger value="main-report" className="gap-2" disabled={!setup?.setup_completed}>
             <FileText className="h-4 w-4" />
@@ -115,6 +121,26 @@ export default function AuditReport() {
             <Card>
               <CardContent className="py-10 text-center">
                 <p className="text-muted-foreground">Complete the setup first to access CARO reporting.</p>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="ifc">
+          {setup?.setup_completed && setup?.ifc_applicable ? (
+            <IFCReportEditor
+              engagementId={currentEngagement.id}
+              clientName={currentEngagement.client_name}
+              financialYear={formatFinancialYearAsReportDate(currentEngagement.financial_year)}
+            />
+          ) : (
+            <Card>
+              <CardContent className="py-10 text-center">
+                <p className="text-muted-foreground">
+                  {!setup?.setup_completed 
+                    ? 'Complete the setup first to access IFC reporting.'
+                    : 'IFC reporting is not applicable for this engagement.'}
+                </p>
               </CardContent>
             </Card>
           )}
