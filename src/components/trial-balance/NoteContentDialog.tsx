@@ -1,10 +1,8 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CostOfMaterialsConsumedNote } from './CostOfMaterialsConsumedNote';
 import { ChangesInInventoriesNote } from './ChangesInInventoriesNote';
 import { LedgerAnnexureContent } from './LedgerAnnexureDialog';
 import { NoteLedgerItem } from './ScheduleIIIProfitLoss';
-import { useState } from 'react';
 
 interface StockItem {
   'Item Name': string;
@@ -89,8 +87,6 @@ export function NoteContentDialog({
   ledgerData,
   reportingScale = 'auto',
 }: Props) {
-  const [viewTab, setViewTab] = useState<'note' | 'ledgers'>('note');
-  
   if (!noteKey) return null;
 
   const noteConfig = NOTE_COMPONENTS[noteKey];
@@ -148,23 +144,7 @@ export function NoteContentDialog({
         </DialogHeader>
 
         {hasNoteComponent ? (
-          <Tabs value={viewTab} onValueChange={(v) => setViewTab(v as 'note' | 'ledgers')}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="note">Note View</TabsTrigger>
-              <TabsTrigger value="ledgers">Ledger Details ({ledgers.length})</TabsTrigger>
-            </TabsList>
-            <TabsContent value="note" className="mt-0">
-              {renderNoteComponent()}
-            </TabsContent>
-            <TabsContent value="ledgers" className="mt-0">
-              <LedgerAnnexureContent
-                ledgers={ledgers}
-                total={total}
-                formatCurrency={formatCurrency}
-                onExport={() => {}}
-              />
-            </TabsContent>
-          </Tabs>
+          renderNoteComponent()
         ) : (
           <div>
             <p className="text-sm text-muted-foreground mb-4">

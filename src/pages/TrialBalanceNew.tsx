@@ -1666,13 +1666,13 @@ export default function TrialBalanceNew() {
       {/* Consolidated Header - Two Compact Rows */}
       
       {/* Row 1: Actions + Date + Status */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white border-b">
+      <div className="flex items-center justify-between px-2 py-1 bg-white border-b" style={{ minHeight: '32px' }}>
         {/* Left: Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {/* Import Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8">
+              <Button variant="outline" size="sm" className="h-6 text-xs px-2">
                 <Upload className="w-3 h-3 mr-1.5" />
                 Import
                 <ChevronDown className="w-3 h-3 ml-1" />
@@ -1879,11 +1879,11 @@ export default function TrialBalanceNew() {
       </div>
 
       {/* Row 2: Company Info */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-gray-50 to-white border-b">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between px-2 py-1 bg-gradient-to-r from-gray-50 to-white border-b" style={{ minHeight: '28px' }}>
+        <div className="flex items-center gap-2">
           {/* Company Name - Large & Bold */}
           <div className="flex items-baseline gap-2">
-            <h1 className="text-lg font-bold text-gray-900">
+            <h1 className="text-sm font-bold text-gray-900">
               {entityName ? entityName.replace(/\s*\(from[^)]+\)/, '') : 'No Company Selected'}
             </h1>
             {entityName && entityName.includes('(from') && (
@@ -1930,15 +1930,15 @@ export default function TrialBalanceNew() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Modern Filter Bar */}
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b">
+        <div className="flex items-center gap-2 px-2 py-1 bg-white border-b" style={{ minHeight: '32px' }}>
           {/* Search */}
           <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
             <Input
               placeholder="Search ledgers, groups, classifications..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="h-9 pl-9 text-sm"
+              className="h-6 pl-7 text-xs"
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   setSearchTerm('');
@@ -2041,7 +2041,7 @@ export default function TrialBalanceNew() {
         </div>
         
         {/* Totals Bar */}
-        <div className="flex items-center justify-end gap-6 px-4 py-1.5 bg-gray-50 border-b text-xs">
+        <div className="flex items-center justify-end gap-4 px-2 py-0.5 bg-gray-50 border-b text-[10px]" style={{ minHeight: '20px' }}>
           <span className="text-muted-foreground">Opening: <strong className="text-foreground font-semibold">{formatNumber(totals.opening)}</strong></span>
           <span className="text-muted-foreground">Debit: <strong className="text-foreground font-semibold">{formatNumber(totals.debit)}</strong></span>
           <span className="text-muted-foreground">Credit: <strong className="text-foreground font-semibold">{formatNumber(totals.credit)}</strong></span>
@@ -2051,58 +2051,58 @@ export default function TrialBalanceNew() {
         {/* Modern Tabs Navigation */}
         <div className="bg-white border-b">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="h-10 bg-transparent border-b-0 px-4 gap-1 rounded-none justify-start">
+            <TabsList className="h-7 bg-transparent border-b-0 px-2 gap-0 rounded-none justify-start">
               <TabsTrigger 
                 value="actual-tb"
-                className="relative data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-10 px-4"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Actual TB
               </TabsTrigger>
               <TabsTrigger 
                 value="classified-tb"
-                className="relative data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-10 px-4"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Classified TB
               </TabsTrigger>
               <TabsTrigger 
                 value="stock-items"
-                className="relative data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-10 px-4"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <Package className="w-4 h-4 mr-2" />
+                <Package className="w-3 h-3 mr-1" />
                 Stock Items
                 {stockItemCount.total > 0 && (
-                  <span className="ml-1 text-xs text-gray-500">
-                    ({stockItemCount.filtered} of {stockItemCount.total})
+                  <span className="ml-1 text-[10px] text-gray-500">
+                    ({stockItemCount.filtered}/{stockItemCount.total})
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger 
                 value="reports"
-                className="relative data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-10 px-4"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <FileText className="w-4 h-4 mr-2" />
+                <FileText className="w-3 h-3 mr-1" />
                 Financial Statements
               </TabsTrigger>
               <TabsTrigger 
                 value="notes"
-                className="relative data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-10 px-4"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
               >
-                <FileText className="w-4 h-4 mr-2" />
+                <FileText className="w-3 h-3 mr-1" />
                 Notes
               </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
 
-        {/* Content Area - Increased to 75vh for better space usage */}
-        <div className="flex-1 overflow-auto" style={{ minHeight: '75vh' }}>
+        {/* Content Area - Maximized for table display */}
+        <div className="flex-1 overflow-auto" style={{ height: 'calc(100vh - 160px)' }}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             
             {/* ACTUAL TRIAL BALANCE TAB */}
-            <TabsContent value="actual-tb" className="mt-0 p-4">
-              <div className="border rounded-lg overflow-hidden">
+            <TabsContent value="actual-tb" className="mt-0 p-1">
+              <div className="border rounded overflow-hidden" style={{ height: 'calc(100vh - 180px)' }}>
             <Table>
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
