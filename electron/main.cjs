@@ -123,9 +123,7 @@ function registerIpcHandlers() {
     
     const toDateFormatted = formatDateForTally(toDate);
     console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
-    console.log('⚠️ IMPORTANT: Tally ODBC returns balances as of Tally\'s CURRENT DATE setting.');
-    console.log('⚠️ Please ensure Tally is set to the "To Date" (' + toDateFormatted + ') before fetching.');
-    console.log('⚠️ If Tally\'s date doesn\'t match, the balances will be incorrect.');
+    console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
     
     // First, get company name
     let companyName = '';
@@ -214,115 +212,33 @@ function registerIpcHandlers() {
       ORDER BY $_PrimaryGroup, $Name
     `;
     
-    console.log('Trial Balance: Executing query...');
     const result = await odbcConnection.query(query);
-    console.log(`Trial Balance: Raw query returned ${result ? result.length : 0} rows`);
-    
-    if (!result || result.length === 0) {
-      console.warn('Trial Balance: No data returned from query');
-      return { success: false, error: 'No data returned from Tally. Please check your connection and ensure Tally has ledger data.' };
-    }
-    
-    // Log sample row for debugging
-    if (result.length > 0) {
-      console.log('Trial Balance: Sample row keys:', Object.keys(result[0]));
-      console.log('Trial Balance: Sample row:', JSON.stringify(result[0], null, 2));
-      
-      // Check if we're getting actual data or zeros
-      const sampleRow = result[0];
-      const sampleOpening = parseNumeric(sampleRow['$OpeningBalance'] || sampleRow['OpeningBalance']);
-      const sampleDebit = parseNumeric(sampleRow['$DebitTotals'] || sampleRow['DebitTotals']);
-      const sampleCredit = parseNumeric(sampleRow['$CreditTotals'] || sampleRow['CreditTotals']);
-      const sampleClosing = parseNumeric(sampleRow['$ClosingBalance'] || sampleRow['ClosingBalance']);
-      
-      console.log('Trial Balance: Sample values - Opening:', sampleOpening, 'Debit:', sampleDebit, 'Credit:', sampleCredit, 'Closing:', sampleClosing);
-      
-      // Warn if all zeros
-      if (Math.abs(sampleOpening) < 0.01 && Math.abs(sampleDebit) < 0.01 && Math.abs(sampleCredit) < 0.01 && Math.abs(sampleClosing) < 0.01) {
-        console.warn('⚠️ WARNING: Sample row has all zero balances. This might indicate:');
-        console.warn('   1. Tally\'s date is not set to the correct period');
-        console.warn('   2. The selected accounts have no transactions');
-        console.warn('   3. Data parsing issue');
-      }
-    }
     
     // Process the data to match the Excel template format
-    // Parse numeric values properly - Tally may return strings with commas
+    // Parse numeric values properly - Tally may return strings
     const parseNumeric = (val) => {
       if (val === null || val === undefined || val === '') return 0;
-      // Handle string numbers with commas (e.g., "1,23,456.78")
-      const cleaned = String(val).replace(/,/g, '').trim();
-      const num = parseFloat(cleaned);
+      const num = parseFloat(val);
       return isNaN(num) ? 0 : num;
     };
     
-    const processedData = result
-      .map(row => {
-        // Ensure we have at least a name
-        const accountHead = row['$Name'] || row['Name'] || '';
-        if (!accountHead.trim()) {
-          return null; // Skip rows without names
-        }
-        
-        return {
-          accountHead: accountHead,
-          openingBalance: parseNumeric(row['$OpeningBalance'] || row['OpeningBalance']),
-          totalDebit: Math.abs(parseNumeric(row['$DebitTotals'] || row['DebitTotals'])), // Ensure positive
-          totalCredit: Math.abs(parseNumeric(row['$CreditTotals'] || row['CreditTotals'])), // Ensure positive
-          closingBalance: parseNumeric(row['$ClosingBalance'] || row['ClosingBalance']),
-          accountCode: row['$Code'] || row['Code'] || '',
-          branch: row['$Branch'] || row['Branch'] || 'HO',
-          // Add hierarchy data
-          primaryGroup: row['$_PrimaryGroup'] || row['_PrimaryGroup'] || row['PrimaryGroup'] || '',
-          parent: row['$Parent'] || row['Parent'] || '',
-          isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1 || row['$IsRevenue'] === '1',
-        };
-      })
-      .filter(row => row !== null); // Remove null entries
+    const processedData = result.map(row => ({
+      accountHead: row['$Name'] || '',
+      openingBalance: parseNumeric(row['$OpeningBalance']),
+      totalDebit: parseNumeric(row['$DebitTotals']),
+      totalCredit: parseNumeric(row['$CreditTotals']),
+      closingBalance: parseNumeric(row['$ClosingBalance']),
+      accountCode: row['$Code'] || '',
+      branch: row['$Branch'] || 'HO',
+      // Add hierarchy data
+      primaryGroup: row['$_PrimaryGroup'] || '',
+      parent: row['$Parent'] || '',
+      isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
+    }));
     
-    // Filter out accounts where all balances are zero (optional - can be removed if you want all accounts)
-    // This matches the Python reference code behavior
-    const filteredData = processedData.filter(row => {
-      const allZero = 
-        Math.abs(row.openingBalance) < 0.01 &&
-        Math.abs(row.totalDebit) < 0.01 &&
-        Math.abs(row.totalCredit) < 0.01 &&
-        Math.abs(row.closingBalance) < 0.01;
-      return !allZero;
-    });
+    console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
     
-    console.log(`Trial Balance: Processed ${processedData.length} ledgers, ${filteredData.length} with non-zero balances`);
-    
-    // Validate data completeness
-    if (filteredData.length === 0 && processedData.length > 0) {
-      console.warn('⚠️ WARNING: All accounts have zero balances - this might indicate:');
-      console.warn('   1. Tally\'s date is not set to the correct period (' + toDateFormatted + ')');
-      console.warn('   2. No transactions exist for the selected period');
-      console.warn('   3. Data filtering is too strict');
-    }
-    
-    // Check if we have meaningful data
-    const accountsWithData = filteredData.filter(row => 
-      Math.abs(row.openingBalance) > 0.01 || 
-      Math.abs(row.totalDebit) > 0.01 || 
-      Math.abs(row.totalCredit) > 0.01 || 
-      Math.abs(row.closingBalance) > 0.01
-    );
-    
-    if (accountsWithData.length === 0 && filteredData.length > 0) {
-      console.warn('⚠️ WARNING: All accounts have zero balances. Please verify:');
-      console.warn('   - Tally is set to date: ' + toDateFormatted);
-      console.warn('   - The company has transactions for this period');
-    }
-    
-    return { 
-      success: true, 
-      data: filteredData, 
-      companyName: companyName,
-      warning: (accountsWithData.length === 0 && filteredData.length > 0) 
-        ? `All accounts show zero balances. Please ensure Tally is set to date ${toDateFormatted} before fetching.`
-        : null
-    };
+    return { success: true, data: processedData, companyName: companyName };
   } catch (error) {
     return { success: false, error: error.message };
   }

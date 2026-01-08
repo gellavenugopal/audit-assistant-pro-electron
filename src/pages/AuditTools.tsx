@@ -182,15 +182,6 @@ const TallyTools = () => {
   };
 
   const handleFetchTrialBalance = async () => {
-    if (!isConnected) {
-      toast({
-        title: "Not Connected",
-        description: "Please connect to Tally ODBC first",
-        variant: "destructive",
-      });
-      return;
-    }
-    
     setIsFetchingTB(true);
     try {
       const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
@@ -200,13 +191,6 @@ const TallyTools = () => {
           title: "Trial Balance Fetched",
           description: `Retrieved ${lines.length} ledger accounts from Tally`,
         });
-      } else {
-        toast({
-          title: "No Data Found",
-          description: "No trial balance data was returned from Tally. Please check your connection and date range.",
-          variant: "destructive",
-        });
-        setFetchedTBData([]);
       }
     } catch (error) {
       toast({
@@ -214,7 +198,6 @@ const TallyTools = () => {
         description: error instanceof Error ? error.message : "Unknown error",
         variant: "destructive",
       });
-      setFetchedTBData([]);
     } finally {
       setIsFetchingTB(false);
     }
@@ -694,15 +677,6 @@ const TallyTools = () => {
     }).format(value);
   };
 
-  // Calculate totals for Trial Balance
-  const totalOpeningBalance = fetchedTBData?.reduce((sum, line) => sum + line.openingBalance, 0) || 0;
-  const totalDebit = fetchedTBData?.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0) || 0;
-  const totalCredit = fetchedTBData?.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0) || 0;
-  const totalClosingBalance = fetchedTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
-  
-  // Verification: Closing should equal Opening + Debit - Credit
-  const totalClosingBalanceSum = totalClosingBalance;
-  const totalClosingBalanceCalculated = totalOpeningBalance + totalDebit - totalCredit;
   // Filter Trial Balance data based on search term
   const filteredTBData = useMemo(() => {
     if (!fetchedTBData) return null;
@@ -962,15 +936,6 @@ const TallyTools = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <Alert variant="warning" className="mb-4">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Important:</strong> Tally ODBC returns balances as of Tally's <strong>current date setting</strong>, not the selected date range.
-              <br />
-              <strong>Before fetching:</strong> Please set Tally's date to the <strong>"To Date"</strong> ({tbToDate}) to get accurate balances for the selected period.
-            </AlertDescription>
-          </Alert>
-
           <div className="space-y-4">
             {/* Period Selection */}
             <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
@@ -994,7 +959,7 @@ const TallyTools = () => {
                   className="w-40"
                 />
               </div>
-              <Button onClick={handleFetchTrialBalance} disabled={isFetchingTB || !isConnected}>
+              <Button onClick={handleFetchTrialBalance} disabled={isFetchingTB}>
                 {isFetchingTB ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1079,7 +1044,6 @@ const TallyTools = () => {
                     </tbody>
                     <tfoot className="bg-muted font-medium sticky bottom-0">
                       <tr className="border-t-2">
-                        <td className="p-2 font-medium">Total:</td>
                         <td className="p-2 text-right font-medium">Total:</td>
                         <td className="p-2 text-right font-mono">{formatCurrency(totalOpeningBalance)}</td>
                         <td className="p-2 text-right font-mono">{formatCurrency(totalDebit)}</td>
@@ -1095,7 +1059,6 @@ const TallyTools = () => {
                 <div className="p-4 border-t bg-muted/30">
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-sm text-muted-foreground">
-                      {fetchedTBData.length} accounts
                       {tbSearchTerm ? (
                         <>
                           {filteredTBData?.length || 0} of {fetchedTBData.length} accounts
@@ -1171,6 +1134,31 @@ const TallyTools = () => {
                         return null;
                       })()}
                     </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setFetchedTBData(null)}>
+                      Clear
+                    </Button>
+                    <Button variant="outline" onClick={handleExportToExcel}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export to Excel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (!currentEngagement) {
+                          toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
+                          return;
+                        }
+                        toast({
+                          title: "Save to Trial Balance",
+                          description: "Navigate to Trial Balance page and use Import to save this data"
+                        });
+                        setShowTBDialog(false);
+                      }}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Use in Trial Balance
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -1315,10 +1303,6 @@ const TallyTools = () => {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Month wise Data Dialog */}
-      <Dialog open={showMonthWiseDialog} onOpenChange={setShowMonthWiseDialog}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5" />
