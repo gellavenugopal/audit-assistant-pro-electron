@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const odbc = require('odbc');
 
@@ -6,6 +6,25 @@ const isDev = process.env.NODE_ENV === 'development' || (app && !app.isPackaged)
 
 // ODBC connection handling
 let odbcConnection = null;
+
+function setAppMenu() {
+  const template = [
+    {
+      label: '&File',
+      submenu: [
+        { role: 'close', label: 'Close Window' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Exit', accelerator: 'Alt+F+X' },
+      ],
+    },
+    { label: '&Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+    { label: '&View', submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+    { label: '&Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
+    { label: '&Help', submenu: [{ role: 'about' }] },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function registerIpcHandlers() {
   const { ipcMain } = require('electron');
@@ -799,6 +818,7 @@ function createWindow() {
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
   console.log('Electron app ready - IPC handlers should be registered');
+  setAppMenu();
   registerIpcHandlers();
   createWindow();
 
