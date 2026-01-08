@@ -130,7 +130,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion]);
 
   useEffect(() => {
-    // Auto-populate and persist illustrative basis into existing drafts when missing (qualified/adverse)
+    // Auto-populate and persist illustrative basis into existing drafts when missing (qualified/adverse/disclaimer)
     if (!draft) return;
     const shouldPopulate = (type: AuditReportMainContent['opinion_type']) =>
       draft.opinion_type === type && !(draft.basis_for_opinion?.trim()) && draft.id !== savedExampleForDraftId;

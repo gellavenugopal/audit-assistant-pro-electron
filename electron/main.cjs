@@ -100,6 +100,35 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('odbc-fetch-trial-balance', async (event, fromDate, toDate) => {
+  try {
+    if (!odbcConnection) {
+      return { success: false, error: 'Not connected to Tally ODBC' };
+    }
+    
+    // Note: Tally ODBC doesn't directly support date filtering in SELECT queries
+    // The balances returned are as of the current Tally date setting
+    // To get period-specific balances, Tally's date should be set before querying
+    // For now, we fetch all ledgers - the balances reflect Tally's current date context
+    
+    // Convert dates to Tally format (DD-MMM-YYYY) for potential future use
+    const formatDateForTally = (dateStr) => {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = months[d.getMonth()];
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
+    
+    const toDateFormatted = formatDateForTally(toDate);
+    console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
+    console.log('⚠️ IMPORTANT: Tally ODBC returns balances as of Tally\'s CURRENT DATE setting.');
+    console.log('⚠️ Please ensure Tally is set to the "To Date" (' + toDateFormatted + ') before fetching.');
+    console.log('⚠️ If Tally\'s date doesn\'t match, the balances will be incorrect.');
+    
+    // First, get company name
+    let companyName = '';
     try {
       if (!odbcConnection) {
         return { success: false, error: 'Not connected to Tally ODBC' };
@@ -176,6 +205,128 @@ function registerIpcHandlers() {
     } catch (error) {
       return { success: false, error: error.message };
     }
+    
+    const query = `
+      SELECT $Name, $_PrimaryGroup, $Parent, $IsRevenue, 
+             $OpeningBalance, $ClosingBalance, $DebitTotals, $CreditTotals,
+             $Code, $Branch
+      FROM Ledger
+      ORDER BY $_PrimaryGroup, $Name
+    `;
+    
+    console.log('Trial Balance: Executing query...');
+    const result = await odbcConnection.query(query);
+    console.log(`Trial Balance: Raw query returned ${result ? result.length : 0} rows`);
+    
+    if (!result || result.length === 0) {
+      console.warn('Trial Balance: No data returned from query');
+      return { success: false, error: 'No data returned from Tally. Please check your connection and ensure Tally has ledger data.' };
+    }
+    
+    // Log sample row for debugging
+    if (result.length > 0) {
+      console.log('Trial Balance: Sample row keys:', Object.keys(result[0]));
+      console.log('Trial Balance: Sample row:', JSON.stringify(result[0], null, 2));
+      
+      // Check if we're getting actual data or zeros
+      const sampleRow = result[0];
+      const sampleOpening = parseNumeric(sampleRow['$OpeningBalance'] || sampleRow['OpeningBalance']);
+      const sampleDebit = parseNumeric(sampleRow['$DebitTotals'] || sampleRow['DebitTotals']);
+      const sampleCredit = parseNumeric(sampleRow['$CreditTotals'] || sampleRow['CreditTotals']);
+      const sampleClosing = parseNumeric(sampleRow['$ClosingBalance'] || sampleRow['ClosingBalance']);
+      
+      console.log('Trial Balance: Sample values - Opening:', sampleOpening, 'Debit:', sampleDebit, 'Credit:', sampleCredit, 'Closing:', sampleClosing);
+      
+      // Warn if all zeros
+      if (Math.abs(sampleOpening) < 0.01 && Math.abs(sampleDebit) < 0.01 && Math.abs(sampleCredit) < 0.01 && Math.abs(sampleClosing) < 0.01) {
+        console.warn('⚠️ WARNING: Sample row has all zero balances. This might indicate:');
+        console.warn('   1. Tally\'s date is not set to the correct period');
+        console.warn('   2. The selected accounts have no transactions');
+        console.warn('   3. Data parsing issue');
+      }
+    }
+    
+    // Process the data to match the Excel template format
+    // Parse numeric values properly - Tally may return strings with commas
+    const parseNumeric = (val) => {
+      if (val === null || val === undefined || val === '') return 0;
+      // Handle string numbers with commas (e.g., "1,23,456.78")
+      const cleaned = String(val).replace(/,/g, '').trim();
+      const num = parseFloat(cleaned);
+      return isNaN(num) ? 0 : num;
+    };
+    
+    const processedData = result
+      .map(row => {
+        // Ensure we have at least a name
+        const accountHead = row['$Name'] || row['Name'] || '';
+        if (!accountHead.trim()) {
+          return null; // Skip rows without names
+        }
+        
+        return {
+          accountHead: accountHead,
+          openingBalance: parseNumeric(row['$OpeningBalance'] || row['OpeningBalance']),
+          totalDebit: Math.abs(parseNumeric(row['$DebitTotals'] || row['DebitTotals'])), // Ensure positive
+          totalCredit: Math.abs(parseNumeric(row['$CreditTotals'] || row['CreditTotals'])), // Ensure positive
+          closingBalance: parseNumeric(row['$ClosingBalance'] || row['ClosingBalance']),
+          accountCode: row['$Code'] || row['Code'] || '',
+          branch: row['$Branch'] || row['Branch'] || 'HO',
+          // Add hierarchy data
+          primaryGroup: row['$_PrimaryGroup'] || row['_PrimaryGroup'] || row['PrimaryGroup'] || '',
+          parent: row['$Parent'] || row['Parent'] || '',
+          isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1 || row['$IsRevenue'] === '1',
+        };
+      })
+      .filter(row => row !== null); // Remove null entries
+    
+    // Filter out accounts where all balances are zero (optional - can be removed if you want all accounts)
+    // This matches the Python reference code behavior
+    const filteredData = processedData.filter(row => {
+      const allZero = 
+        Math.abs(row.openingBalance) < 0.01 &&
+        Math.abs(row.totalDebit) < 0.01 &&
+        Math.abs(row.totalCredit) < 0.01 &&
+        Math.abs(row.closingBalance) < 0.01;
+      return !allZero;
+    });
+    
+    console.log(`Trial Balance: Processed ${processedData.length} ledgers, ${filteredData.length} with non-zero balances`);
+    
+    // Validate data completeness
+    if (filteredData.length === 0 && processedData.length > 0) {
+      console.warn('⚠️ WARNING: All accounts have zero balances - this might indicate:');
+      console.warn('   1. Tally\'s date is not set to the correct period (' + toDateFormatted + ')');
+      console.warn('   2. No transactions exist for the selected period');
+      console.warn('   3. Data filtering is too strict');
+    }
+    
+    // Check if we have meaningful data
+    const accountsWithData = filteredData.filter(row => 
+      Math.abs(row.openingBalance) > 0.01 || 
+      Math.abs(row.totalDebit) > 0.01 || 
+      Math.abs(row.totalCredit) > 0.01 || 
+      Math.abs(row.closingBalance) > 0.01
+    );
+    
+    if (accountsWithData.length === 0 && filteredData.length > 0) {
+      console.warn('⚠️ WARNING: All accounts have zero balances. Please verify:');
+      console.warn('   - Tally is set to date: ' + toDateFormatted);
+      console.warn('   - The company has transactions for this period');
+    }
+    
+    return { 
+      success: true, 
+      data: filteredData, 
+      companyName: companyName,
+      warning: (accountsWithData.length === 0 && filteredData.length > 0) 
+        ? `All accounts show zero balances. Please ensure Tally is set to date ${toDateFormatted} before fetching.`
+        : null
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
   });
 
   ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) => {

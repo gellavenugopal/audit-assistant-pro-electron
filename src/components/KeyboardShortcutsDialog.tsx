@@ -115,10 +115,10 @@ export function KeyboardShortcutsDialog() {
             </div>
           </div>
 
-          {/* Audit Tools Specific */}
+          {/* VERA Tools Specific */}
           <div>
             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-              <Badge variant="outline">Audit Tools Tabs</Badge>
+              <Badge variant="outline">VERA Tools Tabs</Badge>
             </h3>
             <div className="bg-muted/30 rounded-lg p-4">
               <ShortcutRow keys={[modKey, '1']} description="Tally Tools" />
