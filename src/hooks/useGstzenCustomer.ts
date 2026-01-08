@@ -11,39 +11,10 @@ import { useToast } from '@/hooks/use-toast';
 export const gstzenKeys = {
   all: ['gstzen'] as const,
   customers: () => [...gstzenKeys.all, 'customers'] as const,
-  customer: (email: string) => [...gstzenKeys.customers(), email] as const,
-  gstins: (customerUuid: string) => [...gstzenKeys.all, 'gstins', customerUuid] as const,
+  customer: () => [...gstzenKeys.customers(), 'profile'] as const,
+  gstins: () => [...gstzenKeys.all, 'gstins'] as const,
 };
 
-/**
- * Hook to get customer by email
- */
-export function useGstzenCustomer(email: string | null) {
-  // Use GSTZen login email, not Supabase email
-  const gstzenEmail = localStorage.getItem('gstzen_email');
-  const actualEmail = gstzenEmail || email;
-  
-  const query = useQuery({
-    queryKey: gstzenKeys.customer(actualEmail || ''),
-    queryFn: async () => {
-      if (!actualEmail) throw new Error('Email is required');
-      const response = await gstzenApi.getCustomerByEmail(actualEmail);
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to fetch customer');
-      }
-      return response.data;
-    },
-    enabled: !!actualEmail,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  // Return data in expected structure
-  return {
-    customer: query.data,
-    isLoading: query.isLoading,
-    error: query.error,
-  };
-}
 
 /**
  * Hook to create a new customer
@@ -66,7 +37,7 @@ export function useCreateCustomer() {
       
       // Update the specific customer cache
       if (data) {
-        queryClient.setQueryData(gstzenKeys.customer(data.email), data);
+        queryClient.setQueryData(gstzenKeys.customer(), data);
       }
 
       toast({
@@ -110,7 +81,7 @@ export function useUpdateCustomer() {
       queryClient.invalidateQueries({ queryKey: gstzenKeys.customers() });
       
       if (data) {
-        queryClient.setQueryData(gstzenKeys.customer(data.email), data);
+        queryClient.setQueryData(gstzenKeys.customer(), data);
       }
 
       toast({
@@ -128,29 +99,3 @@ export function useUpdateCustomer() {
   });
 }
 
-/**
- * Hook to get or create customer based on current user
- */
-export function useGetOrCreateCustomer(email: string | null, userData?: CreateCustomerRequest) {
-  const customerQuery = useGstzenCustomer(email);
-  const createMutation = useCreateCustomer();
-
-  const ensureCustomer = async () => {
-    if (customerQuery.customer) {
-      return customerQuery.customer;
-    }
-
-    if (!userData) {
-      throw new Error('Customer data required for creation');
-    }
-
-    return createMutation.mutateAsync(userData);
-  };
-
-  return {
-    customer: customerQuery.customer,
-    isLoading: customerQuery.isLoading || createMutation.isPending,
-    error: customerQuery.error || createMutation.error,
-    ensureCustomer,
-  };
-}

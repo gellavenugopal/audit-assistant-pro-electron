@@ -805,9 +805,6 @@ ipcMain.handle('gstzen-login', async (event, credentials) => {
   return handleApiRequest('/accounts/api/login/token/', 'POST', credentials);
 });
 
-ipcMain.handle('gstzen-test-connection', async (event, { gstinUuid, token }) => {
-  return handleApiRequest(`/api/gstin/${gstinUuid}/test-connection/`, 'POST', {}, token);
-});
 
 ipcMain.handle('gstzen-generate-otp', async (event, { data, token }) => {
   return handleApiRequest('/api/gstn-generate-otp/', 'POST', data, token);
@@ -826,6 +823,7 @@ ipcMain.handle('gstzen-download-gstr1', async (event, { data, token }) => {
 });
 
 ipcMain.handle('gstzen-api-request', async (event, { endpoint, method, data, token }) => {
+  console.log(`[IPC] gstzen-api-request: ${method} ${endpoint}`);
   return handleApiRequest(endpoint, method, data, token);
 });
 

@@ -104,15 +104,6 @@ class GstzenApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     // 1. Try Electron IPC Bridge (Bypass CORS)
-    if (typeof window !== 'undefined') {
-        // Debug logging
-        // @ts-ignore
-        if (!window.electronAPI) console.warn("GSTZenAPI: window.electronAPI is missing in request()");
-        // @ts-ignore
-        else if (!window.electronAPI.gstzen) console.warn("GSTZenAPI: window.electronAPI.gstzen is missing in request()");
-        // @ts-ignore
-        else if (!window.electronAPI.gstzen.request) console.warn("GSTZenAPI: window.electronAPI.gstzen.request is missing in request()");
-    }
 
     if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.request) {
         // Map methods
@@ -228,12 +219,6 @@ class GstzenApiClient {
     return this.post<GstzenCustomer>('/api/customer/create/', data);
   }
 
-  /**
-   * Get customer by email
-   */
-  async getCustomerByEmail(email: string): Promise<ApiResponse<GstzenCustomer>> {
-    return this.get<GstzenCustomer>(`/api/customer/by-email/${encodeURIComponent(email)}/`);
-  }
 
   /**
    * Update customer details
@@ -248,65 +233,13 @@ class GstzenApiClient {
   // ===== GSTIN Management =====
 
   /**
-   * Get all GSTINs for a customer
+   * Get all GSTINs for the authenticated user
    */
-  async getGstins(customerUuid: string): Promise<ApiResponse<Gstin[]>> {
-    return this.get<Gstin[]>(`/api/customer/${customerUuid}/gstins/`);
+  async getGstins(): Promise<ApiResponse<Gstin[]>> {
+    return this.get<Gstin[]>(`/api/gstins/`);
   }
 
-  /**
-   * Add a new GSTIN to customer account
-   */
-  async addGstin(
-    customerUuid: string,
-    data: AddGstinRequest
-  ): Promise<ApiResponse<Gstin>> {
-    return this.post<Gstin>(`/api/customer/${customerUuid}/gstins/`, data);
-  }
 
-  /**
-   * Update GSTIN credentials
-   */
-  async updateGstinCredentials(
-    data: UpdateGstinCredentialsRequest
-  ): Promise<ApiResponse<Gstin>> {
-    return this.post<Gstin>(
-      `/api/gstin/${data.gstin_uuid}/credentials/`,
-      {
-        username: data.username,
-        password: data.password,
-      }
-    );
-  }
-
-  /**
-   * Delete a GSTIN
-   */
-  async deleteGstin(gstinUuid: string): Promise<ApiResponse<void>> {
-    return this.delete<void>(`/api/gstin/${gstinUuid}/`);
-  }
-
-  /**
-   * Test GSTIN connection (authenticate with portal)
-   */
-  /**
-   * Test GSTIN connection (authenticate with portal)
-   */
-  async testGstinConnection(gstinUuid: string): Promise<ApiResponse<{ status: string }>> {
-    // Check if running in Electron
-    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.testGstinConnection) {
-      const result = await window.electronAPI.gstzen.testGstinConnection(gstinUuid, this.authToken || '');
-      // Format Electron result to match our ApiResponse
-      if (result.ok) {
-        return { success: true, data: result.data };
-      } else {
-        return { success: false, error: result.data?.error || 'Failed to test connection' };
-      }
-    }
-    
-    // Fallback to direct request (if CORS allowed)
-    return this.post<{ status: string }>(`/api/gstin/${gstinUuid}/test-connection/`, {});
-  }
 
   // ===== GSTN Portal Authentication =====
 
