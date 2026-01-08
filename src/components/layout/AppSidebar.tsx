@@ -91,7 +91,7 @@ export function AppSidebar() {
         >
           <item.icon className="h-5 w-5 shrink-0 text-muted-foreground" />
           {!collapsed && (
-            <span className="truncate text-muted-foreground flex items-center gap-1">
+            <span className="truncate text-muted-foreground">
               {renderName(item.name)}
             </span>
           )}
@@ -128,7 +128,7 @@ export function AppSidebar() {
         )} />
         {!collapsed && (
           <span className={cn(
-            'truncate transition-colors flex items-center gap-1',
+            'truncate transition-colors',
             isActive ? 'text-primary font-medium' : ''
           )}>
             {renderName(item.name)}
