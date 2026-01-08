@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Table,
   TableBody,
@@ -6,7 +7,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { LayoutList, List, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface StockItem {
   'Item Name': string;
@@ -29,6 +34,7 @@ export function ChangesInInventoriesNote({
   reportingScale = 'auto',
   noteNumber = '19'
 }: Props) {
+  const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
   
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
@@ -129,103 +135,207 @@ export function ChangesInInventoriesNote({
     return null;
   }
 
+  // Export to Excel
+  const handleExport = () => {
+    const exportData = stockData.map((item, index) => ({
+      'S.No': index + 1,
+      'Item Name': item['Item Name'],
+      'Stock Group': item['Stock Group'],
+      'Category': item['Stock Category'],
+      'Opening Value': item['Opening Value'],
+      'Closing Value': item['Closing Value'],
+      'Change': item['Opening Value'] - item['Closing Value'],
+    }));
+    
+    // Add total row
+    exportData.push({
+      'S.No': '' as unknown as number,
+      'Item Name': 'TOTAL',
+      'Stock Group': '',
+      'Category': '',
+      'Opening Value': totalOpening,
+      'Closing Value': totalClosing,
+      'Change': changesInInventories,
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Note ${noteNumber}`);
+    XLSX.writeFile(wb, `Note_${noteNumber}_Changes_in_Inventories.xlsx`);
+  };
+
+  // Render Summary View
+  const renderSummaryView = () => (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="font-bold"></TableHead>
+          <TableHead className="text-right font-bold">Amount</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {/* Opening Inventories */}
+        {totalOpening !== 0 && (
+          <>
+            <TableRow>
+              <TableCell colSpan={2} className="font-bold">
+                Inventories at the beginning of the year:
+              </TableCell>
+            </TableRow>
+            {hasStockInTrade && inventory['Stock-in-Trade'].opening !== 0 && (
+              <TableRow>
+                <TableCell className="pl-8">Stock-in-trade</TableCell>
+                <TableCell className="text-right">{formatCurrency(inventory['Stock-in-Trade'].opening)}</TableCell>
+              </TableRow>
+            )}
+            {hasWorkInProgress && inventory['Work in Progress'].opening !== 0 && (
+              <TableRow>
+                <TableCell className="pl-8">Work in progress</TableCell>
+                <TableCell className="text-right">{formatCurrency(inventory['Work in Progress'].opening)}</TableCell>
+              </TableRow>
+            )}
+            {hasFinishedGoods && inventory['Finished Goods'].opening !== 0 && (
+              <TableRow>
+                <TableCell className="pl-8">Finished goods</TableCell>
+                <TableCell className="text-right">{formatCurrency(inventory['Finished Goods'].opening)}</TableCell>
+              </TableRow>
+            )}
+            <TableRow className="font-bold bg-gray-50">
+              <TableCell></TableCell>
+              <TableCell className="text-right">{formatCurrency(totalOpening)} (I)</TableCell>
+            </TableRow>
+          </>
+        )}
+
+        {/* Closing Inventories */}
+        {totalClosing !== 0 && (
+          <>
+            <TableRow>
+              <TableCell colSpan={2} className="font-bold pt-4">
+                Inventories at the end of the year:
+              </TableCell>
+            </TableRow>
+            {hasStockInTrade && inventory['Stock-in-Trade'].closing !== 0 && (
+              <TableRow>
+                <TableCell className="pl-8">Stock-in-trade</TableCell>
+                <TableCell className="text-right">{formatCurrency(inventory['Stock-in-Trade'].closing)}</TableCell>
+              </TableRow>
+            )}
+            {hasWorkInProgress && inventory['Work in Progress'].closing !== 0 && (
+              <TableRow>
+                <TableCell className="pl-8">Work in progress</TableCell>
+                <TableCell className="text-right">{formatCurrency(inventory['Work in Progress'].closing)}</TableCell>
+              </TableRow>
+            )}
+            {hasFinishedGoods && inventory['Finished Goods'].closing !== 0 && (
+              <TableRow>
+                <TableCell className="pl-8">Finished goods</TableCell>
+                <TableCell className="text-right">{formatCurrency(inventory['Finished Goods'].closing)}</TableCell>
+              </TableRow>
+            )}
+            <TableRow className="font-bold bg-gray-50">
+              <TableCell></TableCell>
+              <TableCell className="text-right">{formatCurrency(totalClosing)} (II)</TableCell>
+            </TableRow>
+          </>
+        )}
+
+        {/* Total Change */}
+        <TableRow className="border-t-2 border-black">
+          <TableCell className="font-bold text-lg pt-4">
+            Changes in inventories {totalOpening !== 0 && totalClosing !== 0 && '(I - II)'}
+          </TableCell>
+          <TableCell className={cn(
+            "text-right font-bold text-lg pt-4",
+            changesInInventories < 0 ? "text-red-600" : "text-green-600"
+          )}>
+            {formatCurrency(changesInInventories)}
+          </TableCell>
+        </TableRow>
+      </TableBody>
+    </Table>
+  );
+
+  // Render Detailed View (Ledger-wise)
+  const renderDetailedView = () => (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-12 text-center">S.No</TableHead>
+          <TableHead>Item Name</TableHead>
+          <TableHead>Stock Group</TableHead>
+          <TableHead>Category</TableHead>
+          <TableHead className="text-right">Opening</TableHead>
+          <TableHead className="text-right">Closing</TableHead>
+          <TableHead className="text-right">Change</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {stockData.map((item, index) => (
+          <TableRow key={item['Composite Key'] || index}>
+            <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
+            <TableCell className="font-medium">{item['Item Name']}</TableCell>
+            <TableCell className="text-muted-foreground">{item['Stock Group']}</TableCell>
+            <TableCell className="text-muted-foreground">{item['Stock Category']}</TableCell>
+            <TableCell className="text-right font-mono">{formatCurrency(Math.abs(item['Opening Value']))}</TableCell>
+            <TableCell className="text-right font-mono">{formatCurrency(Math.abs(item['Closing Value']))}</TableCell>
+            <TableCell className={cn(
+              "text-right font-mono",
+              (item['Opening Value'] - item['Closing Value']) < 0 ? "text-red-600" : "text-green-600"
+            )}>
+              {formatCurrency(Math.abs(item['Opening Value']) - Math.abs(item['Closing Value']))}
+            </TableCell>
+          </TableRow>
+        ))}
+        {/* Total Row */}
+        <TableRow className="font-bold bg-gray-100 border-t-2">
+          <TableCell></TableCell>
+          <TableCell>TOTAL</TableCell>
+          <TableCell></TableCell>
+          <TableCell></TableCell>
+          <TableCell className="text-right font-mono">{formatCurrency(totalOpening)}</TableCell>
+          <TableCell className="text-right font-mono">{formatCurrency(totalClosing)}</TableCell>
+          <TableCell className={cn(
+            "text-right font-mono",
+            changesInInventories < 0 ? "text-red-600" : "text-green-600"
+          )}>
+            {formatCurrency(changesInInventories)}
+          </TableCell>
+        </TableRow>
+      </TableBody>
+    </Table>
+  );
+
   return (
     <div className="space-y-4">
-      <div className="border-b pb-2">
-        <h3 className="text-lg font-bold">
-          Note {noteNumber}: Changes in inventories of finished goods, work in progress and stock-in-trade
-        </h3>
-        <p className="text-sm text-gray-600">{getScaleLabel()}</p>
+      <div className="flex items-center justify-between border-b pb-2">
+        <div>
+          <h3 className="text-lg font-bold">
+            Note {noteNumber}: Changes in inventories of finished goods, work in progress and stock-in-trade
+          </h3>
+          <p className="text-sm text-gray-600">{getScaleLabel()}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'summary' | 'detailed')}>
+            <TabsList className="h-8">
+              <TabsTrigger value="summary" className="text-xs gap-1 px-2">
+                <LayoutList className="h-3 w-3" />
+                Summary
+              </TabsTrigger>
+              <TabsTrigger value="detailed" className="text-xs gap-1 px-2">
+                <List className="h-3 w-3" />
+                Detailed
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button variant="outline" size="sm" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-1" />
+            Export
+          </Button>
+        </div>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="font-bold"></TableHead>
-            <TableHead className="text-right font-bold">Amount</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {/* Opening Inventories */}
-          {totalOpening !== 0 && (
-            <>
-              <TableRow>
-                <TableCell colSpan={2} className="font-bold">
-                  Inventories at the beginning of the year:
-                </TableCell>
-              </TableRow>
-              {hasStockInTrade && inventory['Stock-in-Trade'].opening !== 0 && (
-                <TableRow>
-                  <TableCell className="pl-8">Stock-in-trade</TableCell>
-                  <TableCell className="text-right">{formatCurrency(inventory['Stock-in-Trade'].opening)}</TableCell>
-                </TableRow>
-              )}
-              {hasWorkInProgress && inventory['Work in Progress'].opening !== 0 && (
-                <TableRow>
-                  <TableCell className="pl-8">Work in progress</TableCell>
-                  <TableCell className="text-right">{formatCurrency(inventory['Work in Progress'].opening)}</TableCell>
-                </TableRow>
-              )}
-              {hasFinishedGoods && inventory['Finished Goods'].opening !== 0 && (
-                <TableRow>
-                  <TableCell className="pl-8">Finished goods</TableCell>
-                  <TableCell className="text-right">{formatCurrency(inventory['Finished Goods'].opening)}</TableCell>
-                </TableRow>
-              )}
-              <TableRow className="font-bold bg-gray-50">
-                <TableCell></TableCell>
-                <TableCell className="text-right">{formatCurrency(totalOpening)} (I)</TableCell>
-              </TableRow>
-            </>
-          )}
-
-          {/* Closing Inventories */}
-          {totalClosing !== 0 && (
-            <>
-              <TableRow>
-                <TableCell colSpan={2} className="font-bold pt-4">
-                  Inventories at the end of the year:
-                </TableCell>
-              </TableRow>
-              {hasStockInTrade && inventory['Stock-in-Trade'].closing !== 0 && (
-                <TableRow>
-                  <TableCell className="pl-8">Stock-in-trade</TableCell>
-                  <TableCell className="text-right">{formatCurrency(inventory['Stock-in-Trade'].closing)}</TableCell>
-                </TableRow>
-              )}
-              {hasWorkInProgress && inventory['Work in Progress'].closing !== 0 && (
-                <TableRow>
-                  <TableCell className="pl-8">Work in progress</TableCell>
-                  <TableCell className="text-right">{formatCurrency(inventory['Work in Progress'].closing)}</TableCell>
-                </TableRow>
-              )}
-              {hasFinishedGoods && inventory['Finished Goods'].closing !== 0 && (
-                <TableRow>
-                  <TableCell className="pl-8">Finished goods</TableCell>
-                  <TableCell className="text-right">{formatCurrency(inventory['Finished Goods'].closing)}</TableCell>
-                </TableRow>
-              )}
-              <TableRow className="font-bold bg-gray-50">
-                <TableCell></TableCell>
-                <TableCell className="text-right">{formatCurrency(totalClosing)} (II)</TableCell>
-              </TableRow>
-            </>
-          )}
-
-          {/* Total Change */}
-          <TableRow className="border-t-2 border-black">
-            <TableCell className="font-bold text-lg pt-4">
-              Changes in inventories {totalOpening !== 0 && totalClosing !== 0 && '(I - II)'}
-            </TableCell>
-            <TableCell className={cn(
-              "text-right font-bold text-lg pt-4",
-              changesInInventories < 0 ? "text-red-600" : "text-green-600"
-            )}>
-              {formatCurrency(changesInInventories)}
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
+      {viewMode === 'summary' ? renderSummaryView() : renderDetailedView()}
     </div>
   );
 }

@@ -5,7 +5,12 @@
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
 
 export interface NoteValues {
+  // Income items
+  revenueFromOperations?: number;
+  otherIncome?: number;
+  // Expense items
   costOfMaterialsConsumed?: number;
+  purchasesOfStockInTrade?: number;
   changesInInventories?: number;
   employeeBenefits?: number;
   financeCosts?: number;
@@ -35,14 +40,24 @@ interface StockItem {
 }
 
 /**
- * Maps H2 classification to note key
+ * Maps H2 classification to note key for P&L
  */
 const H2_TO_NOTE_KEY: Record<string, string> = {
+  // Income items
+  'Revenue from operations': 'revenueFromOperations',
+  'Revenue from Operations': 'revenueFromOperations',
+  'Sale of products': 'revenueFromOperations',
+  'Sale of services': 'revenueFromOperations',
+  'Other operating revenue': 'revenueFromOperations',
+  'Other income': 'otherIncome',
+  'Other Income': 'otherIncome',
+  // Expense items
   'Employee benefits expense': 'employeeBenefits',
   'Finance costs': 'financeCosts',
   'Depreciation and amortization expense': 'depreciation',
   'Depreciation': 'depreciation',
   'Other expenses': 'otherExpenses',
+  'Purchases of Stock-in-Trade': 'purchasesOfStockInTrade',
 };
 
 /**
@@ -54,7 +69,12 @@ export function computePLNoteValues(
 ): { noteValues: NoteValues; noteLedgers: NoteLedgersMap } {
   const noteValues: NoteValues = {};
   const noteLedgers: NoteLedgersMap = {
+    // Income
+    revenueFromOperations: [],
+    otherIncome: [],
+    // Expenses
     costOfMaterialsConsumed: [],
+    purchasesOfStockInTrade: [],
     changesInInventories: [],
     employeeBenefits: [],
     financeCosts: [],
@@ -67,10 +87,13 @@ export function computePLNoteValues(
   }
 
   // Initialize totals
+  let revenueFromOperationsTotal = 0;
+  let otherIncomeTotal = 0;
   let employeeBenefitsTotal = 0;
   let financeCostsTotal = 0;
   let depreciationTotal = 0;
   let otherExpensesTotal = 0;
+  let purchasesOfStockInTradeTotal = 0;
 
   // Process ledger data
   data.forEach(row => {
@@ -83,7 +106,7 @@ export function computePLNoteValues(
     const openingBalance = row['Opening Balance'] || 0;
     const closingBalance = row['Closing Balance'] || 0;
 
-    // Only process P&L items (expenses)
+    // Only process P&L items
     if (h1 !== 'Profit and Loss') return;
 
     // Determine note key from H2
@@ -103,10 +126,16 @@ export function computePLNoteValues(
         noteLedgers[noteKey].push(ledgerItem);
       }
 
-      // Add to totals (expenses are typically positive closing balances)
+      // Add to totals
       const amount = Math.abs(closingBalance);
       
       switch (noteKey) {
+        case 'revenueFromOperations':
+          revenueFromOperationsTotal += amount;
+          break;
+        case 'otherIncome':
+          otherIncomeTotal += amount;
+          break;
         case 'employeeBenefits':
           employeeBenefitsTotal += amount;
           break;
@@ -119,11 +148,20 @@ export function computePLNoteValues(
         case 'otherExpenses':
           otherExpensesTotal += amount;
           break;
+        case 'purchasesOfStockInTrade':
+          purchasesOfStockInTradeTotal += amount;
+          break;
       }
     }
   });
 
   // Set note values only if there are ledgers
+  if (noteLedgers.revenueFromOperations.length > 0) {
+    noteValues.revenueFromOperations = revenueFromOperationsTotal;
+  }
+  if (noteLedgers.otherIncome.length > 0) {
+    noteValues.otherIncome = otherIncomeTotal;
+  }
   if (noteLedgers.employeeBenefits.length > 0) {
     noteValues.employeeBenefits = employeeBenefitsTotal;
   }
@@ -135,6 +173,9 @@ export function computePLNoteValues(
   }
   if (noteLedgers.otherExpenses.length > 0) {
     noteValues.otherExpenses = otherExpensesTotal;
+  }
+  if (noteLedgers.purchasesOfStockInTrade.length > 0) {
+    noteValues.purchasesOfStockInTrade = purchasesOfStockInTradeTotal;
   }
 
   // Calculate cost of materials consumed and changes in inventories from stock data

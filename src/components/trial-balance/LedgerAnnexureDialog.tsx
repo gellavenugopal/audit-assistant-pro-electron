@@ -36,14 +36,46 @@ interface Props {
   reportingScale?: string;
 }
 
-// Map noteKey to display title
+// Map noteKey to display title - P&L items
 const NOTE_KEY_TO_TITLE: Record<string, string> = {
+  // P&L Income
+  revenueFromOperations: 'Revenue from Operations',
+  otherIncome: 'Other Income',
+  // P&L Expenses
   costOfMaterialsConsumed: 'Cost of Materials Consumed',
+  purchasesOfStockInTrade: 'Purchases of Stock-in-Trade',
   changesInInventories: 'Changes in Inventories',
   employeeBenefits: 'Employee Benefits Expense',
   financeCosts: 'Finance Costs',
   depreciation: 'Depreciation and Amortization Expense',
   otherExpenses: 'Other Expenses',
+  // Balance Sheet - Equity & Liabilities
+  equity: 'Share Capital / Equity',
+  reserves: 'Reserves and Surplus',
+  shareWarrants: 'Money Received Against Share Warrants',
+  shareApplication: 'Share Application Money Pending Allotment',
+  borrowings: 'Long-term Borrowings',
+  deferredTax: 'Deferred Tax Liabilities (Net)',
+  otherLongTerm: 'Other Long-term Liabilities',
+  provisions: 'Long-term Provisions',
+  shortTermBorrowings: 'Short-term Borrowings',
+  payablesMSME: 'Trade Payables - MSME',
+  payables: 'Trade Payables - Others',
+  otherCurrentLiabilities: 'Other Current Liabilities',
+  provisionsCurrent: 'Short-term Provisions',
+  // Balance Sheet - Assets
+  fixedAssets: 'Property, Plant and Equipment',
+  intangibleAssets: 'Intangible Assets',
+  cwip: 'Capital Work-in-Progress',
+  intangibleUnderDev: 'Intangible Assets Under Development',
+  investments: 'Non-current Investments',
+  deferredTaxAsset: 'Deferred Tax Assets (Net)',
+  otherNonCurrent: 'Other Non-current Assets',
+  currentInvestments: 'Current Investments',
+  inventory: 'Inventories',
+  receivables: 'Trade Receivables',
+  cash: 'Cash and Cash Equivalents',
+  otherCurrent: 'Other Current Assets',
 };
 
 export function LedgerAnnexureDialog({

@@ -196,9 +196,14 @@ export function ScheduleIIIProfitLoss({
     const items: DisplayLineItem[] = [];
     let noteCounter = startingNoteNumber;
 
-    // Map fsArea to noteValues keys
+    // Map fsArea to noteValues keys - includes both Income and Expense items
     const fsAreaToNoteKey: Record<string, string> = {
+      // Income items
+      'Revenue': 'revenueFromOperations',
+      'Other Income': 'otherIncome',
+      // Expense items
       'Cost of Materials': 'costOfMaterialsConsumed',
+      'Purchases': 'purchasesOfStockInTrade',
       'Inventory Change': 'changesInInventories',
       'Employee Benefits': 'employeeBenefits',
       'Finance': 'financeCosts',

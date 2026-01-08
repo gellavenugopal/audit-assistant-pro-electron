@@ -13,6 +13,7 @@ import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import { TrialBalanceLine } from '@/hooks/useTrialBalance';
 import { convertLedgerRowsToTrialBalanceLines } from '@/utils/trialBalanceNewAdapter';
 import { computePLNoteValues } from '@/utils/computePLNoteValues';
+import { computeBSNoteValues } from '@/utils/computeBSNoteValues';
 import { ScheduleIIIBalanceSheet } from '@/components/trial-balance/ScheduleIIIBalanceSheet';
 import { ScheduleIIIProfitLoss } from '@/components/trial-balance/ScheduleIIIProfitLoss';
 import { CashFlowStatement } from '@/components/trial-balance/CashFlowStatement';
@@ -98,9 +99,14 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
   }, [data, currentEngagement?.id, user?.id, toDate, stockData]);
 
   // Compute P&L note values and ledger annexures
-  const { noteValues, noteLedgers } = useMemo(() => {
+  const { noteValues: plNoteValues, noteLedgers: plNoteLedgers } = useMemo(() => {
     return computePLNoteValues(data, stockData);
   }, [data, stockData]);
+
+  // Compute Balance Sheet note values and ledger annexures
+  const { noteValues: bsNoteValues, noteLedgers: bsNoteLedgers } = useMemo(() => {
+    return computeBSNoteValues(data);
+  }, [data]);
 
   // Parse financial year from toDate
   const financialYear = useMemo(() => {
@@ -262,6 +268,8 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 reportingScale={reportingScale}
                 constitution={constitution}
                 startingNoteNumber={bsStartingNote}
+                noteValues={bsNoteValues}
+                noteLedgers={bsNoteLedgers}
               />
             </div>
           </div>
@@ -287,8 +295,8 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 constitution={constitution}
                 startingNoteNumber={plStartingNote}
                 stockData={stockData}
-                noteValues={noteValues}
-                noteLedgers={noteLedgers}
+                noteValues={plNoteValues}
+                noteLedgers={plNoteLedgers}
               />
             </div>
           </div>

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Table,
   TableBody,
@@ -6,7 +7,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { LayoutList, List, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface StockItem {
   'Item Name': string;
@@ -39,6 +44,7 @@ export function CostOfMaterialsConsumedNote({
   reportingScale = 'auto',
   noteNumber = '20'
 }: Props) {
+  const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
   
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
@@ -186,17 +192,53 @@ export function CostOfMaterialsConsumedNote({
     return null;
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="border-b pb-2">
-        <h3 className="text-lg font-bold">
-          Note {noteNumber}: Cost of materials consumed
-        </h3>
-        <p className="text-sm text-gray-600">{getScaleLabel()}</p>
-      </div>
+  // Get raw material stock items for detailed view
+  const rawMaterialItems = stockData.filter(item => {
+    const category = (item['Stock Category'] || '').toLowerCase();
+    const group = (item['Stock Group'] || '').toLowerCase();
+    return category.includes('raw') || group.includes('raw');
+  });
 
-      <Table>
-        <TableBody>
+  // Get purchase ledgers for detailed view
+  const purchaseLedgers = ledgerData.filter(row => {
+    const h3 = (row['H3'] || '').toLowerCase();
+    const name = (row['Ledger Name'] || '').toLowerCase();
+    return h3.includes('purchase') || name.includes('purchase');
+  });
+
+  // Export to Excel
+  const handleExport = () => {
+    // Materials sheet
+    const materialsData = rawMaterialItems.map((item, index) => ({
+      'S.No': index + 1,
+      'Item Name': item['Item Name'],
+      'Stock Group': item['Stock Group'],
+      'Category': item['Stock Category'],
+      'Opening Value': Math.abs(item['Opening Value']),
+      'Closing Value': Math.abs(item['Closing Value']),
+    }));
+
+    // Purchases sheet
+    const purchasesData = purchaseLedgers.map((row, index) => ({
+      'S.No': index + 1,
+      'Ledger Name': row['Ledger Name'],
+      'Classification': row['H3'] || '-',
+      'Opening Balance': row['Opening Balance'] || 0,
+      'Closing Balance': row['Closing Balance'] || 0,
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.json_to_sheet(materialsData);
+    const ws2 = XLSX.utils.json_to_sheet(purchasesData);
+    XLSX.utils.book_append_sheet(wb, ws1, 'Materials');
+    XLSX.utils.book_append_sheet(wb, ws2, 'Purchases');
+    XLSX.writeFile(wb, `Note_${noteNumber}_Cost_of_Materials.xlsx`);
+  };
+
+  // Render Summary View
+  const renderSummaryView = () => (
+    <Table>
+      <TableBody>
           {/* Raw Material Section */}
           {hasRawMaterial && (
             <>
@@ -318,6 +360,142 @@ export function CostOfMaterialsConsumedNote({
           </TableRow>
         </TableBody>
       </Table>
+    );
+
+  // Render Detailed View (Ledger-wise)
+  const renderDetailedView = () => (
+    <div className="space-y-6">
+      {/* Materials Inventory */}
+      <div>
+        <h4 className="font-semibold mb-2">Raw Materials Inventory</h4>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12 text-center">S.No</TableHead>
+              <TableHead>Item Name</TableHead>
+              <TableHead>Stock Group</TableHead>
+              <TableHead>Category</TableHead>
+              <TableHead className="text-right">Opening</TableHead>
+              <TableHead className="text-right">Closing</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rawMaterialItems.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  No raw material items found
+                </TableCell>
+              </TableRow>
+            ) : (
+              <>
+                {rawMaterialItems.map((item, index) => (
+                  <TableRow key={item['Composite Key'] || index}>
+                    <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
+                    <TableCell className="font-medium">{item['Item Name']}</TableCell>
+                    <TableCell className="text-muted-foreground">{item['Stock Group']}</TableCell>
+                    <TableCell className="text-muted-foreground">{item['Stock Category']}</TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(Math.abs(item['Opening Value']))}</TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(Math.abs(item['Closing Value']))}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow className="font-bold bg-gray-100 border-t-2">
+                  <TableCell></TableCell>
+                  <TableCell>TOTAL</TableCell>
+                  <TableCell></TableCell>
+                  <TableCell></TableCell>
+                  <TableCell className="text-right font-mono">
+                    {formatCurrency(rawMaterialItems.reduce((sum, i) => sum + Math.abs(i['Opening Value']), 0))}
+                  </TableCell>
+                  <TableCell className="text-right font-mono">
+                    {formatCurrency(rawMaterialItems.reduce((sum, i) => sum + Math.abs(i['Closing Value']), 0))}
+                  </TableCell>
+                </TableRow>
+              </>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Purchase Ledgers */}
+      <div>
+        <h4 className="font-semibold mb-2">Purchase Ledgers</h4>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12 text-center">S.No</TableHead>
+              <TableHead>Ledger Name</TableHead>
+              <TableHead>Classification</TableHead>
+              <TableHead className="text-right">Opening</TableHead>
+              <TableHead className="text-right">Closing</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {purchaseLedgers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  No purchase ledgers found
+                </TableCell>
+              </TableRow>
+            ) : (
+              <>
+                {purchaseLedgers.map((row, index) => (
+                  <TableRow key={index}>
+                    <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
+                    <TableCell className="font-medium">{row['Ledger Name']}</TableCell>
+                    <TableCell className="text-muted-foreground">{row['H3'] || '-'}</TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(row['Opening Balance'] || 0)}</TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(Math.abs(row['Closing Balance'] || 0))}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow className="font-bold bg-gray-100 border-t-2">
+                  <TableCell></TableCell>
+                  <TableCell>TOTAL</TableCell>
+                  <TableCell></TableCell>
+                  <TableCell className="text-right font-mono">
+                    {formatCurrency(purchaseLedgers.reduce((sum, r) => sum + (r['Opening Balance'] || 0), 0))}
+                  </TableCell>
+                  <TableCell className="text-right font-mono">
+                    {formatCurrency(purchaseLedgers.reduce((sum, r) => sum + Math.abs(r['Closing Balance'] || 0), 0))}
+                  </TableCell>
+                </TableRow>
+              </>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between border-b pb-2">
+        <div>
+          <h3 className="text-lg font-bold">
+            Note {noteNumber}: Cost of materials consumed
+          </h3>
+          <p className="text-sm text-gray-600">{getScaleLabel()}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'summary' | 'detailed')}>
+            <TabsList className="h-8">
+              <TabsTrigger value="summary" className="text-xs gap-1 px-2">
+                <LayoutList className="h-3 w-3" />
+                Summary
+              </TabsTrigger>
+              <TabsTrigger value="detailed" className="text-xs gap-1 px-2">
+                <List className="h-3 w-3" />
+                Detailed
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button variant="outline" size="sm" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-1" />
+            Export
+          </Button>
+        </div>
+      </div>
+
+      {viewMode === 'summary' ? renderSummaryView() : renderDetailedView()}
     </div>
   );
 }
