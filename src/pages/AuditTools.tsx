@@ -172,6 +172,15 @@ const TallyTools = () => {
   };
 
   const handleFetchTrialBalance = async () => {
+    if (!isConnected) {
+      toast({
+        title: "Not Connected",
+        description: "Please connect to Tally ODBC first",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsFetchingTB(true);
     try {
       const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
@@ -181,6 +190,13 @@ const TallyTools = () => {
           title: "Trial Balance Fetched",
           description: `Retrieved ${lines.length} ledger accounts from Tally`,
         });
+      } else {
+        toast({
+          title: "No Data Found",
+          description: "No trial balance data was returned from Tally. Please check your connection and date range.",
+          variant: "destructive",
+        });
+        setFetchedTBData([]);
       }
     } catch (error) {
       toast({
@@ -188,6 +204,7 @@ const TallyTools = () => {
         description: error instanceof Error ? error.message : "Unknown error",
         variant: "destructive",
       });
+      setFetchedTBData([]);
     } finally {
       setIsFetchingTB(false);
     }
@@ -666,7 +683,15 @@ const TallyTools = () => {
     }).format(value);
   };
 
+  // Calculate totals for Trial Balance
+  const totalOpeningBalance = fetchedTBData?.reduce((sum, line) => sum + line.openingBalance, 0) || 0;
+  const totalDebit = fetchedTBData?.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0) || 0;
+  const totalCredit = fetchedTBData?.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0) || 0;
   const totalClosingBalance = fetchedTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
+  
+  // Verification: Closing should equal Opening + Debit - Credit
+  const totalClosingBalanceSum = totalClosingBalance;
+  const totalClosingBalanceCalculated = totalOpeningBalance + totalDebit - totalCredit;
 
 
   return (
@@ -882,6 +907,15 @@ const TallyTools = () => {
             </DialogDescription>
           </DialogHeader>
 
+          <Alert variant="warning" className="mb-4">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Important:</strong> Tally ODBC returns balances as of Tally's <strong>current date setting</strong>, not the selected date range.
+              <br />
+              <strong>Before fetching:</strong> Please set Tally's date to the <strong>"To Date"</strong> ({tbToDate}) to get accurate balances for the selected period.
+            </AlertDescription>
+          </Alert>
+
           <div className="space-y-4">
             {/* Period Selection */}
             <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
@@ -905,7 +939,7 @@ const TallyTools = () => {
                   className="w-40"
                 />
               </div>
-              <Button onClick={handleFetchTrialBalance} disabled={isFetchingTB}>
+              <Button onClick={handleFetchTrialBalance} disabled={isFetchingTB || !isConnected}>
                 {isFetchingTB ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -951,7 +985,10 @@ const TallyTools = () => {
                     </tbody>
                     <tfoot className="bg-muted font-medium sticky bottom-0">
                       <tr className="border-t-2">
-                        <td colSpan={4} className="p-2 text-right">Total Closing Balance:</td>
+                        <td className="p-2 font-medium">Total:</td>
+                        <td className="p-2 text-right font-mono">{formatCurrency(totalOpeningBalance)}</td>
+                        <td className="p-2 text-right font-mono">{formatCurrency(totalDebit)}</td>
+                        <td className="p-2 text-right font-mono">{formatCurrency(totalCredit)}</td>
                         <td className="p-2 text-right font-mono">{formatCurrency(totalClosingBalance)}</td>
                         <td colSpan={2}></td>
                       </tr>
@@ -960,41 +997,77 @@ const TallyTools = () => {
                 </div>
 
                 {/* Summary & Save */}
-                <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    {fetchedTBData.length} accounts • 
-                    Total Closing Balance: {formatCurrency(totalClosingBalance)}
-                    {Math.abs(totalClosingBalance) > 0.01 && (
-                      <Badge variant="destructive" className="ml-2 text-xs">Out of Balance</Badge>
-                    )}
-                    {Math.abs(totalClosingBalance) <= 0.01 && (
-                      <Badge variant="default" className="ml-2 text-xs bg-green-500">Balanced</Badge>
-                    )}
+                <div className="p-4 border-t bg-muted/30">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm text-muted-foreground">
+                      {fetchedTBData.length} accounts
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => setFetchedTBData(null)}>
+                        Clear
+                      </Button>
+                      <Button variant="outline" onClick={handleExportToExcel}>
+                        <FileSpreadsheet className="h-4 w-4 mr-2" />
+                        Export to Excel
+                      </Button>
+                      <Button 
+                        onClick={() => {
+                          if (!currentEngagement) {
+                            toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
+                            return;
+                          }
+                          toast({ 
+                            title: "Save to Trial Balance", 
+                            description: "Navigate to Trial Balance page and use Import to save this data" 
+                          });
+                          setShowTBDialog(false);
+                        }}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Use in Trial Balance
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setFetchedTBData(null)}>
-                      Clear
-                    </Button>
-                    <Button variant="outline" onClick={handleExportToExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export to Excel
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        if (!currentEngagement) {
-                          toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
-                          return;
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Total Opening Balance:</span>
+                      <span className="ml-2 font-mono font-medium">{formatCurrency(totalOpeningBalance)}</span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Total Debit:</span>
+                      <span className="ml-2 font-mono font-medium">{formatCurrency(totalDebit)}</span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Total Credit:</span>
+                      <span className="ml-2 font-mono font-medium">{formatCurrency(totalCredit)}</span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Total Closing Balance:</span>
+                      <span className="ml-2 font-mono font-medium">{formatCurrency(totalClosingBalance)}</span>
+                      {(() => {
+                        // Verify calculation: Closing should equal Opening + Debit - Credit
+                        const difference = Math.abs(totalClosingBalanceSum - totalClosingBalanceCalculated);
+                        const isCalculationCorrect = difference < 100; // Allow small rounding differences
+                        
+                        if (!isCalculationCorrect) {
+                          return (
+                            <div className="mt-1">
+                              <Badge variant="destructive" className="text-xs">
+                                Calculation Mismatch: {formatCurrency(difference)}
+                              </Badge>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Sum: {formatCurrency(totalClosingBalanceSum)} | 
+                                Calc: {formatCurrency(totalClosingBalanceCalculated)}
+                              </p>
+                            </div>
+                          );
                         }
-                        toast({
-                          title: "Save to Trial Balance",
-                          description: "Navigate to Trial Balance page and use Import to save this data"
-                        });
-                        setShowTBDialog(false);
-                      }}
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      Use in Trial Balance
-                    </Button>
+                        
+                        // Check if trial balance is balanced (Total Debit = Total Credit for a balanced TB)
+                        // But this depends on account types, so we just verify the calculation is correct
+                        return null;
+                      })()}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1007,6 +1080,129 @@ const TallyTools = () => {
                   No Trial Balance data found for the selected period. Make sure Tally has data for this date range.
                 </AlertDescription>
               </Alert>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Month wise Data Dialog */}
+      <Dialog open={showMonthWiseDialog} onOpenChange={setShowMonthWiseDialog}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Get Month wise Data from Tally
+            </DialogTitle>
+            <DialogDescription>
+              Extract month wise data for analysis. P&L shows movement, Balance Sheet shows closing balances.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Period Selection */}
+            <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg flex-wrap">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="mwFyStartYear">FY Starting Year:</Label>
+                <Select
+                  value={String(mwFyStartYear)}
+                  onValueChange={(v) => setMwFyStartYear(Number(v))}
+                >
+                  <SelectTrigger className="w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[2020, 2021, 2022, 2023, 2024, 2025, 2026].map(year => (
+                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="mwTargetMonth">Target Month:</Label>
+                <Select value={mwTargetMonth} onValueChange={setMwTargetMonth}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"].map(month => (
+                      <SelectItem key={month} value={month}>{month}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={handleFetchMonthWiseData} disabled={isFetchingMW || !isConnected}>
+                {isFetchingMW ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Fetching...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 mr-2" />
+                    Fetch Month Wise Data
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Results Table */}
+            {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-[400px] overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted sticky top-0">
+                      <tr>
+                        <th className="text-left p-2 font-medium min-w-[200px]">Ledger Name</th>
+                        <th className="text-left p-2 font-medium min-w-[120px]">Primary Group</th>
+                        <th className="text-center p-2 font-medium text-xs">Type</th>
+                        {fetchedMWData.months.map(month => (
+                          <th key={month} className="text-right p-2 font-medium min-w-[80px]">{month}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...fetchedMWData.plLines, ...fetchedMWData.bsLines].slice(0, 100).map((line, idx) => (
+                        <tr key={idx} className="border-t hover:bg-muted/50">
+                          <td className="p-2">{line.accountName}</td>
+                          <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                          <td className="p-2 text-center">
+                            <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
+                              {line.isRevenue ? "P&L" : "BS"}
+                            </Badge>
+                          </td>
+                          {fetchedMWData.months.map((month, monthIdx) => {
+                            // For P&L items, show movement (current - previous)
+                            // For BS items, show absolute closing balance
+                            let displayValue = 0;
+                            if (line.isRevenue) {
+                              // P&L: Calculate movement
+                              if (monthIdx === 0) {
+                                // First month: closing - opening
+                                displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
+                              } else {
+                                // Subsequent months: current closing - previous closing
+                                const prevMonth = fetchedMWData.months[monthIdx - 1];
+                                displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
+                              }
+                            } else {
+                              // BS: Show absolute closing balance
+                              displayValue = line.monthlyBalances[month] || 0;
+                            }
+                            
+                            return (
+                              <td key={month} className="p-2 text-right font-mono text-xs">
+                                {displayValue !== 0 
+                                  ? formatCurrency(displayValue) 
+                                  : '-'}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
           </div>
         </DialogContent>

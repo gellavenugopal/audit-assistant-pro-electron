@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ODBC methods
   odbcCheckConnection: () => ipcRenderer.invoke('odbc-check-connection'),
   odbcTestConnection: () => ipcRenderer.invoke('odbc-test-connection'),
-  odbcFetchTrialBalance: () => ipcRenderer.invoke('odbc-fetch-trial-balance'),
+  odbcFetchTrialBalance: (fromDate, toDate) => ipcRenderer.invoke('odbc-fetch-trial-balance', fromDate, toDate),
   odbcFetchMonthWise: (fyStartYear, targetMonth) => ipcRenderer.invoke('odbc-fetch-month-wise', fyStartYear, targetMonth),
   odbcDisconnect: () => ipcRenderer.invoke('odbc-disconnect'),
   // Opening Balance Matching methods
