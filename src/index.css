@@ -219,14 +219,16 @@
     color: inherit !important;
   }
 
-  /* FIX: Selected tab must always show text - override any background-only states */
+  /* FIX: Selected tab must always show text - use white text on primary background */
   [role="tab"][data-state="active"] {
-    color: hsl(var(--primary)) !important;
+    background-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
     font-weight: 500;
   }
 
   [role="tab"][aria-selected="true"] {
-    color: hsl(var(--primary)) !important;
+    background-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
     font-weight: 500;
   }
 
