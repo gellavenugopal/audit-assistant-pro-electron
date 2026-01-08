@@ -18,7 +18,8 @@ import {
   ChevronRight,
   Clock,
   User,
-  Paperclip
+  Paperclip,
+  Eye
 } from 'lucide-react';
 import { useCAROClauseLibrary, CAROClause } from '@/hooks/useCAROClauseLibrary';
 import { useCAROClauseResponses, CAROClauseResponse } from '@/hooks/useCAROClauseResponses';
@@ -43,6 +44,7 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
   const [naReason, setNaReason] = useState('');
   const [wpRefs, setWpRefs] = useState('');
   const [saving, setSaving] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
 
   // Filter clauses based on CARO applicability
   const applicableClauses = clauses.filter(clause => {
@@ -201,6 +203,68 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
     );
   }
 
+  // Preview Mode
+  if (previewMode) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>CARO 2020 Report Preview</CardTitle>
+            <Button variant="outline" onClick={() => setPreviewMode(false)}>
+              Back to Editor
+            </Button>
+          </div>
+        </CardHeader>
+        <ScrollArea className="h-[calc(100vh-250px)]">
+          <CardContent className="space-y-6">
+            {/* CARO Report Header */}
+            <div className="space-y-4">
+              <h2 className="text-xl font-bold text-center">
+                Annexure - A to the Auditors' Report
+              </h2>
+              <p className="text-sm text-center text-muted-foreground">
+                (Referred to in paragraph 1 under 'Report on Other Legal and Regulatory Requirements' section of our report of even date)
+              </p>
+            </div>
+
+            {/* All Clause Responses */}
+            <div className="space-y-6">
+              {applicableClauses.map((clause) => {
+                const response = getResponseForClause(clause.clause_id);
+                if (!response) return null;
+
+                return (
+                  <div key={clause.id} className="border-l-4 border-primary pl-4 space-y-2">
+                    <h3 className="font-semibold">
+                      {clause.clause_id}. {clause.clause_title}
+                    </h3>
+                    {!response.is_applicable ? (
+                      <p className="text-sm whitespace-pre-wrap">
+                        {response.na_reason || 'Not applicable'}
+                      </p>
+                    ) : (
+                      <p className="text-sm whitespace-pre-wrap">
+                        {response.conclusion_text || '[No conclusion entered]'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* No responses message */}
+            {responses.length === 0 && (
+              <div className="text-center py-10 text-muted-foreground">
+                <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No CARO responses have been entered yet.</p>
+              </div>
+            )}
+          </CardContent>
+        </ScrollArea>
+      </Card>
+    );
+  }
+
   return (
     <div className="grid grid-cols-12 gap-4 h-[calc(100vh-200px)] min-h-[500px]">
       {/* Left Panel - Clause List */}
@@ -212,6 +276,14 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
               ? 'Only Clause 3(xxi) applies to CFS' 
               : `${completedResponses.length}/${applicableClauses.length} completed`}
           </CardDescription>
+          <Button 
+            size="sm" 
+            onClick={() => setPreviewMode(true)} 
+            className="gap-2 w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            <Eye className="h-4 w-4" />
+            Preview
+          </Button>
         </CardHeader>
         <div className="flex-1 overflow-hidden px-4 pb-4">
           <ScrollArea className="h-full">

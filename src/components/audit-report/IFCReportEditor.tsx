@@ -33,7 +33,6 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
   const [previewMode, setPreviewMode] = useState(false);
   const [opinionType, setOpinionType] = useState('unmodified');
   const [opinionParagraph, setOpinionParagraph] = useState('');
-  const [basisForOpinion, setBasisForOpinion] = useState('');
   const [managementResponsibility, setManagementResponsibility] = useState('');
   const [auditorResponsibility, setAuditorResponsibility] = useState('');
   const [ifcMeaning, setIfcMeaning] = useState('');
@@ -55,7 +54,6 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
     if (content) {
       setOpinionType(content.opinion_type);
       setOpinionParagraph(content.opinion_paragraph || '');
-      setBasisForOpinion(content.basis_for_opinion || '');
       setManagementResponsibility(content.management_responsibility_section || '');
       setAuditorResponsibility(content.auditor_responsibility_section || '');
       setIfcMeaning(content.ifc_meaning_section || '');
@@ -87,7 +85,6 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
     const success = await saveContent({
       opinion_type: opinionType,
       opinion_paragraph: opinionParagraph,
-      basis_for_opinion: basisForOpinion,
       management_responsibility_section: managementResponsibility,
       auditor_responsibility_section: auditorResponsibility,
       ifc_meaning_section: ifcMeaning,
@@ -185,14 +182,6 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
                 <h4 className="font-semibold">Opinion</h4>
                 <p className="text-sm whitespace-pre-wrap">{opinionParagraph || '[Opinion paragraph not yet entered]'}</p>
               </div>
-
-              {/* Basis for Opinion */}
-              {basisForOpinion && (
-                <div className="space-y-2">
-                  <h4 className="font-semibold">Basis for Opinion</h4>
-                  <p className="text-sm whitespace-pre-wrap">{basisForOpinion}</p>
-                </div>
-              )}
 
               {/* Management's Responsibility */}
               <div className="space-y-2">
@@ -346,17 +335,6 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
                     onChange={(e) => setOpinionParagraph(e.target.value)}
                     placeholder="Enter the opinion paragraph for IFC report..."
                     rows={8}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="basis-opinion">Basis for Opinion</Label>
-                  <Textarea
-                    id="basis-opinion"
-                    value={basisForOpinion}
-                    onChange={(e) => setBasisForOpinion(e.target.value)}
-                    placeholder="Enter the basis for opinion..."
-                    rows={6}
                   />
                 </div>
 
@@ -683,7 +661,13 @@ function getDefaultManagementResponsibility(): string {
 }
 
 function getDefaultAuditorResponsibility(): string {
-  return `Our responsibility is to express an opinion on the Company's internal financial control with reference to standalone financial statements based on our audit. We conducted our audit in accordance with the Guidance Note on Audit of Internal Financial Controls Over Financial Reporting (the "Guidance Note") and the Standards on Auditing issued by ICAI and deemed to be prescribed under section 143(10) of the Companies Act, 2013, to the extent applicable to an audit of internal financial control with reference to standalone financial statements, both applicable to an audit of Internal Financial Controls and, both issued by the Institute of Chartered Accountants of India. Those Standards and the Guidance Note require that we comply with ethical requirements and plan and perform the audit to obtain reasonable assurance about whether adequate internal financial control with reference to standalone financial statements was established and maintained and if such controls operated effectively in all material respects.`;
+  return `Our responsibility is to express an opinion on the Company's internal financial controls with reference to standalone financial statements based on our audit. We conducted our audit in accordance with the Guidance Note on Audit of Internal Financial Controls Over Financial Reporting (the "Guidance Note") and the Standards on Auditing, issued by ICAI and deemed to be prescribed under section 143(10) of the Companies Act, 2013, to the extent applicable to an audit of internal financial controls, both applicable to an audit of Internal Financial Controls and, both issued by the Institute of Chartered Accountants of India. Those Standards and the Guidance Note require that we comply with ethical requirements and plan and perform the audit to obtain reasonable assurance about whether adequate internal financial controls with reference to standalone financial statements was established and maintained and if such controls operated effectively in all material respects.
+
+Our audit involves performing procedures to obtain audit evidence about the adequacy of the internal financial controls system with reference to standalone financial statements and their operating effectiveness.
+
+Our audit of internal financial controls with reference to standalone financial statements included obtaining an understanding of internal financial controls with reference to standalone financial statements, assessing the risk that a material weakness exists, and testing and evaluating the design and operating effectiveness of internal control based on the assessed risk. The procedures selected depend on the auditor's judgement, including the assessment of the risks of material misstatement of the standalone financial statements, whether due to fraud or error.
+
+We believe that the audit evidence we have obtained is sufficient and appropriate to provide a basis for our audit opinion on the Company's internal financial controls system with reference to standalone financial statements.`;
 }
 
 function getDefaultIFCMeaning(): string {
