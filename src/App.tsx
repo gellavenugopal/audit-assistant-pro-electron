@@ -34,6 +34,10 @@ import AuditTools from "./pages/AuditTools";
 import AuditReport from "./pages/AuditReport";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
+import GstzenIntegration from "./pages/GstzenIntegration";
+import GstzenLogin from "./pages/GstzenLogin";
+import Gstr1Dashboard from "./pages/Gstr1Dashboard";
+import ComplianceApplicability from "./pages/ComplianceApplicability";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
 
 const queryClient = new QueryClient();
