@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EngagementLetterTemplateManager } from '@/components/admin/EngagementLetterTemplateManager';
 import { 
   Settings, 
   Building2, 
@@ -48,6 +49,7 @@ import {
   KeyRound,
   CalendarDays,
   Landmark,
+  FileSignature,
   UserCheck,
   UserX,
   MessageCircle,
@@ -670,6 +672,10 @@ export default function AdminSettings() {
           <TabsTrigger value="caro-templates" className="gap-2">
             <FileText className="h-4 w-4" />
             CARO
+          </TabsTrigger>
+          <TabsTrigger value="letter-templates" className="gap-2">
+            <FileSignature className="h-4 w-4" />
+            Letter Templates
           </TabsTrigger>
           <TabsTrigger value="financial-years" className="gap-2">
             <CalendarDays className="h-4 w-4" />
@@ -1482,6 +1488,11 @@ export default function AdminSettings() {
         {/* CARO TEMPLATES TAB */}
         <TabsContent value="caro-templates">
           <CAROTemplatesTab />
+        </TabsContent>
+
+        {/* LETTER TEMPLATES TAB */}
+        <TabsContent value="letter-templates">
+          <EngagementLetterTemplateManager />
         </TabsContent>
       </Tabs>
     </div>

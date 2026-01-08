@@ -18,6 +18,7 @@ export const navigationShortcuts = [
   { key: 'e', route: '/engagements', description: 'Engagements', category: 'Navigation' },
   { key: 'c', route: '/compliance-applicability', description: 'Compliance Applicability', category: 'Navigation', requiresEngagement: true },
   { key: 't', route: '/trial-balance', description: 'Trial Balance', category: 'Navigation', requiresEngagement: true },
+  { key: 'a', route: '/appointment', description: 'Appointment', category: 'Navigation', requiresEngagement: true },
   { key: 'b', route: '/trial-balance-new', description: 'Trial Balance New', category: 'Navigation', requiresEngagement: true },
   { key: 'm', route: '/materiality', description: 'Materiality', category: 'Navigation', requiresEngagement: true },
   { key: 'r', route: '/risks', description: 'Risk Register', category: 'Navigation', requiresEngagement: true },

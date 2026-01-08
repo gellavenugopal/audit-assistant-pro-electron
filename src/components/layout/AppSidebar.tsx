@@ -19,6 +19,7 @@ import {
   Briefcase,
   Shield,
   FileText,
+  FileSignature,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,7 @@ const alwaysActiveItems = [
 const engagementDependentItems = [
   { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
   { name: 'Trial Balance New', href: '/trial-balance-new', icon: FileSpreadsheet },
+  { name: 'Appointment', href: '/appointment', icon: FileSignature },
   { name: 'Materiality', href: '/materiality', icon: Calculator },
   { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
   { name: 'Audit Programs', href: '/programs', icon: ClipboardList },
