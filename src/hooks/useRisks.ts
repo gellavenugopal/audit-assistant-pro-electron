@@ -25,7 +25,7 @@ export function useRisks(engagementId?: string) {
   const [loading, setLoading] = useState(true);
   const { user, profile } = useAuth();
 
-  const logActivity = async (action: string, entity: string, details: string, entityId?: string) => {
+  const logActivity = async (action: string, entity: string, details: string, entityId?: string, logEngagementId?: string) => {
     if (!user || !profile) return;
     await supabase.from('activity_logs').insert([{
       user_id: user.id,
@@ -33,6 +33,7 @@ export function useRisks(engagementId?: string) {
       action,
       entity,
       entity_id: entityId || null,
+      engagement_id: logEngagementId || null,
       details,
     }]);
   };
@@ -72,7 +73,7 @@ export function useRisks(engagementId?: string) {
       if (error) throw error;
       
       // Log activity
-      await logActivity('Created', 'Risk', `Created risk: ${risk.risk_area}`, data.id);
+      await logActivity('Created', 'Risk', `Created risk: ${risk.risk_area}`, data.id, risk.engagement_id);
       
       toast.success('Risk created successfully');
       await fetchRisks();
@@ -94,7 +95,8 @@ export function useRisks(engagementId?: string) {
       if (error) throw error;
       
       // Log activity
-      await logActivity('Updated', 'Risk', `Updated risk`, id);
+      const risk = risks.find(r => r.id === id);
+      await logActivity('Updated', 'Risk', `Updated risk`, id, risk?.engagement_id);
       
       toast.success('Risk updated');
       await fetchRisks();
@@ -115,7 +117,7 @@ export function useRisks(engagementId?: string) {
       if (error) throw error;
       
       // Log activity
-      await logActivity('Deleted', 'Risk', `Deleted risk: ${risk?.risk_area || 'Unknown'}`, id);
+      await logActivity('Deleted', 'Risk', `Deleted risk: ${risk?.risk_area || 'Unknown'}`, id, risk?.engagement_id);
       
       toast.success('Risk deleted');
       await fetchRisks();

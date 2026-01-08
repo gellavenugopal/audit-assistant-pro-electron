@@ -45,7 +45,7 @@ interface DashboardStats {
   } | null;
 }
 
-export function useDashboardStats() {
+export function useDashboardStats(engagementId?: string) {
   const [stats, setStats] = useState<DashboardStats>({
     engagements: { total: 0, active: 0, planning: 0, completed: 0 },
     risks: { total: 0, high: 0, medium: 0, low: 0, open: 0 },
@@ -59,6 +59,16 @@ export function useDashboardStats() {
   const fetchStats = async () => {
     try {
       // Fetch all data in parallel
+      let activityQuery = supabase
+        .from('activity_logs')
+        .select('id, user_name, action, entity, details, created_at')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (engagementId) {
+        activityQuery = activityQuery.eq('engagement_id', engagementId);
+      }
+
       const [
         engagementsRes,
         risksRes,
@@ -67,20 +77,37 @@ export function useDashboardStats() {
         activityRes,
       ] = await Promise.all([
         supabase.from('engagements').select('id, name, client_name, status, financial_year, materiality_amount, performance_materiality'),
-        supabase.from('risks').select('id, combined_risk, status'),
-        supabase.from('audit_procedures').select('id, status'),
-        supabase.from('evidence_files').select('id, file_size'),
-        supabase.from('activity_logs').select('id, user_name, action, entity, details, created_at').order('created_at', { ascending: false }).limit(10),
+        engagementId
+          ? supabase.from('risks').select('id, combined_risk, status').eq('engagement_id', engagementId)
+          : supabase.from('risks').select('id, combined_risk, status'),
+        engagementId
+          ? supabase.from('audit_procedures').select('id, status').eq('engagement_id', engagementId)
+          : supabase.from('audit_procedures').select('id, status'),
+        engagementId
+          ? supabase.from('evidence_files').select('id, file_size').eq('engagement_id', engagementId)
+          : supabase.from('evidence_files').select('id, file_size'),
+        activityQuery,
       ]);
 
       // Calculate engagement stats
       const engagements = engagementsRes.data || [];
-      const engagementStats = {
-        total: engagements.length,
-        active: engagements.filter(e => e.status === 'fieldwork' || e.status === 'review').length,
-        planning: engagements.filter(e => e.status === 'planning').length,
-        completed: engagements.filter(e => e.status === 'completed' || e.status === 'archived').length,
-      };
+      const selectedEngagement = engagementId
+        ? engagements.find(e => e.id === engagementId) || null
+        : null;
+
+      const engagementStats = engagementId
+        ? {
+            total: selectedEngagement ? 1 : 0,
+            active: selectedEngagement && (selectedEngagement.status === 'fieldwork' || selectedEngagement.status === 'review') ? 1 : 0,
+            planning: selectedEngagement && selectedEngagement.status === 'planning' ? 1 : 0,
+            completed: selectedEngagement && (selectedEngagement.status === 'completed' || selectedEngagement.status === 'archived') ? 1 : 0,
+          }
+        : {
+            total: engagements.length,
+            active: engagements.filter(e => e.status === 'fieldwork' || e.status === 'review').length,
+            planning: engagements.filter(e => e.status === 'planning').length,
+            completed: engagements.filter(e => e.status === 'completed' || e.status === 'archived').length,
+          };
 
       // Calculate risk stats
       const risks = risksRes.data || [];
@@ -110,7 +137,11 @@ export function useDashboardStats() {
       };
 
       // Get latest engagement
-      const latestEngagement = engagements.length > 0 ? engagements[0] : null;
+      const latestEngagement = engagementId
+        ? selectedEngagement
+        : engagements.length > 0
+          ? engagements[0]
+          : null;
 
       setStats({
         engagements: engagementStats,
@@ -142,7 +173,7 @@ export function useDashboardStats() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [engagementId]);
 
   return { stats, loading, refetch: fetchStats };
 }

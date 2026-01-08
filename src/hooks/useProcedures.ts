@@ -52,7 +52,7 @@ export function useProcedures(engagementId?: string) {
   const [loading, setLoading] = useState(true);
   const { user, profile, role } = useAuth();
 
-  const logActivity = async (action: string, entity: string, details: string, entityId?: string) => {
+  const logActivity = async (action: string, entity: string, details: string, entityId?: string, logEngagementId?: string) => {
     if (!user || !profile) return;
     await supabase.from('activity_logs').insert([{
       user_id: user.id,
@@ -60,6 +60,7 @@ export function useProcedures(engagementId?: string) {
       action,
       entity,
       entity_id: entityId || null,
+      engagement_id: logEngagementId || null,
       details,
     }]);
   };
@@ -161,7 +162,7 @@ export function useProcedures(engagementId?: string) {
 
       if (error) throw error;
       
-      await logActivity('Created', 'Procedure', `Created procedure: ${procedure.procedure_name}`, data.id);
+      await logActivity('Created', 'Procedure', `Created procedure: ${procedure.procedure_name}`, data.id, procedure.engagement_id);
       
       toast.success('Procedure created successfully');
       await fetchProcedures();
@@ -188,7 +189,8 @@ export function useProcedures(engagementId?: string) {
         : updates.status === 'reviewed' 
           ? 'Reviewed' 
           : 'Updated';
-      await logActivity(action, 'Procedure', `${action} procedure`, id);
+      const procedure = procedures.find(p => p.id === id);
+      await logActivity(action, 'Procedure', `${action} procedure`, id, procedure?.engagement_id);
       
       toast.success('Procedure updated');
       await fetchProcedures();
@@ -208,7 +210,7 @@ export function useProcedures(engagementId?: string) {
 
       if (error) throw error;
       
-      await logActivity('Deleted', 'Procedure', `Deleted procedure: ${procedure?.procedure_name || 'Unknown'}`, id);
+      await logActivity('Deleted', 'Procedure', `Deleted procedure: ${procedure?.procedure_name || 'Unknown'}`, id, procedure?.engagement_id);
       
       toast.success('Procedure deleted');
       await fetchProcedures();
@@ -232,7 +234,7 @@ export function useProcedures(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('audit_procedure', id, 'marked_prepared', procedure.approval_stage, 'prepared');
-      await logActivity('Prepared', 'Procedure', `Marked procedure as prepared: ${procedure.procedure_name}`, id);
+      await logActivity('Prepared', 'Procedure', `Marked procedure as prepared: ${procedure.procedure_name}`, id, procedure.engagement_id);
       
       toast.success('Procedure marked as prepared');
       await fetchProcedures();
@@ -260,7 +262,7 @@ export function useProcedures(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('audit_procedure', id, 'marked_reviewed', procedure.approval_stage, 'reviewed');
-      await logActivity('Reviewed', 'Procedure', `Marked procedure as reviewed: ${procedure.procedure_name}`, id);
+      await logActivity('Reviewed', 'Procedure', `Marked procedure as reviewed: ${procedure.procedure_name}`, id, procedure.engagement_id);
       
       toast.success('Procedure marked as reviewed');
       await fetchProcedures();
@@ -288,7 +290,7 @@ export function useProcedures(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('audit_procedure', id, 'approved', procedure.approval_stage, 'approved');
-      await logActivity('Approved', 'Procedure', `Approved procedure: ${procedure.procedure_name}`, id);
+      await logActivity('Approved', 'Procedure', `Approved procedure: ${procedure.procedure_name}`, id, procedure.engagement_id);
       
       toast.success('Procedure approved and locked');
       await fetchProcedures();
@@ -325,7 +327,7 @@ export function useProcedures(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('audit_procedure', id, 'unlocked', 'locked', 'unlocked', reason);
-      await logActivity('Unlocked', 'Procedure', `Unlocked procedure: ${procedure.procedure_name}. Reason: ${reason}`, id);
+      await logActivity('Unlocked', 'Procedure', `Unlocked procedure: ${procedure.procedure_name}. Reason: ${reason}`, id, procedure.engagement_id);
       
       toast.success('Procedure unlocked');
       await fetchProcedures();

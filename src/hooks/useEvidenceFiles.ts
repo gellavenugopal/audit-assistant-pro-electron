@@ -41,7 +41,7 @@ export function useEvidenceFiles(engagementId?: string) {
 
   const effectiveEngagementId = engagementId || currentEngagement?.id;
 
-  const logActivity = async (action: string, entity: string, details: string, entityId?: string) => {
+  const logActivity = async (action: string, entity: string, details: string, entityId?: string, logEngagementId?: string) => {
     if (!user || !profile) return;
     await supabase.from('activity_logs').insert([{
       user_id: user.id,
@@ -49,6 +49,7 @@ export function useEvidenceFiles(engagementId?: string) {
       action,
       entity,
       entity_id: entityId || null,
+      engagement_id: logEngagementId || null,
       details,
     }]);
   };
@@ -161,7 +162,7 @@ export function useEvidenceFiles(engagementId?: string) {
       if (dbError) throw dbError;
 
       // Log activity
-      await logActivity('Uploaded', 'Evidence', `Uploaded file: ${metadata.name || file.name}`, data.id);
+      await logActivity('Uploaded', 'Evidence', `Uploaded file: ${metadata.name || file.name}`, data.id, effectiveEngagementId);
 
       toast.success('File uploaded successfully');
       await fetchFiles();
@@ -213,7 +214,7 @@ export function useEvidenceFiles(engagementId?: string) {
       if (dbError) throw dbError;
 
       // Log activity
-      await logActivity('Deleted', 'Evidence', `Deleted file: ${file.name}`, file.id);
+      await logActivity('Deleted', 'Evidence', `Deleted file: ${file.name}`, file.id, file.engagement_id || undefined);
 
       toast.success('File deleted successfully');
       await fetchFiles();
@@ -266,7 +267,7 @@ export function useEvidenceFiles(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('evidence_file', id, 'marked_prepared', file.approval_stage, 'prepared');
-      await logActivity('Prepared', 'Evidence', `Marked file as prepared: ${file.name}`, id);
+      await logActivity('Prepared', 'Evidence', `Marked file as prepared: ${file.name}`, id, file.engagement_id || undefined);
       
       toast.success('File marked as prepared');
       await fetchFiles();
@@ -294,7 +295,7 @@ export function useEvidenceFiles(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('evidence_file', id, 'marked_reviewed', file.approval_stage, 'reviewed');
-      await logActivity('Reviewed', 'Evidence', `Marked file as reviewed: ${file.name}`, id);
+      await logActivity('Reviewed', 'Evidence', `Marked file as reviewed: ${file.name}`, id, file.engagement_id || undefined);
       
       toast.success('File marked as reviewed');
       await fetchFiles();
@@ -322,7 +323,7 @@ export function useEvidenceFiles(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('evidence_file', id, 'approved', file.approval_stage, 'approved');
-      await logActivity('Approved', 'Evidence', `Approved file: ${file.name}`, id);
+      await logActivity('Approved', 'Evidence', `Approved file: ${file.name}`, id, file.engagement_id || undefined);
       
       toast.success('File approved and locked');
       await fetchFiles();
@@ -359,7 +360,7 @@ export function useEvidenceFiles(engagementId?: string) {
       if (error) throw error;
 
       await logAuditTrail('evidence_file', id, 'unlocked', 'locked', 'unlocked', reason);
-      await logActivity('Unlocked', 'Evidence', `Unlocked file: ${file.name}. Reason: ${reason}`, id);
+      await logActivity('Unlocked', 'Evidence', `Unlocked file: ${file.name}. Reason: ${reason}`, id, file.engagement_id || undefined);
       
       toast.success('File unlocked');
       await fetchFiles();

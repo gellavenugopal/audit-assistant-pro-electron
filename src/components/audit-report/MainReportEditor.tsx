@@ -69,6 +69,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const [activeTab, setActiveTab] = useState('configuration');
   const [previewMode, setPreviewMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [ifcManualOverride, setIfcManualOverride] = useState(false);
 
   const { setup, saveSetup } = useAuditReportSetup(engagementId);
   const { content, loading: contentLoading, saveContent } = useAuditReportContent(engagementId);
@@ -82,6 +83,33 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
   const [editorBasis, setEditorBasis] = useState<string>('');
   const [savedExampleForDraftId, setSavedExampleForDraftId] = useState<string | null>(null);
+
+  // Auto-calculate IFC applicability
+  useEffect(() => {
+    if (!setup || ifcManualOverride) return;
+
+    // IFC Applicability: If ANY of these criteria are checked, IFC is applicable
+    const computedApplicability =
+      Boolean(setup.is_public_company) ||
+      Boolean(setup.is_private_exceeding_threshold) ||
+      Boolean(setup.is_private_non_exceeding_threshold) ||
+      Boolean(setup.is_listed_company) ||
+      Boolean(setup.is_subsidiary) ||
+      Boolean(setup.is_holding_company);
+
+    // Only update if the computed value differs from current value
+    if (setup.ifc_applicable !== computedApplicability) {
+      saveSetupPatch({ ifc_applicable: computedApplicability });
+    }
+  }, [
+    setup?.is_public_company,
+    setup?.is_private_exceeding_threshold,
+    setup?.is_private_non_exceeding_threshold,
+    setup?.is_listed_company,
+    setup?.is_subsidiary,
+    setup?.is_holding_company,
+    ifcManualOverride,
+  ]);
 
   useEffect(() => {
     if (content?.id) setDraft(content);
@@ -184,6 +212,12 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     const saved = await saveSetup(patch);
     setSaving(false);
     if (saved) toast.success('Configuration saved');
+  };
+
+  // Helper function to update IFC criteria checkboxes and reset manual override
+  const updateIfcCriteria = (patch: Record<string, any>) => {
+    setIfcManualOverride(false); // Reset manual override when criteria change
+    saveSetupPatch(patch);
   };
 
   const addEomItem = () => {
@@ -308,7 +342,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               <FileText className="h-5 w-5" />
               Main Audit Report
             </CardTitle>
-            <CardDescription>8-section editor with structured compliance inputs and preview</CardDescription>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setPreviewMode(true)} className="gap-2">
@@ -325,14 +358,14 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
-            <TabsTrigger value="configuration">1. Config</TabsTrigger>
-            <TabsTrigger value="opinion">2. Opinion</TabsTrigger>
-            <TabsTrigger value="optional">3. Optional</TabsTrigger>
-            <TabsTrigger value="sa720">4. SA 720</TabsTrigger>
-            <TabsTrigger value="s143">5. 143(3)</TabsTrigger>
-            <TabsTrigger value="rule11">6. Rule 11</TabsTrigger>
-            <TabsTrigger value="signature">7. Signature</TabsTrigger>
-            <TabsTrigger value="preview">8. Preview</TabsTrigger>
+            <TabsTrigger value="configuration">Config</TabsTrigger>
+            <TabsTrigger value="opinion">Opinion</TabsTrigger>
+            <TabsTrigger value="optional" className="text-[11px] px-1">KAM/EoM/Other Matter</TabsTrigger>
+            <TabsTrigger value="sa720" className="text-[11px] px-1">Other Info-SA 720</TabsTrigger>
+            <TabsTrigger value="s143" className="text-[11px] px-1">143(3)-Co Act</TabsTrigger>
+            <TabsTrigger value="rule11" className="text-[11px] px-1">Rule 11-Co Audit Rule</TabsTrigger>
+            <TabsTrigger value="signature">Signature</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
 
           {/* 1) Configuration */}
@@ -341,7 +374,53 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               <p className="text-sm text-muted-foreground">Setup not found. Complete the Setup step first.</p>
             ) : (
               <div className="space-y-6">
+                <div className="bg-muted/50 p-3 rounded-md border">
+                  <p className="text-sm font-medium">
+                    <span className="font-semibold">Instruction:</span> Select all cases that are applicable to the entity for the relevant financial year.
+                  </p>
+                </div>
+                
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_small_company)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_small_company: !!v })}
+                    />
+                    <Label className="font-normal">Small Company</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_opc)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_opc: !!v })}
+                    />
+                    <Label className="font-normal">One Person Company (OPC)</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_public_company)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_public_company: !!v })}
+                    />
+                    <Label className="font-normal">Public Company</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_private_exceeding_threshold)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_private_exceeding_threshold: !!v })}
+                    />
+                    <Label className="font-normal">Private limited company with Previous year turnover is  Rs 50 Crores or more</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_private_non_exceeding_threshold)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_private_non_exceeding_threshold: !!v })}
+                    />
+                    <Label className="font-normal">Private limited company with Current year during at any point of time exceeding Rs 25Crores</Label>
+                  </div>
+
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.cash_flow_required)}
@@ -350,28 +429,67 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     <Label className="font-normal">Cash Flow Statement included</Label>
                   </div>
 
+                  <div className="space-y-2">
+                    <Label className="font-normal">Company Result for the Year</Label>
+                    <RadioGroup
+                      value={setup.company_profit_or_loss || ''}
+                      onValueChange={(v) => saveSetupPatch({ company_profit_or_loss: v || null })}
+                    >
+                      <div className="flex items-center gap-2">
+                        <RadioGroupItem value="profit" id="profit" />
+                        <Label htmlFor="profit" className="font-normal cursor-pointer">Profit</Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <RadioGroupItem value="loss" id="loss" />
+                        <Label htmlFor="loss" className="font-normal cursor-pointer">Loss</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.ifc_applicable)}
-                      onCheckedChange={(v) => saveSetupPatch({ ifc_applicable: !!v })}
+                      onCheckedChange={(v) => {
+                        setIfcManualOverride(true);
+                        saveSetupPatch({ ifc_applicable: !!v });
+                      }}
                     />
                     <Label className="font-normal">IFC reporting applicable</Label>
+                    {ifcManualOverride && (
+                      <span className="text-xs text-amber-600 font-medium">manual override</span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.is_listed_company)}
-                      onCheckedChange={(v) => saveSetupPatch({ is_listed_company: !!v })}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_listed_company: !!v })}
                     />
                     <Label className="font-normal">Listed company (KAMs typically required)</Label>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      checked={Boolean(setup.has_subsidiaries)}
-                      onCheckedChange={(v) => saveSetupPatch({ has_subsidiaries: !!v })}
+                      checked={Boolean(setup.is_subsidiary)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_subsidiary: !!v })}
                     />
-                    <Label className="font-normal">Has subsidiaries / associates</Label>
+                    <Label className="font-normal">is a subsidiary</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.is_holding_company)}
+                      onCheckedChange={(v) => updateIfcCriteria({ is_holding_company: !!v })}
+                    />
+                    <Label className="font-normal">is a holding company</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(setup.has_associates)}
+                      onCheckedChange={(v) => saveSetupPatch({ has_associates: !!v })}
+                    />
+                    <Label className="font-normal">has associates</Label>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -447,24 +565,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
           {/* 2) Opinion */}
           <TabsContent value="opinion" className="space-y-6">
-            <Card className="bg-blue-50 border-blue-200">
-              <CardContent className="pt-6">
-                <p className="text-sm text-blue-900">
-                  <strong>Auditor Opinion Paragraph:</strong> The opinion paragraph is automatically generated based on:
-                  <br />
-                  • <strong>Criterion 1:</strong> Clean opinion + No cash flow + No branch auditors
-                  <br />
-                  • <strong>Criterion 2:</strong> Clean opinion + Cash flow included + No branch auditors
-                  <br />
-                  • <strong>Criterion 3:</strong> Clean opinion + No cash flow + With branch auditors
-                  <br />
-                  • <strong>Criterion 4:</strong> Clean opinion + Cash flow included + With branch auditors
-                  <br />
-                  Configure these options in the <strong>Configuration</strong> tab to update the opinion paragraph automatically.
-                </p>
-              </CardContent>
-            </Card>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Opinion type</Label>
@@ -543,6 +643,12 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
           {/* 3) Optional paragraphs */}
           <TabsContent value="optional" className="space-y-6">
+            <div className="bg-muted/50 p-3 rounded-md border">
+              <p className="text-sm font-medium">
+                <span className="font-semibold">Standards Reference:</span> SA 701 - KAM; SA 706 - EoM/Other Matter
+              </p>
+            </div>
+            
             <div className="flex items-center justify-between gap-2">
               <div className="space-y-1">
                 <Label>Key Audit Matters</Label>

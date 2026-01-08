@@ -92,10 +92,9 @@ interface ToolCardProps {
 
 const ToolCard = ({ title, description, icon, status = "available", onClick }: ToolCardProps) => {
   return (
-    <Card 
-      className={`cursor-pointer transition-all hover:shadow-md hover:border-primary/50 ${
-        status === "coming-soon" ? "opacity-60" : ""
-      }`}
+    <Card
+      className={`cursor-pointer transition-all hover:shadow-md hover:border-primary/50 ${status === "coming-soon" ? "opacity-60" : ""
+        }`}
       onClick={status !== "coming-soon" ? onClick : undefined}
     >
       <CardHeader className="pb-3">
@@ -134,6 +133,7 @@ const TallyTools = () => {
   const [fetchedTBData, setFetchedTBData] = useState<TallyTrialBalanceLine[] | null>(null);
   const [tbSearchTerm, setTbSearchTerm] = useState("");
   
+
   // Month wise data fetch state
   const [showMonthWiseDialog, setShowMonthWiseDialog] = useState(false);
   const [mwFyStartYear, setMwFyStartYear] = useState(new Date().getFullYear() - 1);
@@ -148,6 +148,7 @@ const TallyTools = () => {
   const [fetchedGSTNotFeedData, setFetchedGSTNotFeedData] = useState<TallyGSTNotFeedLine[] | null>(null);
   const [gstSearchTerm, setGstSearchTerm] = useState("");
   
+
   // Negative Ledgers state
   const [showNegativeLedgersDialog, setShowNegativeLedgersDialog] = useState(false);
   const [negativeLedgersTab, setNegativeLedgersTab] = useState("debtors");
@@ -383,7 +384,7 @@ const TallyTools = () => {
         "Ledger Name": line.accountName,
         "Primary Group": line.primaryGroup,
       };
-      
+
       // For P&L, calculate movement (current - previous)
       // For BS, show absolute closing balances
       if (isPL) {
@@ -402,12 +403,12 @@ const TallyTools = () => {
           row[month] = line.monthlyBalances[month] || 0;
         });
       }
-      
+
       return row;
     };
-    
+
     const wb = XLSX.utils.book_new();
-    
+
     // P&L Sheet
     if (plItems.length > 0) {
       const plData = plItems.map(line => formatRow(line, true));
@@ -417,11 +418,11 @@ const TallyTools = () => {
         plTotals[month] = plData.reduce((sum, row) => sum + (Number(row[month]) || 0), 0);
       });
       plData.push(plTotals);
-      
+
       const plWs = XLSX.utils.json_to_sheet(plData);
       XLSX.utils.book_append_sheet(wb, plWs, "Profit_Loss");
     }
-    
+
     // Balance Sheet
     if (bsItems.length > 0) {
       const bsData = bsItems.map(line => formatRow(line, false));
@@ -431,14 +432,14 @@ const TallyTools = () => {
         bsTotals[month] = bsData.reduce((sum, row) => sum + (Number(row[month]) || 0), 0);
       });
       bsData.push(bsTotals);
-      
+
       const bsWs = XLSX.utils.json_to_sheet(bsData);
       XLSX.utils.book_append_sheet(wb, bsWs, "Balance_Sheet");
     }
-    
+
     const fileName = `Financial_Report_${mwFyStartYear}_${mwTargetMonth}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
+
     toast({
       title: "Export Complete",
       description: `Saved month wise data to ${fileName}`,
@@ -492,20 +493,20 @@ const TallyTools = () => {
 
   const handleExportGSTNotFeedToExcel = () => {
     if (!fetchedGSTNotFeedData || fetchedGSTNotFeedData.length === 0) return;
-    
+
     const data = fetchedGSTNotFeedData.map(line => ({
       "Ledger Name": line.ledgerName,
       "GST Registration Type": line.registrationType || line.gstRegistrationType || "Unknown",
       "Party GSTIN": line.partyGSTIN || "(Not Feeded)",
     }));
-    
+
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
     XLSX.utils.book_append_sheet(wb, ws, "GST_Not_Feeded");
-    
+
     const fileName = `GST_Not_Feeded_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
+
     toast({
       title: "Export Complete",
       description: `Saved ${fetchedGSTNotFeedData.length} ledgers to ${fileName}`,
@@ -538,7 +539,7 @@ const TallyTools = () => {
     const liabilities = fetchedTBData.filter(line => 
       liabilityGroups.includes(line.primaryGroup) && line.closingBalance < 0
     );
-    
+
     return { debtors, creditors, assets, liabilities };
   };
 
@@ -589,30 +590,30 @@ const TallyTools = () => {
     };
     
     const wb = XLSX.utils.book_new();
-    
+
     if (debtors.length > 0) {
       const ws = XLSX.utils.json_to_sheet(debtors.map(l => formatRow(l, "Dr")));
       XLSX.utils.book_append_sheet(wb, ws, "Debtors_Cr_Bal");
     }
-    
+
     if (creditors.length > 0) {
       const ws = XLSX.utils.json_to_sheet(creditors.map(l => formatRow(l, "Cr")));
       XLSX.utils.book_append_sheet(wb, ws, "Creditors_Dr_Bal");
     }
-    
+
     if (assets.length > 0) {
       const ws = XLSX.utils.json_to_sheet(assets.map(l => formatRow(l, "Dr")));
       XLSX.utils.book_append_sheet(wb, ws, "Assets_Cr_Bal");
     }
-    
+
     if (liabilities.length > 0) {
       const ws = XLSX.utils.json_to_sheet(liabilities.map(l => formatRow(l, "Cr")));
       XLSX.utils.book_append_sheet(wb, ws, "Liabilities_Dr_Bal");
     }
-    
+
     const fileName = `Negative_Ledgers_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
+
     toast({
       title: "Export Complete",
       description: `Saved negative ledgers to ${fileName}`,
@@ -753,7 +754,7 @@ const TallyTools = () => {
               <p>Connect directly to Tally using ODBC. Ensure Tally is running with ODBC enabled.</p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-4 flex-wrap">
             {isConnected ? (
               <Button onClick={handleConnect} size="sm" variant="outline" className="border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950">
@@ -807,7 +808,7 @@ const TallyTools = () => {
               <p>Export your Trial Balance from Tally as Excel/CSV and import it into the system. This is a manual process but works reliably.</p>
             </div>
           </div>
-          
+
           <Button size="sm" onClick={() => toast({ title: "Coming Soon", description: "Use Trial Balance > Import button to import Excel files" })}>
             <Upload className="h-4 w-4 mr-2" />
             Import Trial Balance
@@ -1133,6 +1134,30 @@ const TallyTools = () => {
                         return null;
                       })()}
                     </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setFetchedTBData(null)}>
+                      Clear
+                    </Button>
+                    <Button variant="outline" onClick={handleExportToExcel}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export to Excel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (!currentEngagement) {
+                          toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
+                          return;
+                        }
+                        toast({
+                          title: "Save to Trial Balance",
+                          description: "Navigate to Trial Balance page and use Import to save this data"
+                        });
+                        setShowTBDialog(false);
+                      }}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Use in Trial Balance
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -1173,8 +1198,8 @@ const TallyTools = () => {
             <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg flex-wrap">
               <div className="flex items-center gap-2">
                 <Label htmlFor="mwFyStartYear">FY Starting Year:</Label>
-                <Select 
-                  value={String(mwFyStartYear)} 
+                <Select
+                  value={String(mwFyStartYear)}
                   onValueChange={(v) => setMwFyStartYear(Number(v))}
                 >
                   <SelectTrigger className="w-28">
@@ -1581,6 +1606,8 @@ const TallyTools = () => {
               const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length;
               
               const renderTable = (data: TallyTrialBalanceLine[], filteredData: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
+
+              const renderTable = (data: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
                 <div className="border rounded-lg overflow-hidden">
                   <div className="max-h-[350px] overflow-auto">
                     <table className="w-full text-sm">
@@ -2285,10 +2312,11 @@ const GSTTools = () => {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <ToolCard
-          title="Get GSTR-1, 3B & 2A"
-          description="Download GST returns (GSTR-1, GSTR-3B, GSTR-2A/2B) directly from the GST portal for reconciliation."
+          title="GSTR1 Data Download"
+          description="Download GSTR1 reports directly from GST portal for audit and reconciliation purposes."
           icon={<Download className="h-5 w-5 text-primary" />}
-          status="coming-soon"
+          status="available"
+          onClick={() => window.location.href = '/gstr1-integration'}
         />
         <ToolCard
           title="Reconcile with Books"
@@ -2329,8 +2357,8 @@ const MCATools = () => {
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2 flex-1 min-w-[200px]">
             <Label htmlFor="cin">CIN Number:</Label>
-            <Input 
-              id="cin" 
+            <Input
+              id="cin"
               value={cinNumber}
               onChange={(e) => setCinNumber(e.target.value)}
               placeholder="Enter CIN/LLPIN"
@@ -2397,8 +2425,8 @@ const IncomeTaxTools = () => {
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2 flex-1 min-w-[200px]">
             <Label htmlFor="pan">PAN Number:</Label>
-            <Input 
-              id="pan" 
+            <Input
+              id="pan"
               value={pan}
               onChange={(e) => setPan(e.target.value.toUpperCase())}
               placeholder="Enter PAN"

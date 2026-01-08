@@ -62,8 +62,8 @@ export function buildLegalRegulatorySection(
   // (f) Directors disqualification
   paragraphs.push(buildDirectorsDisqualificationParagraph(content, periodEndLabel));
 
-  // (g) Internal financial controls
-  paragraphs.push({ text: 'g.\twith respect to the adequacy of the internal financial controls with reference to standalone financial statements of the Company and the operating effectiveness of such controls as required under Clause (i) of Sub-section 3 of Section 143 of the Act, the same is not applicable to the Company vide amendment to the notification G.S.R 464(E) dated June 13, 2017;' });
+  // (g) Internal financial controls - conditional based on IFC applicability
+  paragraphs.push(buildInternalFinancialControlsParagraph(setup, periodEndLabel));
 
   // (h) Director remuneration
   paragraphs.push(buildDirectorRemunerationParagraph(setup, content));
@@ -175,6 +175,21 @@ function buildBalanceSheetAgreementParagraph(setup: AuditReportSetup): string {
     return `d.\tthe Balance Sheet, the Statement of Profit and loss and the Statement of Cash Flow dealt with by this Report are in agreement with the books of account;`;
   } else {
     return `d.\tthe Balance Sheet, and the Statement of Profit and loss dealt with by this Report are in agreement with the books of account;`;
+  }
+}
+
+function buildInternalFinancialControlsParagraph(setup: AuditReportSetup, periodEndLabel: string): LegalRegulatoryParagraph {
+  if (setup.ifc_applicable) {
+    // IFC is applicable - report that we have audited and express unmodified opinion
+    const annexureLetter = setup.ifc_annexure_letter || 'B';
+    return { 
+      text: `g.\tWe have also audited, in accordance with the Standards on Auditing (SAs) issued by the ICAI, as specified under Section 143(10) of the Act, the Company's internal financial controls with reference to standalone financial statements as at ${periodEndLabel} and our report in Annexure ${annexureLetter} expresses an unmodified opinion thereon.`
+    };
+  } else {
+    // IFC is not applicable - report exemption
+    return { 
+      text: 'g.\twith respect to the adequacy of the internal financial controls with reference to standalone financial statements of the Company and the operating effectiveness of such controls as required under Clause (i) of Sub-section 3 of Section 143 of the Act, the same is not applicable to the Company vide amendment to the notification G.S.R 464(E) dated June 13, 2017;'
+    };
   }
 }
 

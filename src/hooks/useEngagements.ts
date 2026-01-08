@@ -31,7 +31,7 @@ export function useEngagements() {
   const [loading, setLoading] = useState(true);
   const { user, profile } = useAuth();
 
-  const logActivity = async (action: string, entity: string, details: string, entityId?: string) => {
+  const logActivity = async (action: string, entity: string, details: string, entityId?: string, logEngagementId?: string) => {
     if (!user || !profile) return;
     await supabase.from('activity_logs').insert([{
       user_id: user.id,
@@ -39,6 +39,7 @@ export function useEngagements() {
       action,
       entity,
       entity_id: entityId || null,
+      engagement_id: logEngagementId || null,
       details,
     }]);
   };
@@ -77,7 +78,7 @@ export function useEngagements() {
       if (error) throw error;
       
       // Log activity
-      await logActivity('Created', 'Engagement', `Created engagement: ${engagement.name}`, data.id);
+      await logActivity('Created', 'Engagement', `Created engagement: ${engagement.name}`, data.id, data.id);
       
       toast.success('Engagement created successfully');
       await fetchEngagements();
@@ -99,7 +100,7 @@ export function useEngagements() {
       if (error) throw error;
       
       // Log activity
-      await logActivity('Updated', 'Engagement', `Updated engagement`, id);
+      await logActivity('Updated', 'Engagement', `Updated engagement`, id, id);
       
       toast.success('Engagement updated');
       await fetchEngagements();
@@ -120,7 +121,7 @@ export function useEngagements() {
       if (error) throw error;
       
       // Log activity
-      await logActivity('Deleted', 'Engagement', `Deleted engagement: ${engagement?.name || 'Unknown'}`, id);
+      await logActivity('Deleted', 'Engagement', `Deleted engagement: ${engagement?.name || 'Unknown'}`, id, id);
       
       toast.success('Engagement deleted');
       await fetchEngagements();

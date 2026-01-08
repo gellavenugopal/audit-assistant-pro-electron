@@ -10,6 +10,7 @@ interface LogActivityParams {
   action: string;
   entity: string;
   entityId?: string;
+  engagementId?: string;
   details?: string;
   metadata?: Record<string, unknown>;
 }
@@ -38,7 +39,7 @@ export function useActivityLogs() {
   };
 
   const logActivity = useCallback(
-    async ({ action, entity, entityId, details, metadata = {} }: LogActivityParams) => {
+    async ({ action, entity, entityId, engagementId, details, metadata = {} }: LogActivityParams) => {
       if (!user || !profile) {
         console.warn('Cannot log activity: user not authenticated');
         return false;
@@ -51,6 +52,7 @@ export function useActivityLogs() {
           action,
           entity,
           entity_id: entityId || null,
+          engagement_id: engagementId || null,
           details: details || null,
           metadata: metadata as unknown as Record<string, never>,
         }]);
