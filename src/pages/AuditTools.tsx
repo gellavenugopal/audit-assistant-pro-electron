@@ -1134,6 +1134,7 @@ const TallyTools = () => {
                         return null;
                       })()}
                     </div>
+                  </div>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={() => setFetchedTBData(null)}>
                       Clear
@@ -1605,8 +1606,6 @@ const TallyTools = () => {
               const totalCount = debtors.length + creditors.length + assets.length + liabilities.length;
               const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length;
               
-              const renderTable = (data: TallyTrialBalanceLine[], filteredData: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
-
               const renderTable = (data: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
                 <div className="border rounded-lg overflow-hidden">
                   <div className="max-h-[350px] overflow-auto">
