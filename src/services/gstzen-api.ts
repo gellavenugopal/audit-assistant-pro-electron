@@ -103,6 +103,43 @@ class GstzenApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
+    // 1. Try Electron IPC Bridge (Bypass CORS)
+    if (typeof window !== 'undefined') {
+        // Debug logging
+        // @ts-ignore
+        if (!window.electronAPI) console.warn("GSTZenAPI: window.electronAPI is missing in request()");
+        // @ts-ignore
+        else if (!window.electronAPI.gstzen) console.warn("GSTZenAPI: window.electronAPI.gstzen is missing in request()");
+        // @ts-ignore
+        else if (!window.electronAPI.gstzen.request) console.warn("GSTZenAPI: window.electronAPI.gstzen.request is missing in request()");
+    }
+
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.request) {
+        // Map methods
+        const method = options.method || 'GET';
+        
+        // Handle Body
+        let data = undefined;
+        if (options.body && typeof options.body === 'string') {
+             try {
+                 data = JSON.parse(options.body as string);
+             } catch (e) {
+                 console.warn("Could not parse body for IPC", options.body);
+             }
+        }
+        
+        try {
+            const result = await window.electronAPI.gstzen.request(endpoint, method, data, this.authToken || '');
+            if (result.ok) {
+                return { success: true, data: result.data };
+            } else {
+                return { success: false, error: result.data?.message || `HTTP error ${result.status}` };
+            }
+        } catch (error) {
+             return { success: false, error: error instanceof Error ? error.message : 'IPC Request Failed' };
+        }
+    }
+
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -319,6 +356,7 @@ class GstzenApiClient {
   async downloadGstr1(data: Gstr1DownloadRequest): Promise<ApiResponse<Gstr1Response>> {
     // Check if running in Electron
     if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.downloadGstr1) {
+      console.log('GSTZenAPI: Initiating GSTR1 Download via IPC...', data);
       // Ensure backend-compatible field names
       const requestData = {
           ...data,
@@ -326,6 +364,7 @@ class GstzenApiClient {
       };
 
       const result = await window.electronAPI.gstzen.downloadGstr1(requestData, this.authToken || '');
+      console.log('GSTZenAPI: IPC Download Result:', result);
       if (result.ok) {
         return { success: true, data: result.data };
       } else {
@@ -394,7 +433,7 @@ class GstzenApiClient {
    */
   async getGstinList(): Promise<ApiResponse<{ gstins: Gstin[], page_info: any }>> {
       // Endpoint corresponds to views.GstInListApi
-      return this.get<{ gstins: Gstin[], page_info: any }>(`/a/gstin-list/`);
+      return this.get<{ gstins: Gstin[], page_info: any }>(`/api/gstins/`);
   }
 
   /**

@@ -13,6 +13,7 @@ declare global {
         downloadGstr1: (downloadRequest: any, token: string) => Promise<any>;
         generateOtp: (requestData: any, token: string) => Promise<any>;
         establishSession: (requestData: any, token: string) => Promise<any>;
+        request: (endpoint: string, method: string, data: any, token: string) => Promise<any>;
       };
     };
   }
