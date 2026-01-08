@@ -107,7 +107,7 @@ export function useAuditProgramNew(engagementId: string | null) {
       if (error) throw error;
       
       // Create default sections
-      const sections = DEFAULT_SECTION_NAMES.map((sectionName, index) => ({
+      const sections = DEFAULT_SECTION_NAMES.map((sectionName: string, index: number) => ({
         audit_program_id: data.id,
         name: sectionName,
         order: index,
@@ -206,7 +206,7 @@ export function useAuditProgramSections(programId: string | null) {
 
     if (DEMO_MODE) {
       // Create demo sections
-      const demoSections = DEFAULT_SECTION_NAMES.map((name, index) => ({
+      const demoSections = DEFAULT_SECTION_NAMES.map((name: string, index: number) => ({
         id: `demo-section-${programId}-${index}`,
         audit_program_id: programId,
         name,
@@ -384,7 +384,7 @@ export function useWorkingSectionBoxes(sectionId: string | null) {
 
     if (DEMO_MODE) {
       // Create demo boxes
-      const demoBoxes = DEFAULT_BOX_HEADERS.map((header, index) => ({
+      const demoBoxes = DEFAULT_BOX_HEADERS.map((header: string, index: number) => ({
         id: `demo-box-${sectionId}-${index}`,
         section_id: sectionId,
         header,
