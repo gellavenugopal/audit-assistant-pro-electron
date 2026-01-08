@@ -11,155 +11,33 @@ import { gstzenKeys } from './useGstzenCustomer';
 /**
  * Hook to get all GSTINs for a customer
  */
-export function useGstins(customerUuid: string | null) {
+export function useGstins(options: { enabled?: boolean } = {}) {
   return useQuery({
-    queryKey: gstzenKeys.gstins(customerUuid || ''),
+    queryKey: gstzenKeys.gstins(),
     queryFn: async () => {
-      if (!customerUuid) throw new Error('Customer UUID is required');
-      const response = await gstzenApi.getGstins(customerUuid);
+      const response = await gstzenApi.getGstins();
       if (!response.success) {
+        // Handle Stale Token (401)
+        if (typeof response.error === 'string' && (response.error.includes('token_not_valid') || response.error.includes('401') || response.error.includes('Authentication credentials were not provided'))) {
+           console.warn('[useGstins] Stale or missing token detected. Clearing auth and reloading.');
+           // Only clear and reload if we *thought* we were logged in/enabled
+           if (options.enabled !== false) {
+               gstzenApi.clearAuthToken();
+               window.location.reload();
+           }
+           return [];
+        }
         throw new Error(response.error || 'Failed to fetch GSTINs');
       }
       return response.data || [];
     },
-    enabled: !!customerUuid,
+    retry: false, // Don't retry on 401s
     staleTime: 2 * 60 * 1000, // 2 minutes
+    enabled: options.enabled, // Pass enabled flag to React Query
   });
 }
 
-/**
- * Hook to add a new GSTIN
- */
-export function useAddGstin(customerUuid: string) {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
 
-  return useMutation({
-    mutationFn: async (data: AddGstinRequest) => {
-      const response = await gstzenApi.addGstin(customerUuid, data);
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to add GSTIN');
-      }
-      return response.data;
-    },
-    onSuccess: () => {
-      // Invalidate GSTINs list
-      queryClient.invalidateQueries({ queryKey: gstzenKeys.gstins(customerUuid) });
-
-      toast({
-        title: 'Success',
-        description: 'GSTIN added successfully',
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to add GSTIN',
-        variant: 'destructive',
-      });
-    },
-  });
-}
-
-/**
- * Hook to update GSTIN credentials
- */
-export function useUpdateGstinCredentials() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  return useMutation({
-    mutationFn: async (data: UpdateGstinCredentialsRequest) => {
-      const response = await gstzenApi.updateGstinCredentials(data);
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to update credentials');
-      }
-      return response.data;
-    },
-    onSuccess: (_, variables) => {
-      // Invalidate all GSTIN queries since we don't know the customer UUID
-      queryClient.invalidateQueries({ queryKey: gstzenKeys.all });
-
-      toast({
-        title: 'Success',
-        description: 'GSTIN credentials updated successfully',
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to update credentials',
-        variant: 'destructive',
-      });
-    },
-  });
-}
-
-/**
- * Hook to delete a GSTIN
- */
-export function useDeleteGstin(customerUuid: string) {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  return useMutation({
-    mutationFn: async (gstinUuid: string) => {
-      const response = await gstzenApi.deleteGstin(gstinUuid);
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to delete GSTIN');
-      }
-      return response.data;
-    },
-    onSuccess: () => {
-      // Invalidate GSTINs list
-      queryClient.invalidateQueries({ queryKey: gstzenKeys.gstins(customerUuid) });
-
-      toast({
-        title: 'Success',
-        description: 'GSTIN deleted successfully',
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to delete GSTIN',
-        variant: 'destructive',
-      });
-    },
-  });
-}
-
-/**
- * Hook to test GSTIN connection
- */
-export function useTestGstinConnection() {
-  const { toast } = useToast();
-
-  return useMutation({
-    mutationFn: async (gstinUuid: string) => {
-      const response = await gstzenApi.testGstinConnection(gstinUuid);
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to test connection');
-      }
-      return response.data;
-    },
-    onSuccess: (data) => {
-      toast({
-        title: 'Connection Test',
-        description: data?.status === 'success' 
-          ? 'Successfully connected to GSTN portal' 
-          : 'Connection test completed',
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Connection Failed',
-        description: error.message || 'Failed to connect to GSTN portal',
-        variant: 'destructive',
-      });
-    },
-  });
-}
 
 /**
  * Hook to generate OTP for GSTN login

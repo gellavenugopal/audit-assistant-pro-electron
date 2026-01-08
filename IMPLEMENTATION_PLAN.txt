@@ -1,0 +1,424 @@
+=================================================================================
+AUDIT ASSISTANT PRO - COMPREHENSIVE UI/UX IMPLEMENTATION PLAN
+Date: January 8, 2026
+=================================================================================
+
+## PHASE 1: TABLE IMPROVEMENTS (Priority: CRITICAL)
+=================================================================================
+
+### 1.1 Dense Table Component ✅ CREATED
+- File: src/components/ui/dense-table.tsx
+- Features:
+  * 40-50% reduced row height (h-7 for rows, h-8 for headers)
+  * Minimal padding (px-2 py-0.5 for cells)
+  * Sticky headers with z-index management
+  * Fixed-height scroll container
+  * Horizontal + vertical scrolling
+  * Whitespace: nowrap for dense layout
+
+### 1.2 Multi-Select Filter Component ✅ CREATED
+- File: src/components/ui/multi-select.tsx
+- Features:
+  * Checkbox-based tick/untick
+  * Select All / Clear All buttons
+  * Search functionality
+  * Badge display for selected items
+  * Proper state management
+
+### 1.3 Tables to Convert (IN PROGRESS)
+- [ ] Actual TB table (TrialBalanceNew.tsx ~line 2146)
+- [ ] Classified TB table (TrialBalanceNew.tsx ~line 2415)
+- [ ] Stock Items table (StockItemsTab.tsx)
+- [ ] All Notes tables (various note components)
+
+Steps for each table:
+1. Import DenseTableContainer, DenseTable components
+2. Wrap table in DenseTableContainer with maxHeight
+3. Replace Table* with DenseTable* components
+4. Remove Card wrapper padding
+5. Test scrolling (vertical + horizontal)
+6. Verify sticky headers work
+
+=================================================================================
+## PHASE 2: SELECTION & FILTERING (Priority: HIGH)
+=================================================================================
+
+### 2.1 Multi-Row Selection Without Ctrl
+- Add checkbox column to left of each table
+- Track selected rows in state: selectedRows: Set<string>
+- Click anywhere on row toggles selection
+- Shift+click for range selection
+- Ctrl+A for select all visible
+
+### 2.2 Keyboard Selection
+- Arrow keys for navigation
+- Space for toggle selection
+- Enter to open/edit row
+- Escape to clear selection
+
+### 2.3 Filter Only Visible Rows
+- Apply bulk actions only to filtered subset
+- Show count: "X of Y rows selected"
+- "Select all visible" vs "Select all"
+
+### 2.4 Replace All Filter Dropdowns
+- Convert to MultiSelect component
+- Apply filters cumulatively (AND logic)
+- Show active filter count in UI
+
+=================================================================================
+## PHASE 3: CLASSIFIED TB FEATURES (Priority: HIGH)
+=================================================================================
+
+### 3.1 Hide/Show Zero Balance Toggle
+File: TrialBalanceNew.tsx (Classified TB tab)
+
+Implementation:
+```typescript
+const [hideZeroBalances, setHideZeroBalances] = useState(false)
+
+const visibleRows = useMemo(() => {
+  if (!hideZeroBalances) return classifiedData
+  return classifiedData.filter(row => 
+    Math.abs(row['Opening Balance'] || 0) > 0 || 
+    Math.abs(row['Closing Balance'] || 0) > 0
+  )
+}, [classifiedData, hideZeroBalances])
+```
+
+UI: Add toggle button in toolbar
+```tsx
+<Button 
+  variant={hideZeroBalances ? "default" : "outline"}
+  onClick={() => setHideZeroBalances(!hideZeroBalances)}
+>
+  {hideZeroBalances ? "Show" : "Hide"} Zero Balances
+</Button>
+```
+
+### 3.2 Undo/Redo for Classification
+Implementation:
+```typescript
+interface ClassificationAction {
+  rowKey: string
+  field: 'H1' | 'H2' | 'H3' | 'H4'
+  oldValue: string
+  newValue: string
+  timestamp: number
+}
+
+const [undoStack, setUndoStack] = useState<ClassificationAction[]>([])
+const [redoStack, setRedoStack] = useState<ClassificationAction[]>([])
+
+const handleClassificationChange = (rowKey: string, field: string, newValue: string) => {
+  const oldValue = classifiedData.find(r => r.key === rowKey)?.[field] || ''
+  
+  // Record action
+  setUndoStack(prev => [...prev.slice(-9), { rowKey, field, oldValue, newValue, timestamp: Date.now() }])
+  setRedoStack([]) // Clear redo on new action
+  
+  // Apply change
+  // ... existing classification logic
+}
+
+const undo = () => {
+  const action = undoStack[undoStack.length - 1]
+  if (!action) return
+  
+  // Revert classification
+  applyClassification(action.rowKey, action.field, action.oldValue)
+  setRedoStack(prev => [...prev, action])
+  setUndoStack(prev => prev.slice(0, -1))
+}
+
+const redo = () => {
+  const action = redoStack[redoStack.length - 1]
+  if (!action) return
+  
+  applyClassification(action.rowKey, action.field, action.newValue)
+  setUndoStack(prev => [...prev, action])
+  setRedoStack(prev => prev.slice(0, -1))
+}
+```
+
+UI: Add buttons in toolbar
+```tsx
+<Button onClick={undo} disabled={undoStack.length === 0}>
+  <Undo className="h-4 w-4 mr-2" /> Undo
+</Button>
+<Button onClick={redo} disabled={redoStack.length === 0}>
+  <Redo className="h-4 w-4 mr-2" /> Redo
+</Button>
+```
+
+=================================================================================
+## PHASE 4: EXCEPTION REPORT TAB (Priority: HIGH)
+=================================================================================
+
+### 4.1 Create New Tab
+File: TrialBalanceNew.tsx
+Location: Add after "Reports" tab
+
+```tsx
+<TabsTrigger value="exception-report">
+  <AlertTriangle className="h-4 w-4 mr-2" />
+  Exception Report
+</TabsTrigger>
+
+<TabsContent value="exception-report">
+  <ExceptionReportTab 
+    classifiedData={classifiedData}
+    actualData={actualTrialBalanceLines}
+  />
+</TabsContent>
+```
+
+### 4.2 Exception Report Component
+File: src/components/trial-balance-new/ExceptionReportTab.tsx
+
+Rules to implement:
+1. Debtors (Sundry Debtors) with Credit balance
+2. Creditors (Sundry Creditors) with Debit balance
+3. Loans / Bank OD / CC with Debit balance
+4. Bank accounts with Credit balance
+5. Loans & Advances (Assets) with Credit balance
+
+```typescript
+interface ExceptionItem {
+  ledgerName: string
+  group: string
+  balance: number
+  expectedSign: 'Dr' | 'Cr'
+  actualSign: 'Dr' | 'Cr'
+  classification?: string
+}
+
+const detectExceptions = (data: LedgerRow[]): Record<string, ExceptionItem[]> => {
+  const exceptions: Record<string, ExceptionItem[]> = {
+    debtorsCredit: [],
+    creditorsDebit: [],
+    loansDebit: [],
+    bankCredit: [],
+    loansAdvancesCredit: [],
+  }
+  
+  data.forEach(row => {
+    const group = (row['Primary Group'] || '').toLowerCase()
+    const balance = row['Closing Balance'] || 0
+    const isCredit = balance < 0
+    const isDebit = balance > 0
+    
+    // Rule 1: Debtors with Credit
+    if (group.includes('debtor') && isCredit) {
+      exceptions.debtorsCredit.push({
+        ledgerName: row['Ledger Name'] || '',
+        group: row['Primary Group'] || '',
+        balance,
+        expectedSign: 'Dr',
+        actualSign: 'Cr',
+        classification: row.H2
+      })
+    }
+    
+    // Rule 2: Creditors with Debit
+    if (group.includes('creditor') && isDebit) {
+      exceptions.creditorsDebit.push({
+        ledgerName: row['Ledger Name'] || '',
+        group: row['Primary Group'] || '',
+        balance,
+        expectedSign: 'Cr',
+        actualSign: 'Dr',
+        classification: row.H2
+      })
+    }
+    
+    // Rule 3: Loans/OD/CC with Debit
+    if ((group.includes('loan') || group.includes('bank od') || group.includes('cash credit')) && isDebit) {
+      exceptions.loansDebit.push({
+        ledgerName: row['Ledger Name'] || '',
+        group: row['Primary Group'] || '',
+        balance,
+        expectedSign: 'Cr',
+        actualSign: 'Dr',
+        classification: row.H2
+      })
+    }
+    
+    // Rule 4: Bank accounts with Credit
+    if (group.includes('bank account') && isCredit) {
+      exceptions.bankCredit.push({
+        ledgerName: row['Ledger Name'] || '',
+        group: row['Primary Group'] || '',
+        balance,
+        expectedSign: 'Dr',
+        actualSign: 'Cr',
+        classification: row.H2
+      })
+    }
+    
+    // Rule 5: Loans & Advances (Assets) with Credit
+    if (group.includes('loans and advances') && row.H1 === 'Balance Sheet' && isCredit) {
+      exceptions.loansAdvancesCredit.push({
+        ledgerName: row['Ledger Name'] || '',
+        group: row['Primary Group'] || '',
+        balance,
+        expectedSign: 'Dr',
+        actualSign: 'Cr',
+        classification: row.H2
+      })
+    }
+  })
+  
+  return exceptions
+}
+```
+
+UI: Show exceptions in categorized sections with export functionality
+
+=================================================================================
+## PHASE 5: STOCK ITEMS (Priority: MEDIUM)
+=================================================================================
+
+### 5.1 Manual Stock Entry Flow
+When user skips Tally stock import:
+
+1. Show dialog prompting manual entry
+2. Provide CSV template download
+3. Allow inline entry in Stock Items tab
+4. Validate required fields: Item Name, Category, Opening, Closing
+
+File: src/components/trial-balance-new/ManualStockEntryDialog.tsx
+
+=================================================================================
+## PHASE 6: NOTES RESTRUCTURE (Priority: HIGH)
+=================================================================================
+
+### 6.1 Rename "Capital Notes" → "BS Notes"
+Files to update:
+- TrialBalanceNew.tsx (tab label)
+- ReportsTab.tsx (component name and title)
+
+### 6.2 Create "PL Notes" Tab
+Split ReportsTab into:
+- BSNotesTab (Balance Sheet notes)
+- PLNotesTab (P&L notes)
+
+Move P&L notes:
+- Changes in Inventories
+- Cost of Materials Consumed
+- Revenue from Operations
+- Other Income
+- Employee Benefits
+- Finance Costs
+- Depreciation
+- Other Expenses
+
+Keep in BS Notes:
+- All asset/liability/equity notes
+
+### 6.3 Compact FS Selector
+File: ReportsTab.tsx
+
+Replace tabs with segmented control:
+```tsx
+<div className="flex items-center gap-1 border rounded-md p-1">
+  {['BS', 'P&L', 'Cash Flow', 'Notes'].map(tab => (
+    <Button
+      key={tab}
+      variant={selectedFS === tab ? 'default' : 'ghost'}
+      size="sm"
+      onClick={() => setSelectedFS(tab)}
+    >
+      {tab}
+    </Button>
+  ))}
+</div>
+```
+
+=================================================================================
+## PHASE 7: HEADER/LAYOUT CLEANUP (Priority: MEDIUM)
+=================================================================================
+
+### 7.1 Remove Duplicate Entity Header
+Find and remove duplicate entity name display in page content
+
+### 7.2 Remove FY from UI
+Remove all FY selection/display components
+
+### 7.3 Move Configure Entity to Settings
+Consolidate entity configuration into Settings page
+
+### 7.4 Reduce Vertical Padding
+Global CSS changes:
+```css
+/* Reduce default spacing */
+.space-y-6 → .space-y-3
+.space-y-4 → .space-y-2
+.p-6 → .p-4
+.py-4 → .py-2
+```
+
+### 7.5 Fix Selected Tab Text Bug
+Ensure selected tab button has proper text contrast
+Check: TabsTrigger component styling
+
+=================================================================================
+## PHASE 8: EQUITY CLASSIFICATION RULE (Priority: HIGH)
+=================================================================================
+
+File: src/services/trialBalanceNewClassification.ts
+
+Add rule before keyword matching:
+
+```typescript
+// Special rule for Equity classification
+if (
+  !isRevenue && 
+  (primaryGroup.includes('capital') || 
+   primaryGroup.includes('reserves') || 
+   primaryGroup.includes('surplus')) &&
+  closingBalance < 0  // Credit balance in accounting
+) {
+  return {
+    H1: 'Balance Sheet',
+    H2: 'Equity',
+    H3: '',
+    H4: '',
+    confidence: 'high',
+    matchedRule: 'Equity Rule: Capital/Reserves with Credit balance'
+  }
+}
+```
+
+=================================================================================
+## IMPLEMENTATION PRIORITY
+=================================================================================
+
+WEEK 1 (Days 1-2):
+1. ✅ Dense table components created
+2. ✅ Multi-select component created
+3. [ ] Convert Actual TB to dense table
+4. [ ] Convert Classified TB to dense table
+5. [ ] Test scrolling and sticky headers
+
+WEEK 1 (Days 3-5):
+6. [ ] Implement zero balance toggle
+7. [ ] Implement undo/redo
+8. [ ] Create Exception Report tab
+9. [ ] Implement exception detection rules
+
+WEEK 2:
+10. [ ] Multi-select filters integration
+11. [ ] Row selection improvements
+12. [ ] Notes restructure (BS/PL split)
+13. [ ] Stock manual entry flow
+
+WEEK 3:
+14. [ ] Header/layout cleanup
+15. [ ] Equity classification rule
+16. [ ] Final testing and bug fixes
+17. [ ] Performance optimization
+
+=================================================================================
+END OF IMPLEMENTATION PLAN
+=================================================================================

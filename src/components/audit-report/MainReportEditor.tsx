@@ -130,7 +130,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion]);
 
   useEffect(() => {
-    // Auto-populate and persist illustrative basis into existing drafts when missing (qualified/adverse)
+    // Auto-populate and persist illustrative basis into existing drafts when missing (qualified/adverse/disclaimer)
     if (!draft) return;
     const shouldPopulate = (type: AuditReportMainContent['opinion_type']) =>
       draft.opinion_type === type && !(draft.basis_for_opinion?.trim()) && draft.id !== savedExampleForDraftId;
@@ -342,7 +342,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               <FileText className="h-5 w-5" />
               Main Audit Report
             </CardTitle>
-            <CardDescription>8-section editor with structured compliance inputs and preview</CardDescription>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setPreviewMode(true)} className="gap-2">
@@ -359,14 +358,14 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
-            <TabsTrigger value="configuration">1. Config</TabsTrigger>
-            <TabsTrigger value="opinion">2. Opinion</TabsTrigger>
-            <TabsTrigger value="optional">3. Optional</TabsTrigger>
-            <TabsTrigger value="sa720">4. SA 720</TabsTrigger>
-            <TabsTrigger value="s143">5. 143(3)</TabsTrigger>
-            <TabsTrigger value="rule11">6. Rule 11</TabsTrigger>
-            <TabsTrigger value="signature">7. Signature</TabsTrigger>
-            <TabsTrigger value="preview">8. Preview</TabsTrigger>
+            <TabsTrigger value="configuration">Config</TabsTrigger>
+            <TabsTrigger value="opinion">Opinion</TabsTrigger>
+            <TabsTrigger value="optional" className="text-[11px] px-1">KAM/EoM/Other Matter</TabsTrigger>
+            <TabsTrigger value="sa720" className="text-[11px] px-1">Other Info-SA 720</TabsTrigger>
+            <TabsTrigger value="s143" className="text-[11px] px-1">143(3)-Co Act</TabsTrigger>
+            <TabsTrigger value="rule11" className="text-[11px] px-1">Rule 11-Co Audit Rule</TabsTrigger>
+            <TabsTrigger value="signature">Signature</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
 
           {/* 1) Configuration */}
@@ -375,6 +374,12 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               <p className="text-sm text-muted-foreground">Setup not found. Complete the Setup step first.</p>
             ) : (
               <div className="space-y-6">
+                <div className="bg-muted/50 p-3 rounded-md border">
+                  <p className="text-sm font-medium">
+                    <span className="font-semibold">Instruction:</span> Select all cases that are applicable to the entity for the relevant financial year.
+                  </p>
+                </div>
+                
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -560,24 +565,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
           {/* 2) Opinion */}
           <TabsContent value="opinion" className="space-y-6">
-            <Card className="bg-blue-50 border-blue-200">
-              <CardContent className="pt-6">
-                <p className="text-sm text-blue-900">
-                  <strong>Auditor Opinion Paragraph:</strong> The opinion paragraph is automatically generated based on:
-                  <br />
-                  • <strong>Criterion 1:</strong> Clean opinion + No cash flow + No branch auditors
-                  <br />
-                  • <strong>Criterion 2:</strong> Clean opinion + Cash flow included + No branch auditors
-                  <br />
-                  • <strong>Criterion 3:</strong> Clean opinion + No cash flow + With branch auditors
-                  <br />
-                  • <strong>Criterion 4:</strong> Clean opinion + Cash flow included + With branch auditors
-                  <br />
-                  Configure these options in the <strong>Configuration</strong> tab to update the opinion paragraph automatically.
-                </p>
-              </CardContent>
-            </Card>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Opinion type</Label>
@@ -656,6 +643,12 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
           {/* 3) Optional paragraphs */}
           <TabsContent value="optional" className="space-y-6">
+            <div className="bg-muted/50 p-3 rounded-md border">
+              <p className="text-sm font-medium">
+                <span className="font-semibold">Standards Reference:</span> SA 701 - KAM; SA 706 - EoM/Other Matter
+              </p>
+            </div>
+            
             <div className="flex items-center justify-between gap-2">
               <div className="space-y-1">
                 <Label>Key Audit Matters</Label>

@@ -9,7 +9,7 @@ if (require('electron-squirrel-startup')) {
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 // GSTZen API Configuration
-const GSTZEN_API_URL = process.env.VITE_GSTZEN_API_URL || 'http://localhost:9001';
+const GSTZEN_API_URL = process.env.VITE_GSTZEN_API_URL || 'https://staging.gstzen.in';
 
 // GSTZen API Helper Function
 async function gstzenApiCall(endpoint, options = {}) {
@@ -20,6 +20,11 @@ async function gstzenApiCall(endpoint, options = {}) {
     };
 
     try {
+        console.log('[GSTZen Main] Request:', options.method || 'GET', url);
+        if (options.body) {
+            console.log('[GSTZen Main] Payload:', options.body);
+        }
+
         const response = await fetch(url, {
             ...options,
             headers,
@@ -34,12 +39,15 @@ async function gstzenApiCall(endpoint, options = {}) {
             data = { error: 'Invalid JSON response', raw: text.substring(0, 1000) };
         }
 
+        console.log(`[GSTZen Main] Response (${response.status}) ${url}:`, JSON.stringify(data, null, 2));
+
         return {
             ok: response.ok,
             status: response.status,
             data,
         };
     } catch (error) {
+        console.error('[GSTZen Main] Error:', error);
         return {
             ok: false,
             status: 0,

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { TrialBalanceLine } from '@/hooks/useTrialBalance';
 import {
   Table,
@@ -8,12 +8,40 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   getProfitLossFormat,
   getFormatLabel,
   FSLineItem,
 } from '@/data/financialStatementFormats';
+import { NoteContentDialog } from './NoteContentDialog';
+import { FileText } from 'lucide-react';
+
+// Note values that can be passed from computed notes
+export interface NoteValues {
+  costOfMaterialsConsumed?: number;
+  changesInInventories?: number;
+  employeeBenefits?: number;
+  financeCosts?: number;
+  depreciation?: number;
+  otherExpenses?: number;
+  [key: string]: number | undefined;
+}
+
+// Ledger item for annexure
+export interface NoteLedgerItem {
+  ledgerName: string;
+  groupName: string;
+  openingBalance: number;
+  closingBalance: number;
+  classification?: string;
+}
+
+// Note ledgers mapping
+export interface NoteLedgersMap {
+  [noteKey: string]: NoteLedgerItem[];
+}
 
 interface Props {
   currentLines: TrialBalanceLine[];
@@ -21,12 +49,17 @@ interface Props {
   reportingScale?: string;
   constitution?: string;
   startingNoteNumber?: number;
+  stockData?: any[];
+  ledgerData?: any[];  // Ledger rows for notes like Cost of Materials
+  noteValues?: NoteValues;
+  noteLedgers?: NoteLedgersMap;
 }
 
 interface DisplayLineItem extends FSLineItem {
   currentAmount: number;
   previousAmount: number;
   displayNoteNo?: string;
+  noteKey?: string; // Key for looking up ledgers
 }
 
 export function ScheduleIIIProfitLoss({ 
@@ -34,8 +67,17 @@ export function ScheduleIIIProfitLoss({
   previousLines = [], 
   reportingScale = 'auto',
   constitution = 'company',
-  startingNoteNumber = 19
+  startingNoteNumber = 19,
+  stockData = [],
+  ledgerData = [],
+  noteValues = {},
+  noteLedgers = {}
 }: Props) {
+  // State for note dialog
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [selectedNoteKey, setSelectedNoteKey] = useState<string | null>(null);
+  const [selectedNoteNumber, setSelectedNoteNumber] = useState<string>('');
+
   const formatCurrency = (amount: number) => {
     if (amount === 0) return '-';
     const sign = amount < 0 ? '-' : '';
@@ -77,25 +119,54 @@ export function ScheduleIIIProfitLoss({
     }
   };
 
-  const hasPreviousPeriod = previousLines.length > 0;
+  const hasPreviousPeriod = previousLines && previousLines.length > 0;
   const formatLabel = getFormatLabel(constitution);
   const plFormat = getProfitLossFormat(constitution);
 
   // Helper to get amount from lines by fs_area
   const getAmountByFsArea = (lines: TrialBalanceLine[], fsArea: string): number => {
+    if (!lines || !Array.isArray(lines)) return 0;
     return lines
-      .filter(l => l.fs_area === fsArea)
-      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+      .filter(l => l && l.fs_area === fsArea)
+      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   };
 
-  // Calculate computed totals
-  const currentRevenue = getAmountByFsArea(currentLines, 'Revenue');
-  const currentOtherIncome = getAmountByFsArea(currentLines, 'Other Income');
+  // Calculate computed totals - Use note values when available, fallback to trial balance
+  const currentRevenue = noteValues.revenueFromOperations ?? getAmountByFsArea(currentLines, 'Revenue');
+  const currentOtherIncome = noteValues.otherIncome ?? getAmountByFsArea(currentLines, 'Other Income');
   const currentTotalIncome = currentRevenue + currentOtherIncome;
   
-  const currentTotalExpenses = currentLines
-    .filter(l => l.aile === 'Expense')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  // Calculate Total Expenses from note values
+  const currentCostOfMaterials = noteValues.costOfMaterialsConsumed ?? 0;
+  const currentPurchases = noteValues.purchasesOfStockInTrade ?? 0;
+  const currentChangesInInventories = noteValues.changesInInventories ?? 0;
+  const currentEmployeeBenefits = noteValues.employeeBenefits ?? 0;
+  const currentFinanceCosts = noteValues.financeCosts ?? 0;
+  const currentDepreciation = noteValues.depreciation ?? 0;
+  const currentOtherExpenses = noteValues.otherExpenses ?? 0;
+  
+  // Sum all expense note values
+  const currentTotalExpenses = 
+    currentCostOfMaterials +
+    currentPurchases +
+    currentChangesInInventories +
+    currentEmployeeBenefits +
+    currentFinanceCosts +
+    currentDepreciation +
+    currentOtherExpenses;
+  
+  console.log('ScheduleIIIProfitLoss: P&L populated from note values:', {
+    revenue: currentRevenue,
+    otherIncome: currentOtherIncome,
+    costOfMaterials: currentCostOfMaterials,
+    purchases: currentPurchases,
+    changesInInventories: currentChangesInInventories,
+    employeeBenefits: currentEmployeeBenefits,
+    financeCosts: currentFinanceCosts,
+    depreciation: currentDepreciation,
+    otherExpenses: currentOtherExpenses,
+    totalExpenses: currentTotalExpenses
+  });
   
   const currentPBT = currentTotalIncome - currentTotalExpenses;
   const currentTax = getAmountByFsArea(currentLines, 'Current Tax') + getAmountByFsArea(currentLines, 'Deferred Tax Expense');
@@ -105,9 +176,9 @@ export function ScheduleIIIProfitLoss({
   const prevOtherIncome = getAmountByFsArea(previousLines, 'Other Income');
   const prevTotalIncome = prevRevenue + prevOtherIncome;
   
-  const prevTotalExpenses = previousLines
-    .filter(l => l.aile === 'Expense')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+  const prevTotalExpenses = (previousLines || [])
+    .filter(l => l && l.aile === 'Expense')
+    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
   
   const prevPBT = prevTotalIncome - prevTotalExpenses;
   const prevTax = getAmountByFsArea(previousLines, 'Current Tax') + getAmountByFsArea(previousLines, 'Deferred Tax Expense');
@@ -118,13 +189,45 @@ export function ScheduleIIIProfitLoss({
     const items: DisplayLineItem[] = [];
     let noteCounter = startingNoteNumber;
 
+    // Map fsArea to noteValues keys - includes both Income and Expense items
+    const fsAreaToNoteKey: Record<string, string> = {
+      // Income items
+      'Revenue': 'revenueFromOperations',
+      'Other Income': 'otherIncome',
+      // Expense items
+      'Cost of Materials': 'costOfMaterialsConsumed',
+      'Purchases': 'purchasesOfStockInTrade',
+      'Inventory Change': 'changesInInventories',
+      'Employee Benefits': 'employeeBenefits',
+      'Finance': 'financeCosts',
+      'Depreciation': 'depreciation',
+      'Other Expenses': 'otherExpenses',
+    };
+
     plFormat.forEach(formatItem => {
       let currentAmount = 0;
       let previousAmount = 0;
+      let noteKey: string | undefined;
 
+      // Check for note values first (from computed notes) - ALWAYS USE NOTE VALUES when available
       if (formatItem.fsArea) {
-        currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
-        previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
+        noteKey = fsAreaToNoteKey[formatItem.fsArea];
+        
+        // PRIORITY: ONLY use noteValues from computed notes for these items
+        // Do NOT fall back to trial balance for these calculated items
+        if (noteKey && noteValues[noteKey] !== undefined && noteValues[noteKey] !== null) {
+          currentAmount = noteValues[noteKey] as number;
+          console.log(`P&L: Using note value for ${formatItem.fsArea}:`, currentAmount, `(noteKey: ${noteKey})`);
+        } else if (noteKey && ['costOfMaterialsConsumed', 'changesInInventories', 'purchasesOfStockInTrade'].includes(noteKey)) {
+          // These items MUST come from noteValues only - no trial balance fallback
+          currentAmount = 0;
+          console.log(`P&L: WARNING - No note value found for ${formatItem.fsArea} (${noteKey}), using 0`);
+        } else if (formatItem.fsArea) {
+          // Fall back to trial balance lines only for simple items
+          currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
+          previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
+          console.log(`P&L: Using trial balance for ${formatItem.fsArea}:`, currentAmount);
+        }
       } else if (formatItem.particulars.includes('Total Income')) {
         currentAmount = currentTotalIncome;
         previousAmount = prevTotalIncome;
@@ -145,7 +248,7 @@ export function ScheduleIIIProfitLoss({
 
       // Only assign note number if there's a value in either period and it has an fsArea
       let displayNoteNo: string | undefined;
-      if (formatItem.fsArea && (currentAmount > 0 || previousAmount > 0)) {
+      if (formatItem.fsArea && (currentAmount !== 0 || previousAmount !== 0)) {
         displayNoteNo = noteCounter.toString();
         noteCounter++;
       }
@@ -155,15 +258,41 @@ export function ScheduleIIIProfitLoss({
         currentAmount,
         previousAmount,
         displayNoteNo,
+        noteKey,
       });
     });
 
     return items;
-  }, [plFormat, currentLines, previousLines, startingNoteNumber, currentTotalIncome, prevTotalIncome, currentTotalExpenses, prevTotalExpenses, currentPBT, prevPBT, currentPAT, prevPAT]);
+  }, [plFormat, currentLines, previousLines, startingNoteNumber, currentTotalIncome, prevTotalIncome, currentTotalExpenses, prevTotalExpenses, currentPBT, prevPBT, currentPAT, prevPAT, noteValues]);
+
+  // Store note number mapping for click handler
+  const noteNumberMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    displayItems.forEach(item => {
+      if (item.noteKey && item.displayNoteNo) {
+        map[item.noteKey] = item.displayNoteNo;
+      }
+    });
+    return map;
+  }, [displayItems]);
+
+  const handleNoteClick = (noteKey: string) => {
+    if (noteKey) {
+      setSelectedNoteKey(noteKey);
+      setSelectedNoteNumber(noteNumberMap[noteKey] || '');
+      setNoteDialogOpen(true);
+    }
+  };
 
   const renderRow = (item: DisplayLineItem, index: number) => {
     const isHeader = item.level === 0 || (item.level === 1 && !item.srNo);
-    const showAmount = item.fsArea || item.isTotal || item.particulars.includes('Profit') || item.particulars.includes('Total');
+    const isChangesInInventories = item.particulars.toLowerCase().includes('changes in inventories');
+    const showAmount = item.fsArea || item.isTotal || item.particulars.includes('Profit') || item.particulars.includes('Total') || isChangesInInventories;
+    // Note is clickable if it has a noteKey (either has prepared Note component or ledger data)
+    const hasNoteData = item.noteKey && (
+      ['costOfMaterialsConsumed', 'changesInInventories', 'purchasesOfStockInTrade', 'employeeBenefits', 'financeCosts', 'depreciation', 'otherExpenses'].includes(item.noteKey) || // Has prepared component
+      (noteLedgers[item.noteKey] && noteLedgers[item.noteKey].length > 0) // Has ledger data
+    );
     
     return (
       <TableRow key={index} className={cn(
@@ -180,7 +309,18 @@ export function ScheduleIIIProfitLoss({
           {item.particulars}
         </TableCell>
         <TableCell className="text-center w-16">
-          {item.displayNoteNo}
+          {item.displayNoteNo && hasNoteData ? (
+            <button
+              onClick={() => handleNoteClick(item.noteKey!)}
+              className="inline-flex items-center gap-1 text-primary hover:text-primary/80 hover:underline font-medium"
+              title="Click to view note details"
+            >
+              {item.displayNoteNo}
+              <FileText className="h-3 w-3" />
+            </button>
+          ) : (
+            item.displayNoteNo
+          )}
         </TableCell>
         <TableCell className={cn(
           "text-right font-mono w-32",
@@ -201,16 +341,16 @@ export function ScheduleIIIProfitLoss({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h2 className="text-xl font-bold">Statement of Profit and Loss</h2>
-        <p className="text-sm text-muted-foreground">{formatLabel}</p>
+    <div className="space-y-2">
+      <div className="text-center mb-2">
+        <h2 className="text-base font-semibold">Statement of Profit and Loss</h2>
+        <p className="text-xs text-muted-foreground">{formatLabel}</p>
         {reportingScale !== 'auto' && (
-          <p className="text-xs text-muted-foreground mt-1">{getScaleLabel()}</p>
+          <p className="text-[10px] text-muted-foreground">{getScaleLabel()}</p>
         )}
       </div>
 
-      <div className="audit-card p-0 overflow-hidden">
+      <div className="border rounded overflow-hidden">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -261,6 +401,18 @@ export function ScheduleIIIProfitLoss({
           )}
         </div>
       </div>
+
+      {/* Note Content Dialog - shows Note component for prepared notes, or ledger details for others */}
+      <NoteContentDialog
+        open={noteDialogOpen}
+        onOpenChange={setNoteDialogOpen}
+        noteKey={selectedNoteKey}
+        noteNumber={selectedNoteNumber}
+        ledgers={selectedNoteKey ? noteLedgers[selectedNoteKey] || [] : []}
+        stockData={stockData}
+        ledgerData={ledgerData}
+        reportingScale={reportingScale}
+      />
     </div>
   );
 }

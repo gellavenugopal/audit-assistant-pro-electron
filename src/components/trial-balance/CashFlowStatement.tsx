@@ -125,14 +125,14 @@ export function CashFlowStatement({ lines }: Props) {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="text-center mb-6">
-        <h2 className="text-xl font-bold">Cash Flow Statement</h2>
-        <p className="text-sm text-muted-foreground">As per Ind AS 7 / AS 3</p>
+    <div className="space-y-2">
+      <div className="text-center mb-2">
+        <h2 className="text-base font-semibold">Cash Flow Statement</h2>
+        <p className="text-xs text-muted-foreground">As per Ind AS 7 / AS 3</p>
       </div>
 
       <div className="max-w-3xl mx-auto">
-        <div className="audit-card p-0 overflow-hidden">
+        <div className="border rounded overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow>

@@ -58,6 +58,8 @@ import {
   exportCashFlowStatement 
 } from '@/utils/financialExport';
 import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSettings';
+import { EnhancedNoteNumberSettings } from '@/components/trial-balance/EnhancedNoteNumberSettings';
+import { NoteNumberSummary } from '@/components/trial-balance/NoteNumberSummary';
 import { FormatSelector } from '@/components/trial-balance/FormatSelector';
 import { useClients } from '@/hooks/useClients';
 import { getBalanceReclassifiedLines, getReclassificationSummary } from '@/utils/balanceReclassification';
@@ -85,6 +87,10 @@ export default function TrialBalance() {
   const [reportingScale, setReportingScale] = useState<string>('auto');
   const [bsStartingNote, setBsStartingNote] = useState<number>(3);
   const [plStartingNote, setPlStartingNote] = useState<number>(19);
+  const [bsNoteCount, setBsNoteCount] = useState<number>(15);
+  const [plNoteCount, setPlNoteCount] = useState<number>(7);
+  const [includeContingentLiabilities, setIncludeContingentLiabilities] = useState<boolean>(false);
+  const [contingentLiabilityNoteNo, setContingentLiabilityNoteNo] = useState<number>(27);
   const [quickAssignLine, setQuickAssignLine] = useState<TrialBalanceLine | null>(null);
   
   // Get client constitution for format selection
@@ -207,6 +213,28 @@ export default function TrialBalance() {
       case 'crores': return 'in Crores';
       default: return 'Auto';
     }
+  };
+
+  // Handle note number configuration
+  const handleApplyNoteSettings = (
+    startingNote: number,
+    bsCount: number,
+    plCount: number,
+    includeContingent: boolean
+  ) => {
+    setBsStartingNote(startingNote);
+    setBsNoteCount(bsCount);
+    setPlStartingNote(startingNote + bsCount);
+    setPlNoteCount(plCount);
+    setIncludeContingentLiabilities(includeContingent);
+    setContingentLiabilityNoteNo(startingNote + bsCount + plCount);
+
+    toast({
+      title: 'Note Numbers Configured',
+      description: `BS Notes: ${startingNote}-${startingNote + bsCount - 1}, P&L Notes: ${startingNote + bsCount}-${
+        startingNote + bsCount + plCount - 1
+      }${includeContingent ? `, Contingent Liabilities: ${startingNote + bsCount + plCount}` : ''}`,
+    });
   };
 
   // Calculate totals
@@ -471,37 +499,37 @@ export default function TrialBalance() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-grid">
-          <TabsTrigger value="trial-balance" className="gap-2">
+          <TabsTrigger value="trial-balance" className="gap-2 data-[state=active]:text-white">
             <FileText className="h-4 w-4" />
             <span className="hidden sm:inline">Trial Balance</span>
             <span className="sm:hidden">TB</span>
           </TabsTrigger>
-          <TabsTrigger value="rule-engine" className="gap-2">
+          <TabsTrigger value="rule-engine" className="gap-2 data-[state=active]:text-white">
             <Wand2 className="h-4 w-4" />
             <span className="hidden sm:inline">Rule Engine</span>
             <span className="sm:hidden">Rules</span>
           </TabsTrigger>
-          <TabsTrigger value="uncategorized" className="gap-2">
+          <TabsTrigger value="uncategorized" className="gap-2 data-[state=active]:text-white">
             <Tags className="h-4 w-4" />
             <span className="hidden sm:inline">Uncategorized</span>
             <span className="sm:hidden">Uncat</span>
           </TabsTrigger>
-          <TabsTrigger value="capital-notes" className="gap-2">
+          <TabsTrigger value="capital-notes" className="gap-2 data-[state=active]:text-white">
             <BookOpen className="h-4 w-4" />
             <span className="hidden sm:inline">Capital Notes</span>
             <span className="sm:hidden">Notes</span>
           </TabsTrigger>
-          <TabsTrigger value="balance-sheet" className="gap-2">
+          <TabsTrigger value="balance-sheet" className="gap-2 data-[state=active]:text-white">
             <BarChart3 className="h-4 w-4" />
             <span className="hidden sm:inline">Balance Sheet</span>
             <span className="sm:hidden">BS</span>
           </TabsTrigger>
-          <TabsTrigger value="profit-loss" className="gap-2">
+          <TabsTrigger value="profit-loss" className="gap-2 data-[state=active]:text-white">
             <BarChart3 className="h-4 w-4" />
             <span className="hidden sm:inline">P&L</span>
             <span className="sm:hidden">P&L</span>
           </TabsTrigger>
-          <TabsTrigger value="cash-flow" className="gap-2">
+          <TabsTrigger value="cash-flow" className="gap-2 data-[state=active]:text-white">
             <Banknote className="h-4 w-4" />
             <span className="hidden sm:inline">Cash Flow</span>
             <span className="sm:hidden">CF</span>
@@ -787,11 +815,21 @@ export default function TrialBalance() {
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <FormatSelector constitution={clientConstitution} showDownload={true} />
-                <NoteNumberSettings 
-                  startingNoteNumber={bsStartingNote} 
-                  onStartingNoteNumberChange={setBsStartingNote} 
+                <EnhancedNoteNumberSettings
+                  onApplySettings={handleApplyNoteSettings}
+                  bsStartingNote={bsStartingNote}
+                  plStartingNote={plStartingNote}
+                  includeContingentLiabilities={includeContingentLiabilities}
                 />
               </div>
+              <NoteNumberSummary
+                bsStartingNote={bsStartingNote}
+                bsNoteCount={bsNoteCount}
+                plStartingNote={plStartingNote}
+                plNoteCount={plNoteCount}
+                includeContingentLiabilities={includeContingentLiabilities}
+                contingentLiabilityNoteNo={contingentLiabilityNoteNo}
+              />
               <ScheduleIIIBalanceSheet 
                 currentLines={currentPeriodLines} 
                 previousLines={previousPeriodLines}
@@ -817,11 +855,21 @@ export default function TrialBalance() {
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <FormatSelector constitution={clientConstitution} showDownload={true} />
-                <NoteNumberSettings 
-                  startingNoteNumber={plStartingNote} 
-                  onStartingNoteNumberChange={setPlStartingNote} 
+                <EnhancedNoteNumberSettings
+                  onApplySettings={handleApplyNoteSettings}
+                  bsStartingNote={bsStartingNote}
+                  plStartingNote={plStartingNote}
+                  includeContingentLiabilities={includeContingentLiabilities}
                 />
               </div>
+              <NoteNumberSummary
+                bsStartingNote={bsStartingNote}
+                bsNoteCount={bsNoteCount}
+                plStartingNote={plStartingNote}
+                plNoteCount={plNoteCount}
+                includeContingentLiabilities={includeContingentLiabilities}
+                contingentLiabilityNoteNo={contingentLiabilityNoteNo}
+              />
               <ScheduleIIIProfitLoss 
                 currentLines={currentPeriodLines} 
                 previousLines={previousPeriodLines}

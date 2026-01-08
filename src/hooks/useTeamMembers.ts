@@ -14,7 +14,7 @@ interface TeamMember {
   role: AppRole;
 }
 
-export function useTeamMembers() {
+export function useTeamMembers(engagementId?: string) {
   const { user, role: currentUserRole } = useAuth();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,19 +23,45 @@ export function useTeamMembers() {
 
   const fetchMembers = async () => {
     try {
-      // Fetch profiles
-      const { data: profiles, error: profilesError } = await supabase
+      let targetUserIds: string[] | null = null;
+
+      if (engagementId) {
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from('engagement_assignments')
+          .select('user_id')
+          .eq('engagement_id', engagementId);
+
+        if (assignmentsError) throw assignmentsError;
+
+        targetUserIds = (assignments || []).map(a => a.user_id);
+
+        if (targetUserIds.length === 0) {
+          setMembers([]);
+          setLoading(false);
+          return;
+        }
+      }
+
+      const profilesQuery = supabase
         .from('profiles')
         .select('user_id, full_name, email, avatar_url');
 
-      if (profilesError) throw profilesError;
-
-      // Fetch roles
-      const { data: roles, error: rolesError } = await supabase
+      const rolesQuery = supabase
         .from('user_roles')
         .select('user_id, role');
 
+      if (targetUserIds) {
+        profilesQuery.in('user_id', targetUserIds);
+        rolesQuery.in('user_id', targetUserIds);
+      }
+
+      const [{ data: profiles, error: profilesError }, { data: roles, error: rolesError }] = await Promise.all([
+        profilesQuery,
+        rolesQuery,
+      ]);
+
       if (rolesError) throw rolesError;
+      if (profilesError) throw profilesError;
 
       // Combine profiles with roles
       const membersData: TeamMember[] = (profiles || []).map((profile) => {
@@ -102,7 +128,7 @@ export function useTeamMembers() {
 
   useEffect(() => {
     fetchMembers();
-  }, []);
+  }, [engagementId]);
 
   return {
     members,

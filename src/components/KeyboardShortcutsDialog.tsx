@@ -15,13 +15,22 @@ interface ShortcutRowProps {
   description: string;
 }
 
+const modifierKeys = new Set(['CTRL', 'CMD', 'ALT', 'SHIFT']);
+
 const ShortcutRow = ({ keys, description }: ShortcutRowProps) => (
   <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
     <span className="text-sm text-foreground">{description}</span>
     <div className="flex items-center gap-1">
       {keys.map((key, i) => (
         <span key={i} className="flex items-center gap-1">
-          <kbd className="px-2 py-1 text-xs font-semibold bg-muted rounded border border-border shadow-sm">
+          <kbd
+            className={[
+              'px-2 py-1 text-xs font-semibold rounded border shadow-sm',
+              modifierKeys.has(key.toUpperCase())
+                ? 'bg-primary/15 text-primary border-primary/40'
+                : 'bg-muted text-foreground border-border',
+            ].join(' ')}
+          >
             {key}
           </kbd>
           {i < keys.length - 1 && <span className="text-muted-foreground">+</span>}
@@ -48,7 +57,7 @@ export function KeyboardShortcutsDialog() {
   }, []);
 
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const modKey = isMac ? '⌘' : 'Ctrl';
+  const modKey = isMac ? 'Cmd' : 'Ctrl';
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -59,7 +68,7 @@ export function KeyboardShortcutsDialog() {
             Keyboard Shortcuts
           </DialogTitle>
           <DialogDescription>
-            Use these shortcuts to navigate quickly through the application.
+            Use Ctrl/Cmd with the keys below to navigate quickly through the application.
           </DialogDescription>
         </DialogHeader>
 
@@ -87,8 +96,8 @@ export function KeyboardShortcutsDialog() {
             </h3>
             <div className="bg-muted/30 rounded-lg p-4">
               <ShortcutRow keys={[modKey, '1-9']} description="Switch to tab 1-9" />
-              <ShortcutRow keys={['Alt', '→']} description="Next tab" />
-              <ShortcutRow keys={['Alt', '←']} description="Previous tab" />
+              <ShortcutRow keys={['Alt', 'ArrowRight']} description="Next tab" />
+              <ShortcutRow keys={['Alt', 'ArrowLeft']} description="Previous tab" />
             </div>
           </div>
 
@@ -106,10 +115,10 @@ export function KeyboardShortcutsDialog() {
             </div>
           </div>
 
-          {/* Audit Tools Specific */}
+          {/* VERA Tools Specific */}
           <div>
             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-              <Badge variant="outline">Audit Tools Tabs</Badge>
+              <Badge variant="outline">VERA Tools Tabs</Badge>
             </h3>
             <div className="bg-muted/30 rounded-lg p-4">
               <ShortcutRow keys={[modKey, '1']} description="Tally Tools" />
@@ -128,6 +137,7 @@ export function KeyboardShortcutsDialog() {
             </h3>
             <div className="bg-muted/30 rounded-lg p-4">
               <ShortcutRow keys={[modKey, '/']} description="Show keyboard shortcuts" />
+              <ShortcutRow keys={['Alt']} description="Focus menu bar (File/Edit/View)" />
             </div>
           </div>
         </div>
