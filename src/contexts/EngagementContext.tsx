@@ -10,6 +10,8 @@ interface Engagement {
   financial_year: string;
   engagement_type: string;
   status: string;
+  materiality_amount: number | null;
+  performance_materiality: number | null;
 }
 
 interface EngagementContextType {
@@ -41,7 +43,7 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase
         .from('engagements')
-        .select('id, name, client_id, client_name, financial_year, engagement_type, status')
+        .select('id, name, client_id, client_name, financial_year, engagement_type, status, materiality_amount, performance_materiality')
         .order('created_at', { ascending: false });
 
       if (error) throw error;

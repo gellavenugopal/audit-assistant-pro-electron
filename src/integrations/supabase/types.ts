@@ -20,6 +20,7 @@ export type Database = {
           created_at: string
           details: string | null
           entity: string
+          engagement_id: string | null
           entity_id: string | null
           id: string
           ip_address: string | null
@@ -32,6 +33,7 @@ export type Database = {
           created_at?: string
           details?: string | null
           entity: string
+          engagement_id?: string | null
           entity_id?: string | null
           id?: string
           ip_address?: string | null
@@ -44,6 +46,7 @@ export type Database = {
           created_at?: string
           details?: string | null
           entity?: string
+          engagement_id?: string | null
           entity_id?: string | null
           id?: string
           ip_address?: string | null

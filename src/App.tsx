@@ -35,6 +35,7 @@ import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from '@/pages/Gstr1Dashboard';
 import NotFound from "./pages/NotFound";
+import Feedback from "./pages/Feedback";
 
 import ComplianceApplicability from "./pages/ComplianceApplicability";
 
@@ -90,6 +91,16 @@ const App = () => (
                     <ProtectedEngagementRoute>
                       <MainLayout>
                         <TrialBalance />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/trial-balance-new"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <TrialBalanceNew />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -220,6 +231,16 @@ const App = () => (
                     <ProtectedRoute>
                       <MainLayout>
                         <Settings />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/feedback"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <Feedback />
                       </MainLayout>
                     </ProtectedRoute>
                   }
