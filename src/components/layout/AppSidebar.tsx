@@ -40,11 +40,13 @@ const engagementDependentItems = [
   { name: 'Materiality', href: '/materiality', icon: Calculator },
   { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
   { name: 'Audit Programs', href: '/programs', icon: ClipboardList },
+  { name: 'Audit Program New', href: '/programs-new', icon: FileText },
   { name: 'Evidence Vault', href: '/evidence', icon: FileCheck },
   { name: 'Review Notes', href: '/review-notes', icon: MessageSquare },
   { name: 'Misstatements', href: '/misstatements', icon: AlertCircle },
   { name: 'Audit Report', href: '/audit-report', icon: FileText },
   { name: 'Audit Tools', href: '/audit-tools', icon: Wrench },
+  { name: 'Feedback', href: '/feedback', icon: MessageSquare },
 ];
 
 const secondaryNavItems = [
@@ -68,6 +70,16 @@ export function AppSidebar() {
     navigate('/');
   };
 
+  const renderName = (name: string) => {
+    if (!name) return name;
+    return (
+      <>
+        <span className="text-primary font-semibold">{name[0]}</span>
+        <span>{name.slice(1)}</span>
+      </>
+    );
+  };
+
   const NavItem = ({ item, disabled = false }: { item: { name: string; href: string; icon: any }; disabled?: boolean }) => {
     const isActive = location.pathname === item.href;
     
@@ -81,7 +93,7 @@ export function AppSidebar() {
           <item.icon className="h-5 w-5 shrink-0 text-muted-foreground" />
           {!collapsed && (
             <span className="truncate text-muted-foreground">
-              {item.name}
+              {renderName(item.name)}
             </span>
           )}
         </div>
@@ -120,7 +132,7 @@ export function AppSidebar() {
             'truncate transition-colors',
             isActive ? 'text-primary font-medium' : ''
           )}>
-            {item.name}
+            {renderName(item.name)}
           </span>
         )}
         {isActive && (

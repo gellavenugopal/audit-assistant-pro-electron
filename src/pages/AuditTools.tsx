@@ -1,5 +1,6 @@
-import { useState } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import * as XLSX from "xlsx";
+import { PDFDocument } from "pdf-lib";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTabShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEngagement } from "@/contexts/EngagementContext";
 import { useTallyODBC } from "@/hooks/useTallyODBC";
+import { cn } from "@/lib/utils";
 
 // Type definitions (moved from TallyContext)
 export interface TallyTrialBalanceLine {
@@ -77,6 +79,7 @@ import {
   Scale,
   FileDown,
   FileX,
+  FolderOpen,
 } from "lucide-react";
 
 interface ToolCardProps {
@@ -128,6 +131,8 @@ const TallyTools = () => {
   const [tbToDate, setTbToDate] = useState("2025-03-31");
   const [isFetchingTB, setIsFetchingTB] = useState(false);
   const [fetchedTBData, setFetchedTBData] = useState<TallyTrialBalanceLine[] | null>(null);
+  const [tbSearchTerm, setTbSearchTerm] = useState("");
+  
 
   // Month wise data fetch state
   const [showMonthWiseDialog, setShowMonthWiseDialog] = useState(false);
@@ -135,18 +140,23 @@ const TallyTools = () => {
   const [mwTargetMonth, setMwTargetMonth] = useState("Mar");
   const [isFetchingMW, setIsFetchingMW] = useState(false);
   const [fetchedMWData, setFetchedMWData] = useState<{ plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[] } | null>(null);
+  const [mwSearchTerm, setMwSearchTerm] = useState("");
   
   // GST Not Feeded state
   const [showGSTNotFeedDialog, setShowGSTNotFeedDialog] = useState(false);
   const [isFetchingGSTNotFeed, setIsFetchingGSTNotFeed] = useState(false);
   const [fetchedGSTNotFeedData, setFetchedGSTNotFeedData] = useState<TallyGSTNotFeedLine[] | null>(null);
+  const [gstSearchTerm, setGstSearchTerm] = useState("");
+  
 
   // Negative Ledgers state
   const [showNegativeLedgersDialog, setShowNegativeLedgersDialog] = useState(false);
   const [negativeLedgersTab, setNegativeLedgersTab] = useState("debtors");
+  const [negativeLedgersSearchTerm, setNegativeLedgersSearchTerm] = useState("");
   
   // No Transactions state
   const [showNoTransactionsDialog, setShowNoTransactionsDialog] = useState(false);
+  const [noTransactionsSearchTerm, setNoTransactionsSearchTerm] = useState("");
   
   // ODBC Info Dialog state
   const [showODBCInfoDialog, setShowODBCInfoDialog] = useState(false);
@@ -172,15 +182,6 @@ const TallyTools = () => {
   };
 
   const handleFetchTrialBalance = async () => {
-    if (!isConnected) {
-      toast({
-        title: "Not Connected",
-        description: "Please connect to Tally ODBC first",
-        variant: "destructive",
-      });
-      return;
-    }
-    
     setIsFetchingTB(true);
     try {
       const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
@@ -190,13 +191,6 @@ const TallyTools = () => {
           title: "Trial Balance Fetched",
           description: `Retrieved ${lines.length} ledger accounts from Tally`,
         });
-      } else {
-        toast({
-          title: "No Data Found",
-          description: "No trial balance data was returned from Tally. Please check your connection and date range.",
-          variant: "destructive",
-        });
-        setFetchedTBData([]);
       }
     } catch (error) {
       toast({
@@ -204,7 +198,6 @@ const TallyTools = () => {
         description: error instanceof Error ? error.message : "Unknown error",
         variant: "destructive",
       });
-      setFetchedTBData([]);
     } finally {
       setIsFetchingTB(false);
     }
@@ -521,29 +514,30 @@ const TallyTools = () => {
   };
 
   // Negative Ledgers - accounts with opposite balances
+  // Tally convention: Negative = Debit, Positive = Credit
   const getNegativeLedgers = () => {
     if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [] };
     
-    // Debtors should have Dr balance (positive), so Cr balance (negative/closingBalance < 0) is opposite
+    // Debtors should have Dr balance (negative), so Cr balance (positive/closingBalance > 0) is opposite
     const debtors = fetchedTBData.filter(line => 
-      line.primaryGroup === "Sundry Debtors" && line.closingBalance < 0
+      line.primaryGroup === "Sundry Debtors" && line.closingBalance > 0
     );
     
-    // Creditors should have Cr balance (negative), so Dr balance (positive/closingBalance > 0) is opposite
+    // Creditors should have Cr balance (positive), so Dr balance (negative/closingBalance < 0) is opposite
     const creditors = fetchedTBData.filter(line => 
-      line.primaryGroup === "Sundry Creditors" && line.closingBalance > 0
+      line.primaryGroup === "Sundry Creditors" && line.closingBalance < 0
     );
     
-    // Assets should have Dr balance (positive), so Cr balance (negative) is opposite
+    // Assets should have Dr balance (negative), so Cr balance (positive) is opposite
     const assetGroups = ["Fixed Assets", "Current Assets", "Investments", "Bank Accounts", "Cash-in-Hand", "Deposits (Asset)", "Loans & Advances (Asset)", "Stock-in-Hand", "Bank OD Accounts"];
     const assets = fetchedTBData.filter(line => 
-      assetGroups.includes(line.primaryGroup) && line.closingBalance < 0
+      assetGroups.includes(line.primaryGroup) && line.closingBalance > 0
     );
     
-    // Liabilities should have Cr balance (negative), so Dr balance (positive) is opposite
+    // Liabilities should have Cr balance (positive), so Dr balance (negative) is opposite
     const liabilityGroups = ["Capital Account", "Reserves & Surplus", "Loans (Liability)", "Secured Loans", "Unsecured Loans", "Current Liabilities", "Provisions", "Duties & Taxes"];
     const liabilities = fetchedTBData.filter(line => 
-      liabilityGroups.includes(line.primaryGroup) && line.closingBalance > 0
+      liabilityGroups.includes(line.primaryGroup) && line.closingBalance < 0
     );
 
     return { debtors, creditors, assets, liabilities };
@@ -683,15 +677,40 @@ const TallyTools = () => {
     }).format(value);
   };
 
-  // Calculate totals for Trial Balance
-  const totalOpeningBalance = fetchedTBData?.reduce((sum, line) => sum + line.openingBalance, 0) || 0;
-  const totalDebit = fetchedTBData?.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0) || 0;
-  const totalCredit = fetchedTBData?.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0) || 0;
-  const totalClosingBalance = fetchedTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
+  // Filter Trial Balance data based on search term
+  const filteredTBData = useMemo(() => {
+    if (!fetchedTBData) return null;
+    if (!tbSearchTerm.trim()) return fetchedTBData;
+    
+    const searchLower = tbSearchTerm.toLowerCase().trim();
+    return fetchedTBData.filter(line => 
+      line.accountHead.toLowerCase().includes(searchLower) ||
+      line.accountCode.toLowerCase().includes(searchLower) ||
+      line.primaryGroup.toLowerCase().includes(searchLower) ||
+      (line.parent && line.parent.toLowerCase().includes(searchLower)) ||
+      (line.branch && line.branch.toLowerCase().includes(searchLower))
+    );
+  }, [fetchedTBData, tbSearchTerm]);
+
+  // Calculate totals from filtered data
+  // Note: In Tally ODBC:
+  // - $DebitTotals and $CreditTotals are typically absolute values (positive)
+  // - But we use Math.abs() to ensure they're always positive for totals
+  // - Opening and Closing balances follow Tally convention: negative = Debit, positive = Credit
+  const totalOpeningBalance = filteredTBData?.reduce((sum, line) => sum + line.openingBalance, 0) || 0;
   
-  // Verification: Closing should equal Opening + Debit - Credit
-  const totalClosingBalanceSum = totalClosingBalance;
+  // Total Debit and Credit should be absolute values (sum of all debit/credit amounts)
+  const totalDebit = filteredTBData?.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0) || 0;
+  const totalCredit = filteredTBData?.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0) || 0;
+  
+  // Total Closing Balance: Sum of individual closing balances
+  // OR can be calculated as: Opening + Debit - Credit (accounting formula)
+  const totalClosingBalanceSum = filteredTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
   const totalClosingBalanceCalculated = totalOpeningBalance + totalDebit - totalCredit;
+  
+  // Use the sum of individual closing balances (more accurate)
+  // But verify it matches the formula (allow small rounding differences)
+  const totalClosingBalance = totalClosingBalanceSum;
 
 
   return (
@@ -710,9 +729,14 @@ const TallyTools = () => {
           ODBC Direct
         </Button>
         <Button
-          variant={connectionMode === "excel" ? "default" : "outline"}
+          variant="outline"
           size="sm"
-          onClick={() => setConnectionMode("excel")}
+          onClick={() => {
+            toast({
+              title: "Coming Soon",
+              description: "Excel Import will be available later",
+            });
+          }}
           disabled={isConnected}
         >
           <Upload className="h-4 w-4 mr-2" />
@@ -895,7 +919,12 @@ const TallyTools = () => {
       </div>
 
       {/* Trial Balance Fetch Dialog */}
-      <Dialog open={showTBDialog} onOpenChange={setShowTBDialog}>
+      <Dialog open={showTBDialog} onOpenChange={(open) => {
+        setShowTBDialog(open);
+        if (!open) {
+          setTbSearchTerm("");
+        }
+      }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -906,15 +935,6 @@ const TallyTools = () => {
               Select the period and fetch Trial Balance data directly from Tally ERP
             </DialogDescription>
           </DialogHeader>
-
-          <Alert variant="warning" className="mb-4">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Important:</strong> Tally ODBC returns balances as of Tally's <strong>current date setting</strong>, not the selected date range.
-              <br />
-              <strong>Before fetching:</strong> Please set Tally's date to the <strong>"To Date"</strong> ({tbToDate}) to get accurate balances for the selected period.
-            </AlertDescription>
-          </Alert>
 
           <div className="space-y-4">
             {/* Period Selection */}
@@ -939,7 +959,7 @@ const TallyTools = () => {
                   className="w-40"
                 />
               </div>
-              <Button onClick={handleFetchTrialBalance} disabled={isFetchingTB || !isConnected}>
+              <Button onClick={handleFetchTrialBalance} disabled={isFetchingTB}>
                 {isFetchingTB ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -953,6 +973,37 @@ const TallyTools = () => {
                 )}
               </Button>
             </div>
+
+            {/* Search/Filter */}
+            {fetchedTBData && fetchedTBData.length > 0 && (
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search by Account Head, Code, Group, Parent, or Branch..."
+                    value={tbSearchTerm}
+                    onChange={(e) => setTbSearchTerm(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                {tbSearchTerm && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setTbSearchTerm("")}
+                    className="h-9"
+                  >
+                    Clear
+                  </Button>
+                )}
+                {tbSearchTerm && filteredTBData && (
+                  <div className="text-sm text-muted-foreground whitespace-nowrap">
+                    Showing {filteredTBData.length} of {fetchedTBData.length} accounts
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Results Table */}
             {fetchedTBData && fetchedTBData.length > 0 && (
@@ -971,21 +1022,29 @@ const TallyTools = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {fetchedTBData.map((line, idx) => (
-                        <tr key={idx} className="border-t hover:bg-muted/50">
-                          <td className="p-2">{line.accountHead}</td>
-                          <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.openingBalance)}</td>
-                          <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.totalDebit)}</td>
-                          <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.totalCredit)}</td>
-                          <td className="p-2 text-right font-mono">{formatCurrency(line.closingBalance)}</td>
-                          <td className="p-2 text-muted-foreground text-xs">{line.accountCode}</td>
-                          <td className="p-2 text-muted-foreground text-xs">{line.branch}</td>
+                      {filteredTBData && filteredTBData.length > 0 ? (
+                        filteredTBData.map((line, idx) => (
+                          <tr key={idx} className="border-t hover:bg-muted/50">
+                            <td className="p-2">{line.accountHead}</td>
+                            <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.openingBalance)}</td>
+                            <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.totalDebit)}</td>
+                            <td className="p-2 text-right font-mono text-xs">{formatCurrency(line.totalCredit)}</td>
+                            <td className="p-2 text-right font-mono">{formatCurrency(line.closingBalance)}</td>
+                            <td className="p-2 text-muted-foreground text-xs">{line.accountCode}</td>
+                            <td className="p-2 text-muted-foreground text-xs">{line.branch}</td>
+                          </tr>
+                        ))
+                      ) : tbSearchTerm ? (
+                        <tr>
+                          <td colSpan={7} className="p-4 text-center text-muted-foreground">
+                            No accounts found matching "{tbSearchTerm}"
+                          </td>
                         </tr>
-                      ))}
+                      ) : null}
                     </tbody>
                     <tfoot className="bg-muted font-medium sticky bottom-0">
                       <tr className="border-t-2">
-                        <td className="p-2 font-medium">Total:</td>
+                        <td className="p-2 text-right font-medium">Total:</td>
                         <td className="p-2 text-right font-mono">{formatCurrency(totalOpeningBalance)}</td>
                         <td className="p-2 text-right font-mono">{formatCurrency(totalDebit)}</td>
                         <td className="p-2 text-right font-mono">{formatCurrency(totalCredit)}</td>
@@ -1000,7 +1059,14 @@ const TallyTools = () => {
                 <div className="p-4 border-t bg-muted/30">
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-sm text-muted-foreground">
-                      {fetchedTBData.length} accounts
+                      {tbSearchTerm ? (
+                        <>
+                          {filteredTBData?.length || 0} of {fetchedTBData.length} accounts
+                          {tbSearchTerm && <span className="ml-1">(filtered)</span>}
+                        </>
+                      ) : (
+                        `${fetchedTBData.length} accounts`
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <Button variant="outline" onClick={() => setFetchedTBData(null)}>
@@ -1069,6 +1135,31 @@ const TallyTools = () => {
                       })()}
                     </div>
                   </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setFetchedTBData(null)}>
+                      Clear
+                    </Button>
+                    <Button variant="outline" onClick={handleExportToExcel}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export to Excel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (!currentEngagement) {
+                          toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
+                          return;
+                        }
+                        toast({
+                          title: "Save to Trial Balance",
+                          description: "Navigate to Trial Balance page and use Import to save this data"
+                        });
+                        setShowTBDialog(false);
+                      }}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Use in Trial Balance
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1086,130 +1177,12 @@ const TallyTools = () => {
       </Dialog>
 
       {/* Month wise Data Dialog */}
-      <Dialog open={showMonthWiseDialog} onOpenChange={setShowMonthWiseDialog}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              Get Month wise Data from Tally
-            </DialogTitle>
-            <DialogDescription>
-              Extract month wise data for analysis. P&L shows movement, Balance Sheet shows closing balances.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {/* Period Selection */}
-            <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg flex-wrap">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="mwFyStartYear">FY Starting Year:</Label>
-                <Select
-                  value={String(mwFyStartYear)}
-                  onValueChange={(v) => setMwFyStartYear(Number(v))}
-                >
-                  <SelectTrigger className="w-28">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[2020, 2021, 2022, 2023, 2024, 2025, 2026].map(year => (
-                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="mwTargetMonth">Target Month:</Label>
-                <Select value={mwTargetMonth} onValueChange={setMwTargetMonth}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"].map(month => (
-                      <SelectItem key={month} value={month}>{month}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={handleFetchMonthWiseData} disabled={isFetchingMW || !isConnected}>
-                {isFetchingMW ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Fetching...
-                  </>
-                ) : (
-                  <>
-                    <Download className="h-4 w-4 mr-2" />
-                    Fetch Month Wise Data
-                  </>
-                )}
-              </Button>
-            </div>
-
-            {/* Results Table */}
-            {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (
-              <div className="border rounded-lg overflow-hidden">
-                <div className="max-h-[400px] overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted sticky top-0">
-                      <tr>
-                        <th className="text-left p-2 font-medium min-w-[200px]">Ledger Name</th>
-                        <th className="text-left p-2 font-medium min-w-[120px]">Primary Group</th>
-                        <th className="text-center p-2 font-medium text-xs">Type</th>
-                        {fetchedMWData.months.map(month => (
-                          <th key={month} className="text-right p-2 font-medium min-w-[80px]">{month}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...fetchedMWData.plLines, ...fetchedMWData.bsLines].slice(0, 100).map((line, idx) => (
-                        <tr key={idx} className="border-t hover:bg-muted/50">
-                          <td className="p-2">{line.accountName}</td>
-                          <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                          <td className="p-2 text-center">
-                            <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
-                              {line.isRevenue ? "P&L" : "BS"}
-                            </Badge>
-                          </td>
-                          {fetchedMWData.months.map((month, monthIdx) => {
-                            // For P&L items, show movement (current - previous)
-                            // For BS items, show absolute closing balance
-                            let displayValue = 0;
-                            if (line.isRevenue) {
-                              // P&L: Calculate movement
-                              if (monthIdx === 0) {
-                                // First month: closing - opening
-                                displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
-                              } else {
-                                // Subsequent months: current closing - previous closing
-                                const prevMonth = fetchedMWData.months[monthIdx - 1];
-                                displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
-                              }
-                            } else {
-                              // BS: Show absolute closing balance
-                              displayValue = line.monthlyBalances[month] || 0;
-                            }
-                            
-                            return (
-                              <td key={month} className="p-2 text-right font-mono text-xs">
-                                {displayValue !== 0 
-                                  ? formatCurrency(displayValue) 
-                                  : '-'}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Month wise Data Dialog */}
-      <Dialog open={showMonthWiseDialog} onOpenChange={setShowMonthWiseDialog}>
+      <Dialog open={showMonthWiseDialog} onOpenChange={(open) => {
+        setShowMonthWiseDialog(open);
+        if (!open) {
+          setMwSearchTerm("");
+        }
+      }}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1271,8 +1244,49 @@ const TallyTools = () => {
               </Button>
             </div>
 
-            {/* Results Table */}
+            {/* Search/Filter */}
             {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search by Ledger Name or Primary Group..."
+                    value={mwSearchTerm}
+                    onChange={(e) => setMwSearchTerm(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                {mwSearchTerm && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setMwSearchTerm("")}
+                    className="h-9"
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Results Table */}
+            {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (() => {
+              // Filter data based on search term
+              const allLines = [...fetchedMWData.plLines, ...fetchedMWData.bsLines];
+              const filteredLines = mwSearchTerm.trim() 
+                ? allLines.filter(line => {
+                    const searchLower = mwSearchTerm.toLowerCase().trim();
+                    return line.accountName.toLowerCase().includes(searchLower) ||
+                           line.primaryGroup.toLowerCase().includes(searchLower);
+                  })
+                : allLines;
+              
+              const filteredPlCount = filteredLines.filter(l => l.isRevenue).length;
+              const filteredBsCount = filteredLines.filter(l => !l.isRevenue).length;
+              const displayLines = filteredLines.slice(0, 100);
+              
+              return (
               <div className="border rounded-lg overflow-hidden">
                 <div className="max-h-[400px] overflow-auto">
                   <table className="w-full text-sm">
@@ -1287,44 +1301,52 @@ const TallyTools = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {[...fetchedMWData.plLines, ...fetchedMWData.bsLines].slice(0, 100).map((line, idx) => (
-                        <tr key={idx} className="border-t hover:bg-muted/50">
-                          <td className="p-2">{line.accountName}</td>
-                          <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                          <td className="p-2 text-center">
-                            <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
-                              {line.isRevenue ? "P&L" : "BS"}
-                            </Badge>
-                          </td>
-                          {fetchedMWData.months.map((month, monthIdx) => {
-                            // For P&L items, show movement (current - previous)
-                            // For BS items, show absolute closing balance
-                            let displayValue = 0;
-                            if (line.isRevenue) {
-                              // P&L: Calculate movement
-                              if (monthIdx === 0) {
-                                // First month: closing - opening
-                                displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
+                      {displayLines.length > 0 ? (
+                        displayLines.map((line, idx) => (
+                          <tr key={idx} className="border-t hover:bg-muted/50">
+                            <td className="p-2">{line.accountName}</td>
+                            <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                            <td className="p-2 text-center">
+                              <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
+                                {line.isRevenue ? "P&L" : "BS"}
+                              </Badge>
+                            </td>
+                            {fetchedMWData.months.map((month, monthIdx) => {
+                              // For P&L items, show movement (current - previous)
+                              // For BS items, show absolute closing balance
+                              let displayValue = 0;
+                              if (line.isRevenue) {
+                                // P&L: Calculate movement
+                                if (monthIdx === 0) {
+                                  // First month: closing - opening
+                                  displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
+                                } else {
+                                  // Subsequent months: current closing - previous closing
+                                  const prevMonth = fetchedMWData.months[monthIdx - 1];
+                                  displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
+                                }
                               } else {
-                                // Subsequent months: current closing - previous closing
-                                const prevMonth = fetchedMWData.months[monthIdx - 1];
-                                displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
+                                // BS: Show absolute closing balance
+                                displayValue = line.monthlyBalances[month] || 0;
                               }
-                            } else {
-                              // BS: Show absolute closing balance
-                              displayValue = line.monthlyBalances[month] || 0;
-                            }
-                            
-                            return (
-                              <td key={month} className="p-2 text-right font-mono text-xs">
-                                {displayValue !== 0 
-                                  ? formatCurrency(displayValue) 
-                                  : '-'}
-                              </td>
-                            );
-                          })}
+                              
+                              return (
+                                <td key={month} className="p-2 text-right font-mono text-xs">
+                                  {displayValue !== 0 
+                                    ? formatCurrency(displayValue) 
+                                    : '-'}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))
+                      ) : mwSearchTerm ? (
+                        <tr>
+                          <td colSpan={3 + fetchedMWData.months.length} className="p-4 text-center text-muted-foreground">
+                            No accounts found matching "{mwSearchTerm}"
+                          </td>
                         </tr>
-                      ))}
+                      ) : null}
                     </tbody>
                   </table>
                 </div>
@@ -1332,8 +1354,23 @@ const TallyTools = () => {
                 {/* Summary & Export */}
                 <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
                   <div className="text-sm text-muted-foreground">
-                    {fetchedMWData.plLines.length + fetchedMWData.bsLines.length} accounts ({fetchedMWData.plLines.length} P&L, {fetchedMWData.bsLines.length} BS)
-                    {(fetchedMWData.plLines.length + fetchedMWData.bsLines.length) > 100 && (
+                    {mwSearchTerm ? (
+                      <>
+                        {filteredLines.length} of {allLines.length} accounts
+                        {filteredLines.length > 0 && (
+                          <span className="ml-1">({filteredPlCount} P&L, {filteredBsCount} BS)</span>
+                        )}
+                        {mwSearchTerm && <span className="ml-1">(filtered)</span>}
+                      </>
+                    ) : (
+                      <>
+                        {allLines.length} accounts ({fetchedMWData.plLines.length} P&L, {fetchedMWData.bsLines.length} BS)
+                      </>
+                    )}
+                    {displayLines.length < filteredLines.length && (
+                      <span className="ml-2 text-amber-600">(showing first {displayLines.length} of {filteredLines.length})</span>
+                    )}
+                    {!mwSearchTerm && allLines.length > 100 && (
                       <span className="ml-2 text-amber-600">(showing first 100)</span>
                     )}
                   </div>
@@ -1348,7 +1385,8 @@ const TallyTools = () => {
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {fetchedMWData && fetchedMWData.plLines.length === 0 && fetchedMWData.bsLines.length === 0 && (
               <Alert>
@@ -1363,7 +1401,12 @@ const TallyTools = () => {
       </Dialog>
 
       {/* GST Not Feeded Dialog */}
-      <Dialog open={showGSTNotFeedDialog} onOpenChange={setShowGSTNotFeedDialog}>
+      <Dialog open={showGSTNotFeedDialog} onOpenChange={(open) => {
+        setShowGSTNotFeedDialog(open);
+        if (!open) {
+          setGstSearchTerm("");
+        }
+      }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1396,8 +1439,56 @@ const TallyTools = () => {
               </span>
             </div>
 
-            {/* Results Table */}
+            {/* Search/Filter */}
             {fetchedGSTNotFeedData && fetchedGSTNotFeedData.length > 0 && (
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search by Ledger Name or Primary Group..."
+                    value={gstSearchTerm}
+                    onChange={(e) => setGstSearchTerm(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                {gstSearchTerm && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setGstSearchTerm("")}
+                    className="h-9"
+                  >
+                    Clear
+                  </Button>
+                )}
+                {gstSearchTerm && (
+                  <div className="text-sm text-muted-foreground whitespace-nowrap">
+                    Showing {(() => {
+                      const filtered = fetchedGSTNotFeedData.filter(line => {
+                        const searchLower = gstSearchTerm.toLowerCase().trim();
+                        return line.ledgerName.toLowerCase().includes(searchLower) ||
+                               line.primaryGroup.toLowerCase().includes(searchLower);
+                      });
+                      return filtered.length;
+                    })()} of {fetchedGSTNotFeedData.length} ledgers
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Results Table */}
+            {fetchedGSTNotFeedData && fetchedGSTNotFeedData.length > 0 && (() => {
+              // Filter data based on search term
+              const filteredData = gstSearchTerm.trim() 
+                ? fetchedGSTNotFeedData.filter(line => {
+                    const searchLower = gstSearchTerm.toLowerCase().trim();
+                    return line.ledgerName.toLowerCase().includes(searchLower) ||
+                           line.primaryGroup.toLowerCase().includes(searchLower);
+                  })
+                : fetchedGSTNotFeedData;
+              
+              return (
               <div className="border rounded-lg overflow-hidden">
                 <div className="max-h-[400px] overflow-auto">
                   <table className="w-full text-sm">
@@ -1405,23 +1496,33 @@ const TallyTools = () => {
                       <tr>
                         <th className="text-left p-3 font-medium">#</th>
                         <th className="text-left p-3 font-medium">Ledger Name</th>
+                        <th className="text-left p-3 font-medium">Primary Group</th>
                         <th className="text-left p-3 font-medium">GST Registration Type</th>
                         <th className="text-left p-3 font-medium">Party GSTIN</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {fetchedGSTNotFeedData.map((line, idx) => (
-                        <tr key={idx} className="border-t hover:bg-muted/50">
-                          <td className="p-3 text-muted-foreground">{idx + 1}</td>
-                          <td className="p-3 font-medium">{line.ledgerName}</td>
-                          <td className="p-3">
-                            <Badge variant="secondary">{line.registrationType || line.gstRegistrationType || "Unknown"}</Badge>
-                          </td>
-                          <td className="p-3">
-                            <Badge variant="destructive">Not Feeded</Badge>
+                      {filteredData.length > 0 ? (
+                        filteredData.map((line, idx) => (
+                          <tr key={idx} className="border-t hover:bg-muted/50">
+                            <td className="p-3 text-muted-foreground">{idx + 1}</td>
+                            <td className="p-3 font-medium">{line.ledgerName}</td>
+                            <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                            <td className="p-3">
+                              <Badge variant="secondary">{line.registrationType || line.gstRegistrationType || "Unknown"}</Badge>
+                            </td>
+                            <td className="p-3">
+                              <Badge variant="destructive">Not Feeded</Badge>
+                            </td>
+                          </tr>
+                        ))
+                      ) : gstSearchTerm ? (
+                        <tr>
+                          <td colSpan={5} className="p-4 text-center text-muted-foreground">
+                            No ledgers found matching "{gstSearchTerm}"
                           </td>
                         </tr>
-                      ))}
+                      ) : null}
                     </tbody>
                   </table>
                 </div>
@@ -1429,7 +1530,14 @@ const TallyTools = () => {
                 {/* Summary & Export */}
                 <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
                   <div className="text-sm text-muted-foreground">
-                    Found {fetchedGSTNotFeedData.length} ledgers with missing GSTIN
+                    {gstSearchTerm ? (
+                      <>
+                        {filteredData.length} of {fetchedGSTNotFeedData.length} ledgers with missing GSTIN
+                        {gstSearchTerm && <span className="ml-1">(filtered)</span>}
+                      </>
+                    ) : (
+                      `Found ${fetchedGSTNotFeedData.length} ledgers with missing GSTIN`
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={() => setFetchedGSTNotFeedData(null)}>
@@ -1442,7 +1550,8 @@ const TallyTools = () => {
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {fetchedGSTNotFeedData && fetchedGSTNotFeedData.length === 0 && (
               <Alert>
@@ -1457,7 +1566,12 @@ const TallyTools = () => {
       </Dialog>
 
       {/* Negative Ledgers Dialog */}
-      <Dialog open={showNegativeLedgersDialog} onOpenChange={setShowNegativeLedgersDialog}>
+      <Dialog open={showNegativeLedgersDialog} onOpenChange={(open) => {
+        setShowNegativeLedgersDialog(open);
+        if (!open) {
+          setNegativeLedgersSearchTerm("");
+        }
+      }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1472,9 +1586,27 @@ const TallyTools = () => {
           <div className="space-y-4">
             {(() => {
               const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
+              
+              // Filter function for search
+              const filterData = (data: TallyTrialBalanceLine[]) => {
+                if (!negativeLedgersSearchTerm.trim()) return data;
+                const searchLower = negativeLedgersSearchTerm.toLowerCase().trim();
+                return data.filter(line =>
+                  line.accountHead.toLowerCase().includes(searchLower) ||
+                  line.primaryGroup.toLowerCase().includes(searchLower) ||
+                  (line.parent && line.parent.toLowerCase().includes(searchLower))
+                );
+              };
+              
+              const filteredDebtors = filterData(debtors);
+              const filteredCreditors = filterData(creditors);
+              const filteredAssets = filterData(assets);
+              const filteredLiabilities = filterData(liabilities);
+              
               const totalCount = debtors.length + creditors.length + assets.length + liabilities.length;
-
-              const renderTable = (data: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
+              const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length;
+              
+              const renderTable = (data: TallyTrialBalanceLine[], filteredData: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
                 <div className="border rounded-lg overflow-hidden">
                   <div className="max-h-[350px] overflow-auto">
                     <table className="w-full text-sm">
@@ -1488,21 +1620,36 @@ const TallyTools = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {data.map((line, idx) => (
-                          <tr key={idx} className="border-t hover:bg-muted/50">
-                            <td className="p-3 text-muted-foreground">{idx + 1}</td>
-                            <td className="p-3 font-medium">{line.accountHead}</td>
-                            <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                            <td className="p-3 text-muted-foreground text-xs">{line.parent}</td>
-                            <td className="p-3 text-right font-mono text-destructive">
-                              {(() => {
-                                const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
-                                const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
-                                return formatCurrency(expectedNature === "Dr" ? closingCr : closingDr);
-                              })()}
+                        {filteredData.length > 0 ? (
+                          filteredData.map((line, idx) => (
+                            <tr key={idx} className="border-t hover:bg-muted/50">
+                              <td className="p-3 text-muted-foreground">{idx + 1}</td>
+                              <td className="p-3 font-medium">{line.accountHead}</td>
+                              <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                              <td className="p-3 text-muted-foreground text-xs">{line.parent || '-'}</td>
+                              <td className="p-3 text-right font-mono text-destructive">
+                                {(() => {
+                                  // Since we've already filtered for opposite balances:
+                                  // - For debtors/assets (expected Dr): filtered for closingBalance > 0 (Credit), so show the positive value
+                                  // - For creditors/liabilities (expected Cr): filtered for closingBalance < 0 (Debit), so show the absolute value
+                                  if (expectedNature === "Dr") {
+                                    // Expected Debit, but has Credit balance (positive)
+                                    return formatCurrency(line.closingBalance);
+                                  } else {
+                                    // Expected Credit, but has Debit balance (negative)
+                                    return formatCurrency(Math.abs(line.closingBalance));
+                                  }
+                                })()}
+                              </td>
+                            </tr>
+                          ))
+                        ) : negativeLedgersSearchTerm ? (
+                          <tr>
+                            <td colSpan={5} className="p-4 text-center text-muted-foreground">
+                              No accounts found matching "{negativeLedgersSearchTerm}"
                             </td>
                           </tr>
-                        ))}
+                        ) : null}
                       </tbody>
                     </table>
                   </div>
@@ -1520,25 +1667,62 @@ const TallyTools = () => {
                     </Alert>
                   ) : (
                     <>
+                      {/* Search Input */}
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          type="text"
+                          placeholder="Search by Account Name, Primary Group, or Parent..."
+                          value={negativeLedgersSearchTerm}
+                          onChange={(e) => setNegativeLedgersSearchTerm(e.target.value)}
+                          className="pl-9 pr-9"
+                        />
+                        {negativeLedgersSearchTerm && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-1 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0"
+                            onClick={() => setNegativeLedgersSearchTerm("")}
+                          >
+                            ×
+                          </Button>
+                        )}
+                      </div>
+                      
+                      {negativeLedgersSearchTerm && (
+                        <div className="text-sm text-muted-foreground">
+                          Showing {filteredTotalCount} of {totalCount} accounts
+                          {negativeLedgersSearchTerm && <span className="ml-1">(filtered)</span>}
+                        </div>
+                      )}
+
                       <Tabs value={negativeLedgersTab} onValueChange={setNegativeLedgersTab}>
                         <TabsList className="grid w-full grid-cols-4">
                           <TabsTrigger value="debtors" className="text-xs">
-                            Debtors (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">{debtors.length}</Badge>
+                            Debtors (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">
+                              {negativeLedgersSearchTerm ? `${filteredDebtors.length}/${debtors.length}` : debtors.length}
+                            </Badge>
                           </TabsTrigger>
                           <TabsTrigger value="creditors" className="text-xs">
-                            Creditors (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">{creditors.length}</Badge>
+                            Creditors (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">
+                              {negativeLedgersSearchTerm ? `${filteredCreditors.length}/${creditors.length}` : creditors.length}
+                            </Badge>
                           </TabsTrigger>
                           <TabsTrigger value="assets" className="text-xs">
-                            Assets (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">{assets.length}</Badge>
+                            Assets (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">
+                              {negativeLedgersSearchTerm ? `${filteredAssets.length}/${assets.length}` : assets.length}
+                            </Badge>
                           </TabsTrigger>
                           <TabsTrigger value="liabilities" className="text-xs">
-                            Liabilities (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">{liabilities.length}</Badge>
+                            Liabilities (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">
+                              {negativeLedgersSearchTerm ? `${filteredLiabilities.length}/${liabilities.length}` : liabilities.length}
+                            </Badge>
                           </TabsTrigger>
                         </TabsList>
 
                         <TabsContent value="debtors" className="mt-4">
                           {debtors.length > 0 ? (
-                            renderTable(debtors, "Dr", "Cr")
+                            renderTable(debtors, filteredDebtors, "Dr", "Cr")
                           ) : (
                             <Alert><AlertDescription>No Debtors with Credit balance found.</AlertDescription></Alert>
                           )}
@@ -1546,7 +1730,7 @@ const TallyTools = () => {
 
                         <TabsContent value="creditors" className="mt-4">
                           {creditors.length > 0 ? (
-                            renderTable(creditors, "Cr", "Dr")
+                            renderTable(creditors, filteredCreditors, "Cr", "Dr")
                           ) : (
                             <Alert><AlertDescription>No Creditors with Debit balance found.</AlertDescription></Alert>
                           )}
@@ -1554,7 +1738,7 @@ const TallyTools = () => {
 
                         <TabsContent value="assets" className="mt-4">
                           {assets.length > 0 ? (
-                            renderTable(assets, "Dr", "Cr")
+                            renderTable(assets, filteredAssets, "Dr", "Cr")
                           ) : (
                             <Alert><AlertDescription>No Assets with Credit balance found.</AlertDescription></Alert>
                           )}
@@ -1562,7 +1746,7 @@ const TallyTools = () => {
 
                         <TabsContent value="liabilities" className="mt-4">
                           {liabilities.length > 0 ? (
-                            renderTable(liabilities, "Cr", "Dr")
+                            renderTable(liabilities, filteredLiabilities, "Cr", "Dr")
                           ) : (
                             <Alert><AlertDescription>No Liabilities with Debit balance found.</AlertDescription></Alert>
                           )}
@@ -1572,8 +1756,21 @@ const TallyTools = () => {
                       {/* Summary & Export */}
                       <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
                         <div className="text-sm text-muted-foreground">
-                          Total: {totalCount} accounts with opposite balances
-                          (Debtors: {debtors.length}, Creditors: {creditors.length}, Assets: {assets.length}, Liabilities: {liabilities.length})
+                          {negativeLedgersSearchTerm ? (
+                            <>
+                              Showing {filteredTotalCount} of {totalCount} accounts with opposite balances
+                              <span className="ml-1">(filtered)</span>
+                              <span className="ml-2 text-xs">
+                                (Debtors: {filteredDebtors.length}/{debtors.length}, Creditors: {filteredCreditors.length}/{creditors.length}, 
+                                Assets: {filteredAssets.length}/{assets.length}, Liabilities: {filteredLiabilities.length}/{liabilities.length})
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              Total: {totalCount} accounts with opposite balances
+                              (Debtors: {debtors.length}, Creditors: {creditors.length}, Assets: {assets.length}, Liabilities: {liabilities.length})
+                            </>
+                          )}
                         </div>
                         <Button variant="outline" onClick={handleExportNegativeLedgersToExcel}>
                           <FileSpreadsheet className="h-4 w-4 mr-2" />
@@ -1590,7 +1787,12 @@ const TallyTools = () => {
       </Dialog>
 
       {/* No Transactions Ledgers Dialog */}
-      <Dialog open={showNoTransactionsDialog} onOpenChange={setShowNoTransactionsDialog}>
+      <Dialog open={showNoTransactionsDialog} onOpenChange={(open) => {
+        setShowNoTransactionsDialog(open);
+        if (!open) {
+          setNoTransactionsSearchTerm("");
+        }
+      }}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1606,6 +1808,16 @@ const TallyTools = () => {
             {(() => {
               const noTransactionLedgers = getNoTransactionLedgers();
               
+              // Filter data based on search term
+              const filteredData = noTransactionsSearchTerm.trim() 
+                ? noTransactionLedgers.filter(line => {
+                    const searchLower = noTransactionsSearchTerm.toLowerCase().trim();
+                    return line.accountHead.toLowerCase().includes(searchLower) ||
+                           line.primaryGroup.toLowerCase().includes(searchLower) ||
+                           (line.parent && line.parent.toLowerCase().includes(searchLower));
+                  })
+                : noTransactionLedgers;
+              
               if (noTransactionLedgers.length === 0) {
                 return (
                   <Alert>
@@ -1619,6 +1831,35 @@ const TallyTools = () => {
 
               return (
                 <>
+                  {/* Search Input */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Search by Account Name, Primary Group, or Parent..."
+                      value={noTransactionsSearchTerm}
+                      onChange={(e) => setNoTransactionsSearchTerm(e.target.value)}
+                      className="pl-9 pr-9"
+                    />
+                    {noTransactionsSearchTerm && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-1 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0"
+                        onClick={() => setNoTransactionsSearchTerm("")}
+                      >
+                        ×
+                      </Button>
+                    )}
+                  </div>
+                  
+                  {noTransactionsSearchTerm && (
+                    <div className="text-sm text-muted-foreground">
+                      Showing {filteredData.length} of {noTransactionLedgers.length} ledgers
+                      {noTransactionsSearchTerm && <span className="ml-1">(filtered)</span>}
+                    </div>
+                  )}
+
                   <div className="border rounded-lg overflow-hidden">
                     <div className="max-h-[500px] overflow-auto">
                       <table className="w-full text-sm">
@@ -1636,47 +1877,55 @@ const TallyTools = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {noTransactionLedgers.map((line, idx) => {
-                            return (
-                              <tr key={idx} className="border-t hover:bg-muted/50">
-                                <td className="p-3 text-muted-foreground">{idx + 1}</td>
-                                <td className="p-3 font-medium">{line.accountHead}</td>
-                                <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                                <td className="p-3 text-muted-foreground text-xs">{line.parent || '-'}</td>
-                                <td className="p-3 text-right font-mono text-xs">
-                                  {line.openingBalance !== 0 ? (
-                                    <span className={line.openingBalance > 0 ? "text-blue-600" : "text-red-600"}>
-                                      {line.openingBalance > 0 ? "Dr " : "Cr "}
-                                      {formatCurrency(Math.abs(line.openingBalance))}
-                                    </span>
-                                  ) : (
-                                    <span className="text-muted-foreground">-</span>
-                                  )}
-                                </td>
-                                <td className="p-3 text-right font-mono text-xs text-muted-foreground">
-                                  {formatCurrency(line.totalDebit)}
-                                </td>
-                                <td className="p-3 text-right font-mono text-xs text-muted-foreground">
-                                  {formatCurrency(line.totalCredit)}
-                                </td>
-                                <td className="p-3 text-right font-mono text-xs">
-                                  {line.closingBalance !== 0 ? (
-                                    <span className={line.closingBalance > 0 ? "text-blue-600" : "text-red-600"}>
-                                      {line.closingBalance > 0 ? "Dr " : "Cr "}
-                                      {formatCurrency(Math.abs(line.closingBalance))}
-                                    </span>
-                                  ) : (
-                                    <span className="text-muted-foreground">-</span>
-                                  )}
-                                </td>
-                                <td className="p-3 text-center">
-                                  <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
-                                    {line.isRevenue ? "P&L" : "BS"}
-                                  </Badge>
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {filteredData.length > 0 ? (
+                            filteredData.map((line, idx) => {
+                              return (
+                                <tr key={idx} className="border-t hover:bg-muted/50">
+                                  <td className="p-3 text-muted-foreground">{idx + 1}</td>
+                                  <td className="p-3 font-medium">{line.accountHead}</td>
+                                  <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                                  <td className="p-3 text-muted-foreground text-xs">{line.parent || '-'}</td>
+                                  <td className="p-3 text-right font-mono text-xs">
+                                    {line.openingBalance !== 0 ? (
+                                      <span className={line.openingBalance < 0 ? "text-blue-600" : "text-red-600"}>
+                                        {line.openingBalance < 0 ? "Dr " : "Cr "}
+                                        {formatCurrency(Math.abs(line.openingBalance))}
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground">-</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-right font-mono text-xs text-muted-foreground">
+                                    {formatCurrency(line.totalDebit)}
+                                  </td>
+                                  <td className="p-3 text-right font-mono text-xs text-muted-foreground">
+                                    {formatCurrency(line.totalCredit)}
+                                  </td>
+                                  <td className="p-3 text-right font-mono text-xs">
+                                    {line.closingBalance !== 0 ? (
+                                      <span className={line.closingBalance < 0 ? "text-blue-600" : "text-red-600"}>
+                                        {line.closingBalance < 0 ? "Dr " : "Cr "}
+                                        {formatCurrency(Math.abs(line.closingBalance))}
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground">-</span>
+                                    )}
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
+                                      {line.isRevenue ? "P&L" : "BS"}
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          ) : noTransactionsSearchTerm ? (
+                            <tr>
+                              <td colSpan={9} className="p-4 text-center text-muted-foreground">
+                                No ledgers found matching "{noTransactionsSearchTerm}"
+                              </td>
+                            </tr>
+                          ) : null}
                         </tbody>
                       </table>
                     </div>
@@ -1685,10 +1934,22 @@ const TallyTools = () => {
                   {/* Summary & Export */}
                   <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">
-                      Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions during the year
-                      <span className="ml-2 text-xs">
-                        ({noTransactionLedgers.filter(l => l.isRevenue).length} P&L, {noTransactionLedgers.filter(l => !l.isRevenue).length} BS)
-                      </span>
+                      {noTransactionsSearchTerm ? (
+                        <>
+                          Showing {filteredData.length} of {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions
+                          <span className="ml-1">(filtered)</span>
+                          <span className="ml-2 text-xs">
+                            ({filteredData.filter(l => l.isRevenue).length} P&L, {filteredData.filter(l => !l.isRevenue).length} BS)
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions during the year
+                          <span className="ml-2 text-xs">
+                            ({noTransactionLedgers.filter(l => l.isRevenue).length} P&L, {noTransactionLedgers.filter(l => !l.isRevenue).length} BS)
+                          </span>
+                        </>
+                      )}
                     </div>
                     <Button variant="outline" onClick={handleExportNoTransactionLedgersToExcel}>
                       <FileSpreadsheet className="h-4 w-4 mr-2" />
@@ -1925,21 +2186,66 @@ const TallyTools = () => {
                   </div>
                 )}
 
-                {/* Download XML Button */}
+                {/* Download Excel Button */}
                 <div className="flex justify-end gap-2">
                   <Button
-                    onClick={openingBalanceMatching.downloadXML}
+                    onClick={() => {
+                      // Export to Excel instead of XML
+                      if (!openingBalanceMatching.comparisonResult) return;
+                      
+                      const wb = XLSX.utils.book_new();
+                      
+                      // Balance Mismatches Sheet
+                      if (openingBalanceMatching.comparisonResult.balanceMismatches.length > 0) {
+                        const balanceData = openingBalanceMatching.comparisonResult.balanceMismatches.map((row, idx) => ({
+                          'Sl No': idx + 1,
+                          '$Name': row.$Name,
+                          '$_PrimaryGroup': row.$_PrimaryGroup,
+                          '$Parent': row.$Parent,
+                          'New_Dr_Balance': row.New_Dr_Balance,
+                          'New_Cr_Balance': row.New_Cr_Balance,
+                          'Old_Dr_Balance': row.Old_Dr_Balance,
+                          'Old_Cr_Balance': row.Old_Cr_Balance,
+                          'Dr_Difference': row.Dr_Difference,
+                          'Cr_Difference': row.Cr_Difference,
+                        }));
+                        const wsBalance = XLSX.utils.json_to_sheet(balanceData);
+                        XLSX.utils.book_append_sheet(wb, wsBalance, "Balance Mismatches");
+                      }
+                      
+                      // Name Mismatches Sheet
+                      if (openingBalanceMatching.comparisonResult.nameMismatches.length > 0) {
+                        const nameData = openingBalanceMatching.comparisonResult.nameMismatches.map((row, idx) => ({
+                          'Sl No': idx + 1,
+                          'Name as per OLD Tally': row['Name as per OLD Tally'],
+                          'Name as per NEW Tally': row['Name as per NEW Tally'],
+                          'Balance as per OLD Tally': row['Balance as per OLD Tally'],
+                          'Balance as per NEW Tally': row['Balance as per NEW Tally'],
+                          'Remarks': row['Remarks'],
+                        }));
+                        const wsName = XLSX.utils.json_to_sheet(nameData);
+                        XLSX.utils.book_append_sheet(wb, wsName, "Ledger Name Mismatches");
+                      }
+                      
+                      const fileName = `Balance_Comparison_${new Date().toISOString().split('T')[0]}.xlsx`;
+                      XLSX.writeFile(wb, fileName);
+                      
+                      toast({
+                        title: "Excel Downloaded",
+                        description: `${fileName} has been downloaded`,
+                      });
+                    }}
                     className="gap-2"
                   >
-                    <FileDown className="h-4 w-4" />
-                    Download XML for Import
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Download Excel Report
                   </Button>
                 </div>
 
                 <Alert>
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription className="text-xs">
-                    To import the XML to Tally: Go to Gateway of Tally &gt; Import &gt; Masters &gt; Select the downloaded XML file &gt; Choose "Modify with new data" &gt; Press Enter. Backup your Tally data before importing!
+                    The comparison report shows balance mismatches (ledgers with different balances between old and new Tally) and name mismatches (ledgers present in only one instance).
                   </AlertDescription>
                 </Alert>
               </div>
@@ -1980,17 +2286,28 @@ const GSTTools = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-amber-50 dark:bg-amber-950/20 rounded-lg p-4 border border-amber-200 dark:border-amber-800">
-        <div className="flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5" />
-          <div>
-            <p className="font-medium text-amber-800 dark:text-amber-200">GST Portal Integration</p>
-            <p className="text-sm text-amber-700 dark:text-amber-300">
-              To use GST tools, you'll need to authenticate with the GST portal using your credentials or API access.
-            </p>
+      <Alert className="bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800">
+        <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+        <AlertDescription className="text-amber-800 dark:text-amber-200">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-medium mb-1">GST Portal Integration</p>
+              <p className="text-sm text-amber-700 dark:text-amber-300">
+                To use GST tools, you'll need to authenticate with the GST portal using your credentials or API access.
+              </p>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm"
+              className="bg-white dark:bg-gray-800 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-900/30 shrink-0"
+              onClick={() => toast({ title: "GST Authentication", description: "GST portal authentication will be available soon" })}
+            >
+              <Unplug className="h-4 w-4 mr-2" />
+              Authenticate
+            </Button>
           </div>
-        </div>
-      </div>
+        </AlertDescription>
+      </Alert>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <ToolCard
@@ -2099,20 +2416,7 @@ const MCATools = () => {
 const IncomeTaxTools = () => {
   const { toast } = useToast();
   const [pan, setPan] = useState("");
-  const [showDTLTool, setShowDTLTool] = useState(false);
 
-  if (showDTLTool) {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setShowDTLTool(false)}>
-            ← Back to Income Tax Tools
-          </Button>
-        </div>
-        <DeferredTax />
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
@@ -2138,18 +2442,6 @@ const IncomeTaxTools = () => {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <ToolCard
-          title="Deferred Tax Calculator (AS-22)"
-          description="Calculate deferred tax assets and liabilities as per AS-22. Professional audit working paper format."
-          icon={<Calculator className="h-5 w-5 text-primary" />}
-          onClick={() => setShowDTLTool(true)}
-        />
-        <ToolCard
-          title="Get 26AS"
-          description="Download Form 26AS containing TDS/TCS credits, advance tax, self-assessment tax details for verification."
-          icon={<FileText className="h-5 w-5 text-primary" />}
-          status="coming-soon"
-        />
-        <ToolCard
           title="Check Notices on IT Website"
           description="View pending notices and communications from the Income Tax department for the assessee."
           icon={<Bell className="h-5 w-5 text-primary" />}
@@ -2173,12 +2465,6 @@ const IncomeTaxTools = () => {
           icon={<Table className="h-5 w-5 text-primary" />}
           status="coming-soon"
         />
-        <ToolCard
-          title="ITR Status & History"
-          description="Check ITR filing status, refund status, and filing history for previous assessment years."
-          icon={<Search className="h-5 w-5 text-primary" />}
-          status="coming-soon"
-        />
       </div>
     </div>
   );
@@ -2186,13 +2472,446 @@ const IncomeTaxTools = () => {
 
 const PDFTools = () => {
   const { toast } = useToast();
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
+  
+  // Split PDF specific state
+  const [splitMode, setSplitMode] = useState<'range' | 'every' | 'specific'>('range');
+  const [pageRange, setPageRange] = useState({ start: 1, end: 1 });
+  const [splitEvery, setSplitEvery] = useState(1);
+  const [specificPages, setSpecificPages] = useState('');
+  const [totalPages, setTotalPages] = useState<number | null>(null);
 
-  const handleFileUpload = (toolName: string) => {
-    toast({
-      title: toolName,
-      description: "Please select files to process",
-    });
+  const toolsConfig: Record<string, { 
+    title: string; 
+    accept: string; 
+    multiple: boolean;
+    description: string;
+  }> = {
+    "Merge PDFs": {
+      title: "Merge PDF Documents",
+      accept: ".pdf",
+      multiple: true,
+      description: "Select multiple PDF files to merge into one document"
+    },
+    "Split PDF": {
+      title: "Split PDF File",
+      accept: ".pdf",
+      multiple: false,
+      description: "Select a PDF file to split by page range"
+    },
+    "Word to PDF": {
+      title: "Convert Word to PDF",
+      accept: ".doc,.docx",
+      multiple: true,
+      description: "Select Word documents to convert to PDF"
+    },
+    "Excel to PDF": {
+      title: "Convert Excel to PDF",
+      accept: ".xls,.xlsx",
+      multiple: true,
+      description: "Select Excel files to convert to PDF"
+    },
+    "Redact PII": {
+      title: "Redact Personal Information",
+      accept: ".pdf",
+      multiple: true,
+      description: "Select PDF files to redact personal information"
+    },
+    "Compress PDF": {
+      title: "Compress PDF",
+      accept: ".pdf",
+      multiple: true,
+      description: "Select PDF files to compress"
+    }
   };
+
+  const handleToolClick = (toolName: string) => {
+    setSelectedTool(toolName);
+    setSelectedFiles([]);
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length > 0) {
+      if (selectedTool === "Split PDF" && files.length === 1) {
+        setSelectedFiles(files);
+        // Get total page count for Split PDF
+        try {
+          const file = files[0];
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await PDFDocument.load(arrayBuffer);
+          const pageCount = pdf.getPageCount();
+          setTotalPages(pageCount);
+          setPageRange({ start: 1, end: pageCount });
+        } catch (error) {
+          console.error("Error reading PDF:", error);
+          setTotalPages(null);
+          toast({
+            title: "Error reading PDF",
+            description: "Could not read the PDF file. Please ensure it's a valid PDF.",
+            variant: "destructive",
+          });
+        }
+      } else {
+        setSelectedFiles(files);
+      }
+    }
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      const config = selectedTool ? toolsConfig[selectedTool] : null;
+      
+      if (config) {
+        const validFiles = files.filter(file => {
+          const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+          return config.accept.split(',').some(accept => accept.trim() === ext);
+        });
+        
+        if (validFiles.length > 0) {
+          if (config.multiple) {
+            setSelectedFiles(validFiles);
+          } else {
+            setSelectedFiles([validFiles[0]]);
+            // For Split PDF, get the total page count
+            if (selectedTool === "Split PDF") {
+              try {
+                const file = validFiles[0];
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await PDFDocument.load(arrayBuffer);
+                const pageCount = pdf.getPageCount();
+                setTotalPages(pageCount);
+                setPageRange({ start: 1, end: pageCount });
+              } catch (error) {
+                console.error("Error reading PDF:", error);
+                setTotalPages(null);
+                toast({
+                  title: "Error reading PDF",
+                  description: "Could not read the PDF file. Please ensure it's a valid PDF.",
+                  variant: "destructive",
+                });
+              }
+            }
+          }
+        } else {
+          toast({
+            title: "Invalid file type",
+            description: `Please select ${config.accept} files`,
+            variant: "destructive",
+          });
+        }
+      }
+    }
+  };
+
+  const handleProcess = async () => {
+    if (selectedFiles.length === 0) {
+      toast({
+        title: "No files selected",
+        description: "Please select files to process",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    
+    try {
+      if (selectedTool === "Merge PDFs") {
+        // Merge PDF functionality
+        if (selectedFiles.length < 2) {
+          toast({
+            title: "Insufficient files",
+            description: "Please select at least 2 PDF files to merge",
+            variant: "destructive",
+          });
+          setIsProcessing(false);
+          return;
+        }
+
+        // Create a new PDF document
+        const mergedPdf = await PDFDocument.create();
+
+        // Process each PDF file
+        for (let i = 0; i < selectedFiles.length; i++) {
+          const file = selectedFiles[i];
+          
+          try {
+            // Read the file as array buffer
+            const arrayBuffer = await file.arrayBuffer();
+            
+            // Load the PDF
+            const pdf = await PDFDocument.load(arrayBuffer);
+            
+            // Get all pages from the PDF
+            const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+            
+            // Add each page to the merged PDF
+            pages.forEach((page) => {
+              mergedPdf.addPage(page);
+            });
+          } catch (error) {
+            console.error(`Error processing ${file.name}:`, error);
+            toast({
+              title: "Error processing file",
+              description: `Failed to process ${file.name}. It may not be a valid PDF file.`,
+              variant: "destructive",
+            });
+            setIsProcessing(false);
+            return;
+          }
+        }
+
+        // Generate the merged PDF as bytes
+        const mergedPdfBytes = await mergedPdf.save();
+
+        // Create a blob and download
+        const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `merged_pdf_${new Date().toISOString().split('T')[0]}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        toast({
+          title: "PDFs Merged Successfully",
+          description: `Successfully merged ${selectedFiles.length} PDF file(s)`,
+        });
+
+        setSelectedTool(null);
+        setSelectedFiles([]);
+        setTotalPages(null);
+        setSplitMode('range');
+        setPageRange({ start: 1, end: 1 });
+        setSplitEvery(1);
+        setSpecificPages('');
+      } else if (selectedTool === "Split PDF") {
+        // Split PDF functionality
+        if (selectedFiles.length !== 1) {
+          toast({
+            title: "Invalid selection",
+            description: "Please select exactly one PDF file to split",
+            variant: "destructive",
+          });
+          setIsProcessing(false);
+          return;
+        }
+
+        try {
+          const file = selectedFiles[0];
+          const arrayBuffer = await file.arrayBuffer();
+          const sourcePdf = await PDFDocument.load(arrayBuffer);
+          const pageCount = sourcePdf.getPageCount();
+
+          let pagesToExtract: number[] = [];
+
+          if (splitMode === 'range') {
+            // Extract page range
+            const start = Math.max(1, Math.min(pageRange.start, pageCount));
+            const end = Math.max(start, Math.min(pageRange.end, pageCount));
+            
+            if (start > end) {
+              toast({
+                title: "Invalid range",
+                description: "Start page must be less than or equal to end page",
+                variant: "destructive",
+              });
+              setIsProcessing(false);
+              return;
+            }
+
+            for (let i = start; i <= end; i++) {
+              pagesToExtract.push(i - 1); // pdf-lib uses 0-based indexing
+            }
+          } else if (splitMode === 'every') {
+            // Split every N pages
+            if (splitEvery < 1) {
+              toast({
+                title: "Invalid value",
+                description: "Pages per file must be at least 1",
+                variant: "destructive",
+              });
+              setIsProcessing(false);
+              return;
+            }
+
+            // Create multiple PDFs, each with splitEvery pages
+            const baseFileName = file.name.replace('.pdf', '');
+            
+            for (let startPage = 0; startPage < pageCount; startPage += splitEvery) {
+              const endPage = Math.min(startPage + splitEvery - 1, pageCount - 1);
+              const newPdf = await PDFDocument.create();
+              
+              const pages = await newPdf.copyPages(sourcePdf, 
+                Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i)
+              );
+              
+              pages.forEach((page) => {
+                newPdf.addPage(page);
+              });
+
+              const pdfBytes = await newPdf.save();
+              const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${baseFileName}_pages_${startPage + 1}_to_${endPage + 1}.pdf`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }
+
+            toast({
+              title: "PDF Split Successfully",
+              description: `Split PDF into ${Math.ceil(pageCount / splitEvery)} file(s)`,
+            });
+
+            setSelectedTool(null);
+            setSelectedFiles([]);
+            setTotalPages(null);
+            setSplitMode('range');
+            setPageRange({ start: 1, end: 1 });
+            setSplitEvery(1);
+            setSpecificPages('');
+            setIsProcessing(false);
+            return;
+          } else if (splitMode === 'specific') {
+            // Extract specific pages
+            const pageNumbers = specificPages
+              .split(',')
+              .map(p => p.trim())
+              .filter(p => p.length > 0)
+              .map(p => {
+                if (p.includes('-')) {
+                  const [start, end] = p.split('-').map(n => parseInt(n.trim()));
+                  if (!isNaN(start) && !isNaN(end) && start <= end) {
+                    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+                  }
+                  return [];
+                }
+                const num = parseInt(p);
+                return isNaN(num) ? [] : [num];
+              })
+              .flat()
+              .filter(p => !isNaN(p) && p >= 1 && p <= pageCount)
+              .map(p => p - 1); // Convert to 0-based
+
+            if (pageNumbers.length === 0) {
+              toast({
+                title: "Invalid pages",
+                description: "Please specify valid page numbers (e.g., 1,3,5 or 1-5)",
+                variant: "destructive",
+              });
+              setIsProcessing(false);
+              return;
+            }
+
+            pagesToExtract = [...new Set(pageNumbers)].sort((a, b) => a - b);
+          }
+
+          // Create the split PDF
+          const newPdf = await PDFDocument.create();
+          const pages = await newPdf.copyPages(sourcePdf, pagesToExtract);
+          pages.forEach((page) => {
+            newPdf.addPage(page);
+          });
+
+          const pdfBytes = await newPdf.save();
+          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          
+          let fileName = file.name.replace('.pdf', '');
+          if (splitMode === 'range') {
+            a.download = `${fileName}_pages_${pageRange.start}_to_${pageRange.end}.pdf`;
+          } else {
+            a.download = `${fileName}_extracted_pages.pdf`;
+          }
+          
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+
+          toast({
+            title: "PDF Split Successfully",
+            description: `Extracted ${pagesToExtract.length} page(s) from the PDF`,
+          });
+
+          setSelectedTool(null);
+          setSelectedFiles([]);
+          setTotalPages(null);
+          setSplitMode('range');
+          setPageRange({ start: 1, end: 1 });
+          setSplitEvery(1);
+          setSpecificPages('');
+        } catch (error) {
+          console.error("Error splitting PDF:", error);
+          toast({
+            title: "Processing Failed",
+            description: error instanceof Error ? error.message : "An error occurred while splitting the PDF",
+            variant: "destructive",
+          });
+        } finally {
+          setIsProcessing(false);
+        }
+      } else {
+        // Placeholder for other tools
+        setTimeout(() => {
+          setIsProcessing(false);
+          toast({
+            title: `${selectedTool} - Processing`,
+            description: `Processing ${selectedFiles.length} file(s). This feature is coming soon!`,
+          });
+          setSelectedTool(null);
+          setSelectedFiles([]);
+        }, 1500);
+      }
+    } catch (error) {
+      console.error("Error processing PDFs:", error);
+      toast({
+        title: "Processing Failed",
+        description: error instanceof Error ? error.message : "An error occurred while processing the files",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  const config = selectedTool ? toolsConfig[selectedTool] : null;
 
   return (
     <div className="space-y-6">
@@ -2201,32 +2920,32 @@ const PDFTools = () => {
           title="Merge PDF Documents"
           description="Combine multiple PDF files into a single document. Useful for consolidating audit evidence."
           icon={<Merge className="h-5 w-5 text-primary" />}
-          onClick={() => handleFileUpload("Merge PDFs")}
+          onClick={() => handleToolClick("Merge PDFs")}
         />
         <ToolCard
           title="Split PDF File"
           description="Split a PDF into multiple files by page range or extract specific pages."
           icon={<Scissors className="h-5 w-5 text-primary" />}
-          onClick={() => handleFileUpload("Split PDF")}
+          onClick={() => handleToolClick("Split PDF")}
         />
         <ToolCard
           title="Convert Word to PDF"
           description="Convert Microsoft Word documents (.doc, .docx) to PDF format."
           icon={<FileType className="h-5 w-5 text-primary" />}
-          onClick={() => handleFileUpload("Word to PDF")}
+          onClick={() => handleToolClick("Word to PDF")}
         />
         <ToolCard
           title="Convert Excel to PDF"
           description="Convert Microsoft Excel spreadsheets (.xls, .xlsx) to PDF format."
           icon={<FileSpreadsheet className="h-5 w-5 text-primary" />}
-          onClick={() => handleFileUpload("Excel to PDF")}
+          onClick={() => handleToolClick("Excel to PDF")}
         />
         <ToolCard
           title="Redact Personal Information"
           description="Automatically detect and redact PII like Aadhaar, PAN, bank account numbers from documents."
           icon={<Eye className="h-5 w-5 text-primary" />}
           status="beta"
-          onClick={() => handleFileUpload("Redact PII")}
+          onClick={() => handleToolClick("Redact PII")}
         />
         <ToolCard
           title="OCR - Extract Text from PDF"
@@ -2238,7 +2957,7 @@ const PDFTools = () => {
           title="Compress PDF"
           description="Reduce PDF file size while maintaining quality for easier sharing and storage."
           icon={<FilePlus className="h-5 w-5 text-primary" />}
-          onClick={() => handleFileUpload("Compress PDF")}
+          onClick={() => handleToolClick("Compress PDF")}
         />
         <ToolCard
           title="Add Watermark"
@@ -2247,16 +2966,234 @@ const PDFTools = () => {
           status="coming-soon"
         />
       </div>
+
+      {/* PDF Tool Dialog */}
+      <Dialog open={selectedTool !== null} onOpenChange={(open) => {
+        if (!open) {
+          setSelectedTool(null);
+          setSelectedFiles([]);
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{config?.title}</DialogTitle>
+            <DialogDescription>
+              {config?.description}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* File Drop Zone */}
+            <div
+              className={cn(
+                'border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer',
+                dragActive
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-primary/50',
+                selectedFiles.length > 0 && 'border-primary bg-primary/5'
+              )}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept={config?.accept}
+                multiple={config?.multiple}
+                onChange={handleFileSelect}
+              />
+              {selectedFiles.length > 0 ? (
+                <>
+                  <FileText className="h-12 w-12 mx-auto text-primary mb-4" />
+                  <p className="text-sm text-foreground font-medium mb-2">
+                    {selectedFiles.length} file(s) selected
+                  </p>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {selectedFiles.map((file, idx) => (
+                      <p key={idx} className="text-xs text-muted-foreground">
+                        {file.name} ({formatFileSize(file.size)})
+                      </p>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">Click to change files</p>
+                </>
+              ) : (
+                <>
+                  <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                  <p className="text-sm text-foreground font-medium mb-1">
+                    Drop files here or click to browse
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {config?.accept} {config?.multiple ? '(Multiple files allowed)' : '(Single file)'}
+                  </p>
+                </>
+              )}
+            </div>
+
+            {/* Split PDF Options */}
+            {selectedTool === "Split PDF" && selectedFiles.length > 0 && totalPages !== null && (
+              <div className="space-y-4 border-t pt-4">
+                <div className="space-y-2">
+                  <Label>Split Mode</Label>
+                  <Select value={splitMode} onValueChange={(value: 'range' | 'every' | 'specific') => setSplitMode(value)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="range">Extract Page Range</SelectItem>
+                      <SelectItem value="every">Split Every N Pages</SelectItem>
+                      <SelectItem value="specific">Extract Specific Pages</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {splitMode === 'range' && (
+                  <div className="space-y-3">
+                    <div className="text-sm text-muted-foreground">
+                      Total pages: {totalPages}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="start-page">Start Page</Label>
+                        <Input
+                          id="start-page"
+                          type="number"
+                          min={1}
+                          max={totalPages}
+                          value={pageRange.start}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value) || 1;
+                            setPageRange({ ...pageRange, start: Math.max(1, Math.min(value, totalPages || 1)) });
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="end-page">End Page</Label>
+                        <Input
+                          id="end-page"
+                          type="number"
+                          min={pageRange.start}
+                          max={totalPages}
+                          value={pageRange.end}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value) || 1;
+                            setPageRange({ ...pageRange, end: Math.max(pageRange.start, Math.min(value, totalPages || 1)) });
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Pages {pageRange.start} to {pageRange.end} will be extracted ({pageRange.end - pageRange.start + 1} pages)
+                    </p>
+                  </div>
+                )}
+
+                {splitMode === 'every' && (
+                  <div className="space-y-3">
+                    <div className="text-sm text-muted-foreground">
+                      Total pages: {totalPages}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="split-every">Pages per File</Label>
+                      <Input
+                        id="split-every"
+                        type="number"
+                        min={1}
+                        max={totalPages}
+                        value={splitEvery}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value) || 1;
+                          setSplitEvery(Math.max(1, Math.min(value, totalPages || 1)));
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      PDF will be split into {Math.ceil((totalPages || 1) / splitEvery)} file(s), each containing {splitEvery} page(s)
+                    </p>
+                  </div>
+                )}
+
+                {splitMode === 'specific' && (
+                  <div className="space-y-3">
+                    <div className="text-sm text-muted-foreground">
+                      Total pages: {totalPages}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="specific-pages">Page Numbers</Label>
+                      <Input
+                        id="specific-pages"
+                        type="text"
+                        placeholder="e.g., 1,3,5 or 1-5,10,15-20"
+                        value={specificPages}
+                        onChange={(e) => setSpecificPages(e.target.value)}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Enter page numbers separated by commas. Use ranges like "1-5" for pages 1 through 5. Example: "1,3,5" or "1-5,10,15-20"
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Process Button */}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSelectedTool(null);
+                  setSelectedFiles([]);
+                  setTotalPages(null);
+                  setSplitMode('range');
+                  setPageRange({ start: 1, end: 1 });
+                  setSplitEvery(1);
+                  setSpecificPages('');
+                }}
+                disabled={isProcessing}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleProcess}
+                disabled={selectedFiles.length === 0 || isProcessing}
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <FilePlus className="h-4 w-4 mr-2" />
+                    Process Files
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
 const AnalyticsTools = () => {
   const { toast } = useToast();
+  const [showDTLDialog, setShowDTLDialog] = useState(false);
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <ToolCard
+          title="Deferred Tax Calculator (AS-22)"
+          description="Calculate Deferred Tax Assets (DTA) and Deferred Tax Liabilities (DTL) as per Accounting Standard 22 for taxes on income."
+          icon={<Scale className="h-5 w-5 text-primary" />}
+          onClick={() => setShowDTLDialog(true)}
+        />
         <ToolCard
           title="Ratio Analysis Calculator"
           description="Calculate key financial ratios including liquidity, profitability, and solvency ratios from trial balance."
@@ -2294,6 +3231,21 @@ const AnalyticsTools = () => {
           status="coming-soon"
         />
       </div>
+
+      {/* Deferred Tax Calculator Dialog */}
+      <Dialog open={showDTLDialog} onOpenChange={setShowDTLDialog}>
+        <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Deferred Tax Calculator (AS-22)</DialogTitle>
+            <DialogDescription>
+              Calculate Deferred Tax Assets (DTA) and Deferred Tax Liabilities (DTL) as per Accounting Standard 22
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            <DeferredTax />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -2311,7 +3263,7 @@ export default function AuditTools() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Audit Tools</h1>
+          <h1 className="text-2xl font-bold text-foreground">VERA Tools</h1>
           <p className="text-muted-foreground">
             Productivity tools to streamline your audit workflow
           </p>
@@ -2319,7 +3271,7 @@ export default function AuditTools() {
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            Please select an engagement from the sidebar to use audit tools.
+            Please select an engagement from the sidebar to use VERA tools.
           </AlertDescription>
         </Alert>
       </div>
@@ -2329,7 +3281,7 @@ export default function AuditTools() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Audit Tools</h1>
+        <h1 className="text-2xl font-bold text-foreground">VERA Tools</h1>
         <p className="text-muted-foreground">
           {currentEngagement.client_name} - {currentEngagement.name}
         </p>
@@ -2337,27 +3289,45 @@ export default function AuditTools() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="flex flex-wrap h-auto gap-1 bg-muted/50 p-1">
-          <TabsTrigger value="tally" className="flex items-center gap-2">
+          <TabsTrigger 
+            value="tally" 
+            className="flex items-center gap-2"
+          >
             <Database className="h-4 w-4" />
             Tally Tools
           </TabsTrigger>
-          <TabsTrigger value="gst" className="flex items-center gap-2">
+          <TabsTrigger 
+            value="gst" 
+            className="flex items-center gap-2"
+          >
             <Receipt className="h-4 w-4" />
             GST Related
           </TabsTrigger>
-          <TabsTrigger value="mca" className="flex items-center gap-2">
+          <TabsTrigger 
+            value="mca" 
+            className="flex items-center gap-2"
+          >
             <Building2 className="h-4 w-4" />
             MCA Data
           </TabsTrigger>
-          <TabsTrigger value="incometax" className="flex items-center gap-2">
+          <TabsTrigger 
+            value="incometax" 
+            className="flex items-center gap-2"
+          >
             <FileText className="h-4 w-4" />
             Income Tax
           </TabsTrigger>
-          <TabsTrigger value="pdf" className="flex items-center gap-2">
+          <TabsTrigger 
+            value="pdf" 
+            className="flex items-center gap-2"
+          >
             <FileType className="h-4 w-4" />
             PDF Tools
           </TabsTrigger>
-          <TabsTrigger value="analytics" className="flex items-center gap-2">
+          <TabsTrigger 
+            value="analytics" 
+            className="flex items-center gap-2"
+          >
             <Calculator className="h-4 w-4" />
             Analytics
           </TabsTrigger>
