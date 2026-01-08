@@ -176,17 +176,10 @@ export default function GstzenIntegration() {
             {/* Customer Profile Section */}
             {isGstzenAuthenticated && (
                 <>
+                    {/* Customer Profile Section Hidden as requested 
                     <div className="grid gap-6 md:grid-cols-2 mb-8">
-                        {/* Customer Profile Card */}
                         <Card className="md:col-span-2 overflow-hidden">
                             <div className="bg-primary/5 p-6 md:p-8 flex flex-col md:flex-row gap-6 items-center md:items-start text-center md:text-left relative group">
-                                {/* DEMO: Sign Out button hidden as requested
-                                <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                    <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-destructive">
-                                        <LogOut className="h-4 w-4 md:mr-2" />
-                                        <span className="hidden md:inline">Sign Out</span>
-                                    </Button>
-                                </div> */}
                                 <div className="h-20 w-20 rounded-full bg-background shadow-sm flex items-center justify-center shrink-0">
                                     <UserCircle className="h-10 w-10 text-primary" />
                                 </div>
@@ -222,6 +215,8 @@ export default function GstzenIntegration() {
                             </div>
                         </Card>
                     </div>
+                    */}
+
 
                     {/* GSTINs Management Section */}
                     <div className="space-y-6">
