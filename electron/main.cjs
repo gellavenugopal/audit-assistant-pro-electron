@@ -1,6 +1,13 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
-const odbc = require('odbc');
+
+// ODBC is optional - only load if available
+let odbc = null;
+try {
+  odbc = require('odbc');
+} catch (error) {
+  console.warn('ODBC module not available - Tally integration will be disabled');
+}
 
 const isDev = process.env.NODE_ENV === 'development' || (app && !app.isPackaged);
 
