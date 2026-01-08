@@ -694,15 +694,6 @@ const TallyTools = () => {
     }).format(value);
   };
 
-  // Calculate totals for Trial Balance
-  const totalOpeningBalance = fetchedTBData?.reduce((sum, line) => sum + line.openingBalance, 0) || 0;
-  const totalDebit = fetchedTBData?.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0) || 0;
-  const totalCredit = fetchedTBData?.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0) || 0;
-  const totalClosingBalance = fetchedTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
-  
-  // Verification: Closing should equal Opening + Debit - Credit
-  const totalClosingBalanceSum = totalClosingBalance;
-  const totalClosingBalanceCalculated = totalOpeningBalance + totalDebit - totalCredit;
   // Filter Trial Balance data based on search term
   const filteredTBData = useMemo(() => {
     if (!fetchedTBData) return null;
