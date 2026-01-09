@@ -28,6 +28,7 @@ import Misstatements from "./pages/Misstatements";
 import AuditTrail from "./pages/AuditTrail";
 import Completion from "./pages/Completion";
 import Settings from "./pages/Settings";
+import Feedback from "./pages/Feedback";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
@@ -252,6 +253,16 @@ const App = () => (
                     <ProtectedRoute>
                       <MainLayout>
                         <Settings />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/feedback"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <Feedback />
                       </MainLayout>
                     </ProtectedRoute>
                   }
