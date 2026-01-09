@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { HashRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { EngagementProvider } from "@/contexts/EngagementContext";
 import { TallyProvider } from "@/contexts/TallyContext";
@@ -39,6 +39,10 @@ import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from "./pages/Gstr1Dashboard";
 import ComplianceApplicability from "./pages/ComplianceApplicability";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
+import GstzenIntegration from "./pages/GstzenIntegration";
+import GstzenLogin from "./pages/GstzenLogin";
+import Gstr1Dashboard from "./pages/Gstr1Dashboard";
+import ComplianceApplicability from "./pages/ComplianceApplicability";
 
 const queryClient = new QueryClient();
 
@@ -47,7 +51,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <HashRouter>
         <AuthProvider>
           <EngagementProvider>
             <TallyProvider>
@@ -152,6 +156,16 @@ const App = () => (
                     <ProtectedEngagementRoute>
                       <MainLayout>
                         <AuditPrograms />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/programs-new"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <AuditProgramNew />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -329,7 +343,7 @@ const App = () => (
             </TallyProvider>
           </EngagementProvider>
         </AuthProvider>
-      </BrowserRouter>
+      </HashRouter>
     </TooltipProvider>
   </QueryClientProvider>
 );

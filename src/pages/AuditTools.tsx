@@ -184,12 +184,12 @@ const TallyTools = () => {
   const handleFetchTrialBalance = async () => {
     setIsFetchingTB(true);
     try {
-      const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
-      if (lines && lines.length > 0) {
-        setFetchedTBData(lines);
+      const result = await odbcConnection.fetchTrialBalance();
+      if (result && result.data && result.data.length > 0) {
+        setFetchedTBData(result.data);
         toast({
           title: "Trial Balance Fetched",
-          description: `Retrieved ${lines.length} ledger accounts from Tally`,
+          description: `Retrieved ${result.data.length} ledger accounts from Tally`,
         });
       }
     } catch (error) {
@@ -2685,7 +2685,7 @@ const PDFTools = () => {
         const mergedPdfBytes = await mergedPdf.save();
 
         // Create a blob and download
-        const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+        const blob = new Blob([new Uint8Array(mergedPdfBytes)], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -2773,7 +2773,7 @@ const PDFTools = () => {
               });
 
               const pdfBytes = await newPdf.save();
-              const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+              const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;
@@ -2840,7 +2840,7 @@ const PDFTools = () => {
           });
 
           const pdfBytes = await newPdf.save();
-          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
@@ -2932,20 +2932,19 @@ const PDFTools = () => {
           title="Convert Word to PDF"
           description="Convert Microsoft Word documents (.doc, .docx) to PDF format."
           icon={<FileType className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Word to PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Convert Excel to PDF"
           description="Convert Microsoft Excel spreadsheets (.xls, .xlsx) to PDF format."
           icon={<FileSpreadsheet className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Excel to PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Redact Personal Information"
           description="Automatically detect and redact PII like Aadhaar, PAN, bank account numbers from documents."
           icon={<Eye className="h-5 w-5 text-primary" />}
-          status="beta"
-          onClick={() => handleToolClick("Redact PII")}
+          status="coming-soon"
         />
         <ToolCard
           title="OCR - Extract Text from PDF"
@@ -2957,7 +2956,7 @@ const PDFTools = () => {
           title="Compress PDF"
           description="Reduce PDF file size while maintaining quality for easier sharing and storage."
           icon={<FilePlus className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Compress PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Add Watermark"
