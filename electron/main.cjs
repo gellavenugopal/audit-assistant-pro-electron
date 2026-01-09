@@ -243,7 +243,6 @@ function registerIpcHandlers() {
     return { success: false, error: error.message };
   }
 });
-  });
 
   ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) => {
     try {

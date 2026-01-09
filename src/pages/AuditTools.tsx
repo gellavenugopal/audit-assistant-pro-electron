@@ -184,12 +184,12 @@ const TallyTools = () => {
   const handleFetchTrialBalance = async () => {
     setIsFetchingTB(true);
     try {
-      const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
-      if (lines && lines.length > 0) {
-        setFetchedTBData(lines);
+      const result = await odbcConnection.fetchTrialBalance();
+      if (result && result.data && result.data.length > 0) {
+        setFetchedTBData(result.data);
         toast({
           title: "Trial Balance Fetched",
-          description: `Retrieved ${lines.length} ledger accounts from Tally`,
+          description: `Retrieved ${result.data.length} ledger accounts from Tally`,
         });
       }
     } catch (error) {
@@ -1299,221 +1299,6 @@ const TallyTools = () => {
                   </table>
                 </div>
               </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              Get Month wise Data from Tally
-            </DialogTitle>
-            <DialogDescription>
-              Extract month wise data for analysis. P&L shows movement, Balance Sheet shows closing balances.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {/* Period Selection */}
-            <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg flex-wrap">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="mwFyStartYear">FY Starting Year:</Label>
-                <Select
-                  value={String(mwFyStartYear)}
-                  onValueChange={(v) => setMwFyStartYear(Number(v))}
-                >
-                  <SelectTrigger className="w-28">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[2020, 2021, 2022, 2023, 2024, 2025, 2026].map(year => (
-                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="mwTargetMonth">Target Month:</Label>
-                <Select value={mwTargetMonth} onValueChange={setMwTargetMonth}>
-                  <SelectTrigger className="w-24">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"].map(month => (
-                      <SelectItem key={month} value={month}>{month}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="text-sm text-muted-foreground">
-                FY {mwFyStartYear}-{String(mwFyStartYear + 1).slice(-2)} → Apr to {mwTargetMonth}
-              </div>
-              <Button onClick={handleFetchMonthWiseData} disabled={isFetchingMW}>
-                {isFetchingMW ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Fetching...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Fetch from Tally
-                  </>
-                )}
-              </Button>
-            </div>
-
-            {/* Search/Filter */}
-            {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="Search by Ledger Name or Primary Group..."
-                    value={mwSearchTerm}
-                    onChange={(e) => setMwSearchTerm(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-                {mwSearchTerm && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setMwSearchTerm("")}
-                    className="h-9"
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {/* Results Table */}
-            {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (() => {
-              // Filter data based on search term
-              const allLines = [...fetchedMWData.plLines, ...fetchedMWData.bsLines];
-              const filteredLines = mwSearchTerm.trim() 
-                ? allLines.filter(line => {
-                    const searchLower = mwSearchTerm.toLowerCase().trim();
-                    return line.accountName.toLowerCase().includes(searchLower) ||
-                           line.primaryGroup.toLowerCase().includes(searchLower);
-                  })
-                : allLines;
-              
-              const filteredPlCount = filteredLines.filter(l => l.isRevenue).length;
-              const filteredBsCount = filteredLines.filter(l => !l.isRevenue).length;
-              const displayLines = filteredLines.slice(0, 100);
-              
-              return (
-              <div className="border rounded-lg overflow-hidden">
-                <div className="max-h-[400px] overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted sticky top-0">
-                      <tr>
-                        <th className="text-left p-2 font-medium min-w-[200px]">Ledger Name</th>
-                        <th className="text-left p-2 font-medium min-w-[120px]">Primary Group</th>
-                        <th className="text-center p-2 font-medium text-xs">Type</th>
-                        {fetchedMWData.months.map(month => (
-                          <th key={month} className="text-right p-2 font-medium min-w-[80px]">{month}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {displayLines.length > 0 ? (
-                        displayLines.map((line, idx) => (
-                          <tr key={idx} className="border-t hover:bg-muted/50">
-                            <td className="p-2">{line.accountName}</td>
-                            <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                            <td className="p-2 text-center">
-                              <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
-                                {line.isRevenue ? "P&L" : "BS"}
-                              </Badge>
-                            </td>
-                            {fetchedMWData.months.map((month, monthIdx) => {
-                              // For P&L items, show movement (current - previous)
-                              // For BS items, show absolute closing balance
-                              let displayValue = 0;
-                              if (line.isRevenue) {
-                                // P&L: Calculate movement
-                                if (monthIdx === 0) {
-                                  // First month: closing - opening
-                                  displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
-                                } else {
-                                  // Subsequent months: current closing - previous closing
-                                  const prevMonth = fetchedMWData.months[monthIdx - 1];
-                                  displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
-                                }
-                              } else {
-                                // BS: Show absolute closing balance
-                                displayValue = line.monthlyBalances[month] || 0;
-                              }
-                              
-                              return (
-                                <td key={month} className="p-2 text-right font-mono text-xs">
-                                  {displayValue !== 0 
-                                    ? formatCurrency(displayValue) 
-                                    : '-'}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))
-                      ) : mwSearchTerm ? (
-                        <tr>
-                          <td colSpan={3 + fetchedMWData.months.length} className="p-4 text-center text-muted-foreground">
-                            No accounts found matching "{mwSearchTerm}"
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Summary & Export */}
-                <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    {mwSearchTerm ? (
-                      <>
-                        {filteredLines.length} of {allLines.length} accounts
-                        {filteredLines.length > 0 && (
-                          <span className="ml-1">({filteredPlCount} P&L, {filteredBsCount} BS)</span>
-                        )}
-                        {mwSearchTerm && <span className="ml-1">(filtered)</span>}
-                      </>
-                    ) : (
-                      <>
-                        {allLines.length} accounts ({fetchedMWData.plLines.length} P&L, {fetchedMWData.bsLines.length} BS)
-                      </>
-                    )}
-                    {displayLines.length < filteredLines.length && (
-                      <span className="ml-2 text-amber-600">(showing first {displayLines.length} of {filteredLines.length})</span>
-                    )}
-                    {!mwSearchTerm && allLines.length > 100 && (
-                      <span className="ml-2 text-amber-600">(showing first 100)</span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setFetchedMWData(null)}>
-                      Clear
-                    </Button>
-                    <Button variant="outline" onClick={handleExportMonthWiseToExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export to Excel
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              );
-            })()}
-
-            {fetchedMWData && fetchedMWData.plLines.length === 0 && fetchedMWData.bsLines.length === 0 && (
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  No month wise data found. Make sure Tally has data for FY {mwFyStartYear}-{mwFyStartYear + 1}.
-                </AlertDescription>
-              </Alert>
             )}
           </div>
         </DialogContent>
@@ -2804,7 +2589,7 @@ const PDFTools = () => {
         const mergedPdfBytes = await mergedPdf.save();
 
         // Create a blob and download
-        const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+        const blob = new Blob([new Uint8Array(mergedPdfBytes)], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -2892,7 +2677,7 @@ const PDFTools = () => {
               });
 
               const pdfBytes = await newPdf.save();
-              const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+              const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;
@@ -2959,7 +2744,7 @@ const PDFTools = () => {
           });
 
           const pdfBytes = await newPdf.save();
-          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
@@ -3051,20 +2836,19 @@ const PDFTools = () => {
           title="Convert Word to PDF"
           description="Convert Microsoft Word documents (.doc, .docx) to PDF format."
           icon={<FileType className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Word to PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Convert Excel to PDF"
           description="Convert Microsoft Excel spreadsheets (.xls, .xlsx) to PDF format."
           icon={<FileSpreadsheet className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Excel to PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Redact Personal Information"
           description="Automatically detect and redact PII like Aadhaar, PAN, bank account numbers from documents."
           icon={<Eye className="h-5 w-5 text-primary" />}
-          status="beta"
-          onClick={() => handleToolClick("Redact PII")}
+          status="coming-soon"
         />
         <ToolCard
           title="OCR - Extract Text from PDF"
@@ -3076,7 +2860,7 @@ const PDFTools = () => {
           title="Compress PDF"
           description="Reduce PDF file size while maintaining quality for easier sharing and storage."
           icon={<FilePlus className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Compress PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Add Watermark"
