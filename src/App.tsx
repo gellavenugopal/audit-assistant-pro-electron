@@ -39,10 +39,7 @@ import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from "./pages/Gstr1Dashboard";
 import ComplianceApplicability from "./pages/ComplianceApplicability";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
-import GstzenIntegration from "./pages/GstzenIntegration";
-import GstzenLogin from "./pages/GstzenLogin";
-import Gstr1Dashboard from "./pages/Gstr1Dashboard";
-import ComplianceApplicability from "./pages/ComplianceApplicability";
+
 
 const queryClient = new QueryClient();
 
