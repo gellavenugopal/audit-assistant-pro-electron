@@ -80,7 +80,6 @@ interface ActiveClient {
 }
 
 interface ChildCounts {
-  procedures: number;
   risks: number;
   review_notes: number;
   evidence_files: number;
@@ -205,8 +204,7 @@ export function DataIntegrityPanel() {
   };
 
   const checkEngagementChildren = async (engagementId: string): Promise<ChildCounts> => {
-    const [procedures, risks, notes, evidence, tb, assignments] = await Promise.all([
-      supabase.from('audit_procedures').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
+    const [risks, notes, evidence, tb, assignments] = await Promise.all([
       supabase.from('risks').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
       supabase.from('review_notes').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
       supabase.from('evidence_files').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
@@ -215,7 +213,6 @@ export function DataIntegrityPanel() {
     ]);
 
     return {
-      procedures: procedures.count || 0,
       risks: risks.count || 0,
       review_notes: notes.count || 0,
       evidence_files: evidence.count || 0,
@@ -226,7 +223,6 @@ export function DataIntegrityPanel() {
 
   const hasChildren = (counts: ChildCounts): boolean => {
     return (
-      counts.procedures > 0 ||
       counts.risks > 0 ||
       counts.review_notes > 0 ||
       counts.evidence_files > 0 ||
@@ -887,7 +883,6 @@ export function DataIntegrityPanel() {
               <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
                 <p className="font-medium text-destructive mb-2">Cannot delete: Linked data exists</p>
                 <ul className="text-sm space-y-1">
-                  {childCounts.procedures > 0 && <li>• {childCounts.procedures} audit procedure(s)</li>}
                   {childCounts.risks > 0 && <li>• {childCounts.risks} risk(s)</li>}
                   {childCounts.review_notes > 0 && <li>• {childCounts.review_notes} review note(s)</li>}
                   {childCounts.evidence_files > 0 && <li>• {childCounts.evidence_files} evidence file(s)</li>}

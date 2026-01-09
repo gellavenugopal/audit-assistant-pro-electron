@@ -23,12 +23,7 @@ export async function generateEngagementReport(engagement: Engagement): Promise<
   const pageWidth = doc.internal.pageSize.getWidth();
   
   // Fetch related data
-  const [proceduresRes, risksRes, reviewNotesRes] = await Promise.all([
-    supabase
-      .from('audit_procedures')
-      .select('*')
-      .eq('engagement_id', engagement.id)
-      .order('area'),
+  const [risksRes, reviewNotesRes] = await Promise.all([
     supabase
       .from('risks')
       .select('*')
@@ -41,7 +36,6 @@ export async function generateEngagementReport(engagement: Engagement): Promise<
       .order('created_at', { ascending: false }),
   ]);
 
-  const procedures = proceduresRes.data || [];
   const risks = risksRes.data || [];
   const reviewNotes = reviewNotesRes.data || [];
 
@@ -94,48 +88,6 @@ export async function generateEngagementReport(engagement: Engagement): Promise<
       1: { cellWidth: 'auto' },
     },
   });
-
-  // Procedures Section
-  yPos = (doc as any).lastAutoTable.finalY + 15;
-  
-  if (yPos > 250) {
-    doc.addPage();
-    yPos = 20;
-  }
-  
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`Audit Procedures (${procedures.length})`, 14, yPos);
-  
-  if (procedures.length > 0) {
-    yPos += 5;
-    autoTable(doc, {
-      startY: yPos,
-      head: [['Area', 'Procedure', 'Status', 'Workpaper Ref', 'Conclusion']],
-      body: procedures.map(p => [
-        p.area,
-        p.procedure_name,
-        p.status,
-        p.workpaper_ref || '-',
-        p.conclusion || '-',
-      ]),
-      theme: 'striped',
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [59, 130, 246] },
-      columnStyles: {
-        0: { cellWidth: 25 },
-        1: { cellWidth: 50 },
-        2: { cellWidth: 25 },
-        3: { cellWidth: 25 },
-        4: { cellWidth: 'auto' },
-      },
-    });
-  } else {
-    yPos += 8;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'italic');
-    doc.text('No procedures recorded', 14, yPos);
-  }
 
   // Risks Section
   yPos = (doc as any).lastAutoTable?.finalY + 15 || yPos + 15;
@@ -228,13 +180,6 @@ export async function generateEngagementReport(engagement: Engagement): Promise<
   doc.setFont('helvetica', 'bold');
   doc.text('Summary Statistics', 14, yPos);
   
-  const procedureStats = {
-    total: procedures.length,
-    completed: procedures.filter(p => p.status === 'completed' || p.status === 'done').length,
-    inProgress: procedures.filter(p => p.status === 'in_progress').length,
-    notStarted: procedures.filter(p => p.status === 'not_started').length,
-  };
-  
   const riskStats = {
     total: risks.length,
     high: risks.filter(r => r.combined_risk === 'high').length,
@@ -254,7 +199,6 @@ export async function generateEngagementReport(engagement: Engagement): Promise<
     startY: yPos,
     head: [['Category', 'Total', 'Completed/Cleared', 'In Progress/Open', 'Other']],
     body: [
-      ['Procedures', procedureStats.total, procedureStats.completed, procedureStats.inProgress, procedureStats.notStarted],
       ['Risks', riskStats.total, '-', '-', `High: ${riskStats.high}, Med: ${riskStats.medium}, Low: ${riskStats.low}`],
       ['Review Notes', noteStats.total, noteStats.cleared, noteStats.open, noteStats.responded],
     ],

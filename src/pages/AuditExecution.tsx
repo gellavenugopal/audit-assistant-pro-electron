@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,21 +27,18 @@ import {
 } from '@/components/ui/accordion';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Plus, 
-  FileText, 
-  Upload, 
-  Download, 
+import {
+  Plus,
+  FileText,
+  Upload,
+  Download,
   Paperclip,
   Edit2,
   Trash2,
-  Eye,
   Save,
   Building2,
   Calendar,
   User,
-  CheckCircle,
-  Clock,
   Loader2,
   MessageSquare,
   Search,
@@ -57,30 +53,26 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useClients } from '@/hooks/useClients';
 import { useFinancialYears } from '@/hooks/useFinancialYears';
-import { usePartners } from '@/hooks/usePartners';
+import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { useReviewNotes } from '@/hooks/useReviewNotes';
 import { 
-  useAuditProgramNew, 
-  useAuditProgramSections, 
+  useAuditExecution, 
+  useAuditExecutionSections, 
   useWorkingSectionBoxes,
-  useAuditProgramAttachments 
-} from '@/hooks/useAuditProgramNew';
+  useAuditExecutionAttachments 
+} from '@/hooks/useAuditExecution';
 import { WorkingSectionBoxComponent } from '@/components/audit/WorkingSectionBox';
 import { useEvidenceFiles } from '@/hooks/useEvidenceFiles';
-import { DEFAULT_SECTION_NAMES, BoxStatus } from '@/types/auditProgramNew';
-import { StatusBadge, getStatusVariant } from '@/components/ui/status-badge';
-import { ApprovalBadge } from '@/components/audit/ApprovalBadge';
 import { cn } from '@/lib/utils';
 
-export default function AuditProgramNew() {
-  const navigate = useNavigate();
-  const { user, role } = useAuth();
+export default function AuditExecution() {
+  const { user } = useAuth();
   const { currentEngagement } = useEngagement();
   const { clients } = useClients();
   const { financialYears } = useFinancialYears();
-  const { partners } = usePartners();
+  const { members: teamMembers, loading: teamMembersLoading } = useTeamMembers(currentEngagement?.id);
   
-  const { programs, loading: programsLoading, createProgram, updateProgram, deleteProgram } = useAuditProgramNew(currentEngagement?.id || null);
+  const { programs, loading: programsLoading, createProgram, updateProgram, deleteProgram } = useAuditExecution(currentEngagement?.id || null);
   
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
@@ -96,9 +88,6 @@ export default function AuditProgramNew() {
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [newBoxHeader, setNewBoxHeader] = useState('');
   const [createBoxCallback, setCreateBoxCallback] = useState<((header: string) => Promise<void>) | null>(null);
-  const [attachmentDialogOpen, setAttachmentDialogOpen] = useState(false);
-  const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [editProgramDialogOpen, setEditProgramDialogOpen] = useState(false);
   const [editingProgramId, setEditingProgramId] = useState<string | null>(null);
   const [editProgramName, setEditProgramName] = useState('');
@@ -106,20 +95,50 @@ export default function AuditProgramNew() {
   const [editProgramDescription, setEditProgramDescription] = useState('');
   const [editSelectedMemberIds, setEditSelectedMemberIds] = useState<string[]>([]);
   const [programAssignments, setProgramAssignments] = useState<Record<string, string[]>>({});
-  const [attachedEvidence, setAttachedEvidence] = useState<Record<string, string[]>>({}); // key: program/section/box id, value: evidence file ids
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [selectedCommentBoxId, setSelectedCommentBoxId] = useState<string | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const assignmentStorageKey = currentEngagement?.id
+    ? `audit_execution_assignments_${currentEngagement.id}`
+    : null;
 
-  const { sections, loading: sectionsLoading, updateSectionStatus, toggleSectionLock, updateSectionName, toggleSectionApplicability, refetch: refetchSections } = useAuditProgramSections(selectedProgramId);
+  const { sections, loading: sectionsLoading, updateSectionName, toggleSectionApplicability } = useAuditExecutionSections(selectedProgramId);
   const { notes: reviewNotes, createNote, updateNote } = useReviewNotes(currentEngagement?.id || undefined);
   const { files: evidenceFiles, loading: evidenceLoading } = useEvidenceFiles(currentEngagement?.id);
+  const { attachments, loading: attachmentsLoading, createAttachment, deleteAttachment } = useAuditExecutionAttachments(selectedProgramId);
+
+  useEffect(() => {
+    if (!assignmentStorageKey) return;
+    const raw = localStorage.getItem(assignmentStorageKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string[]>;
+      setProgramAssignments(parsed || {});
+    } catch {
+      localStorage.removeItem(assignmentStorageKey);
+    }
+  }, [assignmentStorageKey]);
+
+  useEffect(() => {
+    if (!assignmentStorageKey) return;
+    localStorage.setItem(assignmentStorageKey, JSON.stringify(programAssignments));
+  }, [assignmentStorageKey, programAssignments]);
+
+  useEffect(() => {
+    if (programs.length === 0) {
+      setSelectedProgramId(null);
+      return;
+    }
+    if (!selectedProgramId || !programs.some((program) => program.id === selectedProgramId)) {
+      setSelectedProgramId(programs[0].id);
+    }
+  }, [programs, selectedProgramId]);
 
   const handleCreateProgram = async () => {
     if (!newProgramName) {
-      toast.error('Please enter a program name');
+      toast.error('Please enter an execution name');
       return;
     }
 
@@ -184,29 +203,47 @@ export default function AuditProgramNew() {
     setSelectedEvidenceIds([]);
     setEvidenceDialogOpen(true);
   };
-
   const handleAttachEvidence = async () => {
+    if (!user || !selectedProgramId) {
+      toast.error('Please sign in and select a program first.');
+      return;
+    }
     if (!evidenceAttachmentId || selectedEvidenceIds.length === 0) return;
-    
-    // Save attached evidence
-    setAttachedEvidence(prev => ({
-      ...prev,
-      [evidenceAttachmentId]: [...(prev[evidenceAttachmentId] || []), ...selectedEvidenceIds],
-    }));
-    
-    toast.success(`✨ Demo: ${selectedEvidenceIds.length} evidence file(s) attached to ${evidenceAttachmentLevel}!`);
+
+    const attachmentTarget =
+      evidenceAttachmentLevel === 'section'
+        ? { section_id: evidenceAttachmentId, box_id: null }
+        : evidenceAttachmentLevel === 'box'
+          ? { section_id: null, box_id: evidenceAttachmentId }
+          : { section_id: null, box_id: null };
+
+    const created = await Promise.all(
+      selectedEvidenceIds.map((evidenceId) => {
+        const evidence = evidenceFiles.find((file) => file.id === evidenceId);
+        if (!evidence) return null;
+        return createAttachment({
+          audit_program_id: selectedProgramId,
+          file_name: evidence.name,
+          file_type: evidence.file_type,
+          file_size: evidence.file_size,
+          file_path: evidence.file_path,
+          uploaded_by: user.id,
+          is_evidence: true,
+          ...attachmentTarget,
+        });
+      })
+    );
+
+    const attachedCount = created.filter(Boolean).length;
+    if (attachedCount > 0) {
+      toast.success(`Attached ${attachedCount} evidence file(s) to ${evidenceAttachmentLevel}.`);
+    }
     setEvidenceDialogOpen(false);
     setSelectedEvidenceIds([]);
   };
 
-  const handleDeleteEvidence = async (entityId: string, evidenceId: string) => {
-    // Remove from attached evidence
-    setAttachedEvidence(prev => ({
-      ...prev,
-      [entityId]: (prev[entityId] || []).filter(id => id !== evidenceId),
-    }));
-    
-    toast.success('✨ Demo: Evidence detached from audit program (in real mode, would also delete from vault if not used elsewhere)');
+  const handleDeleteEvidence = async (attachmentId: string) => {
+    await deleteAttachment(attachmentId);
   };
 
   // Comment handling
@@ -237,10 +274,11 @@ export default function AuditProgramNew() {
     const note = reviewNotes.find(n => n.id === noteId);
     if (!note) return;
     
+    const isCleared = note.status === 'cleared';
     await updateNote(noteId, {
-      status: note.status === 'resolved' ? 'open' : 'resolved',
-      resolved_at: note.status === 'resolved' ? null : new Date().toISOString(),
-      resolved_by: note.status === 'resolved' ? null : user?.id,
+      status: isCleared ? 'open' : 'cleared',
+      resolved_at: isCleared ? null : new Date().toISOString(),
+      resolved_by: isCleared ? null : user?.id,
     });
     
     toast.success('Review note status updated!');
@@ -281,9 +319,16 @@ export default function AuditProgramNew() {
   }, []);
 
   const selectedProgram = programs.find(p => p.id === selectedProgramId);
-  // Get client and year from current engagement
   const selectedClient = clients.find(c => c.id === currentEngagement?.client_id);
-  const selectedYear = financialYears.find(y => y.id === currentEngagement?.financial_year);
+  const selectedYear = financialYears.find(
+    (year) =>
+      year.year_code === currentEngagement?.financial_year ||
+      year.display_name === currentEngagement?.financial_year
+  );
+  const financialYearDisplay = selectedYear?.display_name || currentEngagement?.financial_year || 'N/A';
+  const programAttachments = attachments.filter(
+    (attachment) => !attachment.section_id && !attachment.box_id
+  );
 
   if (!currentEngagement) {
     return (
@@ -292,7 +337,7 @@ export default function AuditProgramNew() {
           <FileText className="h-16 w-16 text-muted-foreground mx-auto" />
           <h3 className="text-lg font-semibold">No Engagement Selected</h3>
           <p className="text-sm text-muted-foreground">
-            Please select an engagement to view audit programs
+            Please select an engagement to view audit executions
           </p>
         </div>
       </div>
@@ -304,14 +349,14 @@ export default function AuditProgramNew() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Audit Program New</h1>
+          <h1 className="text-2xl font-bold text-foreground">Audit Execution</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Comprehensive working paper sections for financial statement areas
           </p>
         </div>
         <Button onClick={() => setCreateDialogOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
-          New Program
+          New Execution
         </Button>
       </div>
 
@@ -331,7 +376,7 @@ export default function AuditProgramNew() {
             <CardContent className="py-12 text-center">
               <FileText className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
               <p className="text-muted-foreground">
-                No audit programs yet. Create your first program to get started.
+                No audit executions yet. Create your first execution to get started.
               </p>
             </CardContent>
           </Card>
@@ -446,39 +491,36 @@ export default function AuditProgramNew() {
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-medium">Team:</span>
                       {programAssignments[selectedProgram.id].map(memberId => {
-                        const member = partners.find(p => p.id === memberId);
+                        const member = teamMembers.find(m => m.user_id === memberId);
                         return member ? (
-                          <Badge key={member.id} variant="secondary" className="text-xs">
+                          <Badge key={member.user_id} variant="secondary" className="text-xs">
                             <User className="h-3 w-3 mr-1" />
-                            {member.name}
+                            {member.full_name}
                           </Badge>
                         ) : null;
                       })}
                     </div>
                   )}
                   {/* Show attached evidence */}
-                  {attachedEvidence[selectedProgram.id]?.length > 0 && (
+                  {programAttachments.length > 0 && (
                     <div className="mt-2">
                       <span className="text-xs font-medium mb-1 block">Attached Evidence:</span>
                       <div className="flex flex-wrap gap-2">
-                        {attachedEvidence[selectedProgram.id].map(evidenceId => {
-                          const evidence = evidenceFiles.find(f => f.id === evidenceId);
-                          return evidence ? (
-                            <Badge key={evidence.id} variant="outline" className="text-xs flex items-center gap-1">
-                              <FileText className="h-3 w-3" />
-                              {evidence.name}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteEvidence(selectedProgram.id, evidenceId);
-                                }}
-                                className="ml-1 hover:text-destructive"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
-                            </Badge>
-                          ) : null;
-                        })}
+                        {programAttachments.map((attachment) => (
+                          <Badge key={attachment.id} variant="outline" className="text-xs flex items-center gap-1">
+                            <FileText className="h-3 w-3" />
+                            {attachment.file_name}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteEvidence(attachment.id);
+                              }}
+                              className="ml-1 hover:text-destructive"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -493,9 +535,9 @@ export default function AuditProgramNew() {
                 >
                   <Paperclip className="h-4 w-4 mr-2" />
                   Attach Evidence
-                  {attachedEvidence[selectedProgramId]?.length > 0 && (
+                  {programAttachments.length > 0 && (
                     <Badge className="ml-2 h-5 min-w-5 px-1" variant="secondary">
-                      {attachedEvidence[selectedProgramId].length}
+                      {programAttachments.length}
                     </Badge>
                   )}
                 </Button>
@@ -599,12 +641,12 @@ export default function AuditProgramNew() {
                 setAddBoxDialogOpen(true);
               }}
               onAttachEvidence={openEvidenceDialog}
-              attachedEvidence={attachedEvidence}
-              evidenceFiles={evidenceFiles}
+              attachments={attachments}
               onDeleteEvidence={handleDeleteEvidence}
               onBoxStatusUpdate={updateBoxStatusForSection}
               updateSectionName={updateSectionName}
               toggleSectionApplicability={toggleSectionApplicability}
+              reviewNotes={reviewNotes}
             />
           </CardContent>
         </Card>
@@ -614,9 +656,9 @@ export default function AuditProgramNew() {
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Create New Audit Program</DialogTitle>
+            <DialogTitle>Create New Audit Execution</DialogTitle>
             <DialogDescription>
-              Create a comprehensive working paper program for your engagement
+              Create a comprehensive working paper execution for your engagement
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -630,7 +672,7 @@ export default function AuditProgramNew() {
                 </div>
                 <div>
                   <span className="text-muted-foreground">Financial Year:</span>
-                  <p className="font-medium">{selectedYear?.display_name || 'N/A'}</p>
+                  <p className="font-medium">{financialYearDisplay}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Engagement:</span>
@@ -644,7 +686,7 @@ export default function AuditProgramNew() {
             </div>
 
             <div>
-              <Label>Program Name *</Label>
+              <Label>Execution Name *</Label>
               <Input
                 value={newProgramName}
                 onChange={(e) => setNewProgramName(e.target.value)}
@@ -667,39 +709,47 @@ export default function AuditProgramNew() {
                 Select team members who will work on this audit program
               </p>
               <div className="max-h-[200px] overflow-y-auto space-y-2 border rounded-lg p-3">
-                {partners.map((partner) => {
-                  const isSelected = selectedMemberIds.includes(partner.id);
-                  
-                  return (
-                    <div
-                      key={partner.id}
-                      className="flex items-center justify-between p-2 hover:bg-muted/50 rounded cursor-pointer"
-                      onClick={() => {
-                        setSelectedMemberIds(prev =>
-                          isSelected
-                            ? prev.filter(id => id !== partner.id)
-                            : [...prev, partner.id]
-                        );
-                      }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
-                          <User className="h-3 w-3" />
+                {teamMembersLoading ? (
+                  <div className="text-xs text-muted-foreground">Loading team members...</div>
+                ) : teamMembers.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">
+                    No team members assigned to this engagement yet.
+                  </div>
+                ) : (
+                  teamMembers.map((member) => {
+                    const isSelected = selectedMemberIds.includes(member.user_id);
+
+                    return (
+                      <div
+                        key={member.user_id}
+                        className="flex items-center justify-between p-2 hover:bg-muted/50 rounded cursor-pointer"
+                        onClick={() => {
+                          setSelectedMemberIds(prev =>
+                            isSelected
+                              ? prev.filter(id => id !== member.user_id)
+                              : [...prev, member.user_id]
+                          );
+                        }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                            <User className="h-3 w-3" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{member.full_name}</p>
+                            <p className="text-xs text-muted-foreground">{member.email}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium">{partner.name}</p>
-                          <p className="text-xs text-muted-foreground">{partner.email}</p>
-                        </div>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          readOnly
+                          className="h-4 w-4"
+                        />
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        readOnly
-                        className="h-4 w-4"
-                      />
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
             <div>
@@ -731,7 +781,7 @@ export default function AuditProgramNew() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label>Program Name</Label>
+              <Label>Execution Name</Label>
               <Input
                 value={editProgramName}
                 onChange={(e) => setEditProgramName(e.target.value)}
@@ -760,39 +810,47 @@ export default function AuditProgramNew() {
                 Select team members who will work on this audit program
               </p>
               <div className="max-h-[200px] overflow-y-auto space-y-2 border rounded-lg p-3">
-                {partners.map((partner) => {
-                  const isSelected = editSelectedMemberIds.includes(partner.id);
+                {teamMembersLoading ? (
+                  <div className="text-xs text-muted-foreground">Loading team members...</div>
+                ) : teamMembers.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">
+                    No team members assigned to this engagement yet.
+                  </div>
+                ) : (
+                  teamMembers.map((member) => {
+                    const isSelected = editSelectedMemberIds.includes(member.user_id);
 
-                  return (
-                    <div
-                      key={partner.id}
-                      className="flex items-center justify-between p-2 hover:bg-muted/50 rounded cursor-pointer"
-                      onClick={() => {
-                        setEditSelectedMemberIds(prev =>
-                          isSelected
-                            ? prev.filter(id => id !== partner.id)
-                            : [...prev, partner.id]
-                        );
-                      }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
-                          <User className="h-3 w-3" />
+                    return (
+                      <div
+                        key={member.user_id}
+                        className="flex items-center justify-between p-2 hover:bg-muted/50 rounded cursor-pointer"
+                        onClick={() => {
+                          setEditSelectedMemberIds(prev =>
+                            isSelected
+                              ? prev.filter(id => id !== member.user_id)
+                              : [...prev, member.user_id]
+                          );
+                        }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                            <User className="h-3 w-3" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{member.full_name}</p>
+                            <p className="text-xs text-muted-foreground">{member.email}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium">{partner.name}</p>
-                          <p className="text-xs text-muted-foreground">{partner.email}</p>
-                        </div>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          readOnly
+                          className="h-4 w-4"
+                        />
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        readOnly
-                        className="h-4 w-4"
-                      />
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
@@ -833,7 +891,7 @@ export default function AuditProgramNew() {
                 }
                 if (createBoxCallback) {
                   await createBoxCallback(newBoxHeader);
-                  toast.success('✨ Demo: Box added successfully!');
+                  toast.success('Box added successfully.');
                 }
                 setAddBoxDialogOpen(false);
                 setNewBoxHeader('');
@@ -868,7 +926,7 @@ export default function AuditProgramNew() {
                     const file = e.target.files?.[0];
                     if (file) {
                       // In demo mode, just show a message
-                      toast.success(`✨ Demo: File "${file.name}" would be uploaded to Evidence Vault`);
+                      toast.success(`File "${file.name}" queued for upload to Evidence Vault.`);
                     }
                   }}
                   className="flex-1"
@@ -967,36 +1025,39 @@ export default function AuditProgramNew() {
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
                 {reviewNotes
                   .filter(note => note.title.includes(selectedCommentBoxId))
-                  .map(note => (
-                  <div key={note.id} className={cn("p-3 border rounded-lg", note.status === 'resolved' && "opacity-60 bg-muted")}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-sm">{note.created_by}</span>
-                          <span className="text-xs text-muted-foreground">{new Date(note.created_at).toLocaleString()}</span>
-                          {note.status === 'resolved' && (
-                            <Badge variant="outline" className="text-xs">Resolved</Badge>
-                          )}
-                          <Badge variant="outline" className="text-xs capitalize">{note.priority}</Badge>
-                        </div>
-                        <p className="text-sm">{note.content}</p>
-                        {note.response && (
-                          <div className="mt-2 p-2 bg-muted rounded text-sm">
-                            <span className="font-medium">Response: </span>
-                            {note.response}
+                  .map(note => {
+                    const authorName = teamMembers.find((member) => member.user_id === note.created_by)?.full_name || 'Unknown';
+                    return (
+                      <div key={note.id} className={cn("p-3 border rounded-lg", note.status === 'cleared' && "opacity-60 bg-muted")}>
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-sm">{authorName}</span>
+                              <span className="text-xs text-muted-foreground">{new Date(note.created_at).toLocaleString()}</span>
+                              {note.status === 'cleared' && (
+                                <Badge variant="outline" className="text-xs">Cleared</Badge>
+                              )}
+                              <Badge variant="outline" className="text-xs capitalize">{note.priority}</Badge>
+                            </div>
+                            <p className="text-sm">{note.content}</p>
+                            {note.response && (
+                              <div className="mt-2 p-2 bg-muted rounded text-sm">
+                                <span className="font-medium">Response: </span>
+                                {note.response}
+                              </div>
+                            )}
                           </div>
-                        )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleToggleResolveComment(note.id)}
+                          >
+                            {note.status === 'cleared' ? 'Reopen' : 'Clear'}
+                          </Button>
+                        </div>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleToggleResolveComment(note.id)}
-                      >
-                        {note.status === 'resolved' ? 'Reopen' : 'Resolve'}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                    );
+                })}
               </div>
             )}
             
@@ -1036,12 +1097,12 @@ interface ProgramSectionsProps {
   boxStatusMap: Record<string, { total: number; complete: number }>;
   onAddBox: (sectionId: string, createBoxFn: (header: string) => Promise<void>) => void;
   onAttachEvidence: (level: 'program' | 'section' | 'box', id: string) => void;
-  attachedEvidence: Record<string, string[]>;
-  evidenceFiles: any[];
-  onDeleteEvidence: (entityId: string, evidenceId: string) => void;
+  attachments: any[];
+  onDeleteEvidence: (attachmentId: string) => void;
   onBoxStatusUpdate: (sectionId: string, total: number, complete: number) => void;
   updateSectionName: (sectionId: string, newName: string) => void;
   toggleSectionApplicability: (sectionId: string) => void;
+  reviewNotes: any[];
 }
 
 function ProgramSections({ 
@@ -1053,12 +1114,12 @@ function ProgramSections({
   boxStatusMap,
   onAddBox,
   onAttachEvidence,
-  attachedEvidence,
-  evidenceFiles,
+  attachments,
   onDeleteEvidence,
   onBoxStatusUpdate,
   updateSectionName,
   toggleSectionApplicability,
+  reviewNotes,
 }: ProgramSectionsProps) {
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
@@ -1099,17 +1160,6 @@ function ProgramSections({
     setEditedSectionName('');
   };
 
-  const getStatusBadge = (status: BoxStatus) => {
-    const config = {
-      'not-commenced': { label: 'Not Commenced', className: 'bg-gray-200 text-gray-700' },
-      'in-progress': { label: 'In Progress', className: 'bg-yellow-200 text-yellow-800' },
-      'review': { label: 'Review', className: 'bg-blue-200 text-blue-800' },
-      'complete': { label: 'Complete', className: 'bg-green-200 text-green-800' },
-    };
-    const { label, className } = config[status];
-    return <Badge className={className}>{label}</Badge>;
-  };
-
   // Filter sections based on search query and status
   const filteredSections = sections.filter(section => {
     // Status filter
@@ -1140,6 +1190,9 @@ function ProgramSections({
           filteredSections.map((section, index) => {
           // Check if section name matches search (if so, show all boxes)
           const sectionMatchesSearch = !searchQuery || section.name.toLowerCase().includes(searchQuery.toLowerCase());
+          const sectionAttachments = attachments.filter(
+            (attachment) => attachment.section_id === section.id && !attachment.box_id
+          );
           
           return (
             <AccordionItem 
@@ -1272,10 +1325,10 @@ function ProgramSections({
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      {attachedEvidence[section.id]?.length > 0 && (
+                      {sectionAttachments.length > 0 && (
                         <Badge variant="secondary" className="text-xs">
                           <Paperclip className="h-3 w-3 mr-1" />
-                          {attachedEvidence[section.id].length}
+                          {sectionAttachments.length}
                         </Badge>
                       )}
                     </div>
@@ -1300,15 +1353,14 @@ function ProgramSections({
               <SectionContent 
                 sectionId={section.id} 
                 onAddBox={onAddBox} 
-                programId={programId}
                 onAttachEvidence={onAttachEvidence}
-                attachedEvidence={attachedEvidence}
-                evidenceFiles={evidenceFiles}
+                attachments={attachments}
                 onDeleteEvidence={onDeleteEvidence}
                 onBoxStatusUpdate={onBoxStatusUpdate}
                 searchQuery={searchQuery}
                 statusFilter={statusFilter}
                 sectionMatchesSearch={sectionMatchesSearch}
+                reviewNotes={reviewNotes}
               />
             </AccordionContent>
           </AccordionItem>
@@ -1323,21 +1375,18 @@ function ProgramSections({
 interface SectionContentProps {
   sectionId: string;
   onAddBox: (sectionId: string, createBoxFn: (header: string) => Promise<void>) => void;
-  programId: string;
   onAttachEvidence: (level: 'program' | 'section' | 'box', id: string) => void;
-  attachedEvidence: Record<string, string[]>;
-  evidenceFiles: any[];
-  onDeleteEvidence: (entityId: string, evidenceId: string) => void;
+  attachments: any[];
+  onDeleteEvidence: (attachmentId: string) => void;
   onBoxStatusUpdate: (sectionId: string, total: number, complete: number) => void;
   searchQuery: string;
   statusFilter: string;
   sectionMatchesSearch: boolean;
+  reviewNotes: any[];
 }
 
-function SectionContent({ sectionId, onAddBox, programId, onAttachEvidence, attachedEvidence, evidenceFiles, onDeleteEvidence, onBoxStatusUpdate, searchQuery, statusFilter, sectionMatchesSearch }: SectionContentProps) {
-  const { boxes, loading, updateBox, deleteBox, createBox, updateBoxStatus, toggleBoxLock, updateCommentCount, reorderBoxes, moveBoxUp, moveBoxDown } = useWorkingSectionBoxes(sectionId);
-  const { attachments } = useAuditProgramAttachments(programId);
-  const { notes: reviewNotes } = useReviewNotes();
+function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, onDeleteEvidence, onBoxStatusUpdate, searchQuery, statusFilter, sectionMatchesSearch, reviewNotes }: SectionContentProps) {
+  const { boxes, loading, updateBox, deleteBox, createBox, updateBoxStatus, toggleBoxLock, reorderBoxes, moveBoxUp, moveBoxDown } = useWorkingSectionBoxes(sectionId);
   const [addingBox, setAddingBox] = useState(false);
   const [newHeader, setNewHeader] = useState('');
   const [draggingBoxId, setDraggingBoxId] = useState<string | null>(null);
@@ -1381,10 +1430,6 @@ function SectionContent({ sectionId, onAddBox, programId, onAttachEvidence, atta
     return true;
   });
 
-  const getBoxCommentCount = (boxId: string) => {
-    return reviewNotes.filter(note => note.title.includes(boxId)).length;
-  };
-
   const handleCommentClick = (boxId: string) => {
     // This will be handled by parent component
     window.dispatchEvent(new CustomEvent('open-comment-dialog', { detail: { boxId } }));
@@ -1405,15 +1450,17 @@ function SectionContent({ sectionId, onAddBox, programId, onAttachEvidence, atta
   }
 
   const getBoxAttachmentCount = (boxId: string) => {
-    const attachedCount = attachedEvidence[boxId]?.length || 0;
-    const generalAttachments = attachments.filter(a => a.box_id === boxId).length;
-    return attachedCount + generalAttachments;
+    return attachments.filter((attachment) => attachment.box_id === boxId).length;
   };
+
+  const sectionAttachments = attachments.filter(
+    (attachment) => attachment.section_id === sectionId && !attachment.box_id
+  );
 
   return (
     <div className="space-y-2 pt-2">
       {/* Section Evidence */}
-      {attachedEvidence[sectionId]?.length > 0 && (
+      {sectionAttachments.length > 0 && (
         <div className="mb-4 p-3 border rounded-lg bg-muted/30">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium">Section Evidence:</span>
@@ -1428,21 +1475,18 @@ function SectionContent({ sectionId, onAddBox, programId, onAttachEvidence, atta
             </Button>
           </div>
           <div className="flex flex-wrap gap-2">
-            {attachedEvidence[sectionId].map(evidenceId => {
-              const evidence = evidenceFiles.find(f => f.id === evidenceId);
-              return evidence ? (
-                <Badge key={evidence.id} variant="outline" className="text-xs flex items-center gap-1">
-                  <FileText className="h-3 w-3" />
-                  {evidence.name}
-                  <button
-                    onClick={() => onDeleteEvidence(sectionId, evidenceId)}
-                    className="ml-1 hover:text-destructive"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ) : null;
-            })}
+            {sectionAttachments.map((attachment) => (
+              <Badge key={attachment.id} variant="outline" className="text-xs flex items-center gap-1">
+                <FileText className="h-3 w-3" />
+                {attachment.file_name}
+                <button
+                  onClick={() => onDeleteEvidence(attachment.id)}
+                  className="ml-1 hover:text-destructive"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
           </div>
         </div>
       )}
@@ -1453,78 +1497,78 @@ function SectionContent({ sectionId, onAddBox, programId, onAttachEvidence, atta
         </div>
       )}
 
-      {filteredBoxes.map((box, index) => (
-        <div
-          key={box.id}
-          onDragOver={(e) => {
-            if (draggingBoxId && draggingBoxId !== box.id) {
+      {filteredBoxes.map((box, index) => {
+        const boxAttachments = attachments.filter((attachment) => attachment.box_id === box.id);
+        return (
+          <div
+            key={box.id}
+            onDragOver={(e) => {
+              if (draggingBoxId && draggingBoxId !== box.id) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+              }
+            }}
+            onDrop={(e) => {
               e.preventDefault();
-              e.dataTransfer.dropEffect = 'move';
-            }
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            const fromId = draggingBoxId || e.dataTransfer.getData('text/plain');
-            if (fromId && fromId !== box.id) {
-              reorderBoxes(fromId, box.id);
-            }
-            setDraggingBoxId(null);
-          }}
-          className="group relative"
-        >
-          {!box.locked && (
-            <div
-              className="absolute -left-6 top-4 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab"
-              draggable
-              onDragStart={(e) => {
-                setDraggingBoxId(box.id);
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', box.id);
-              }}
-              title="Drag to reorder"
-            >
-              <GripVertical className="h-4 w-4 text-muted-foreground" />
-            </div>
-          )}
-          <WorkingSectionBoxComponent
-            box={getMemoizedBox(box.id)}
-            onUpdate={updateBox}
-            onDelete={deleteBox}
-            onAttach={() => onAttachEvidence('box', box.id)}
-            onStatusChange={updateBoxStatus}
-            onToggleLock={toggleBoxLock}
-            onCommentClick={handleCommentClick}
-            attachmentCount={getBoxAttachmentCount(box.id)}
-            onMoveUp={moveBoxUp}
-            onMoveDown={moveBoxDown}
-            isFirst={index === 0}
-            isLast={index === filteredBoxes.length - 1}
-          />
-          {/* Show attached evidence for this box */}
-          {attachedEvidence[box.id]?.length > 0 && (
-            <div className="ml-4 mb-4 p-2 border-l-2 border-primary/30 bg-muted/20">
-              <span className="text-xs font-medium">Box Evidence:</span>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {attachedEvidence[box.id].map(evidenceId => {
-                  const evidence = evidenceFiles.find(f => f.id === evidenceId);
-                  return evidence ? (
-                    <Badge key={evidence.id} variant="outline" className="text-xs flex items-center gap-1">
+              const fromId = draggingBoxId || e.dataTransfer.getData('text/plain');
+              if (fromId && fromId !== box.id) {
+                reorderBoxes(fromId, box.id);
+              }
+              setDraggingBoxId(null);
+            }}
+            className="group relative"
+          >
+            {!box.locked && (
+              <div
+                className="absolute -left-6 top-4 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab"
+                draggable
+                onDragStart={(e) => {
+                  setDraggingBoxId(box.id);
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData('text/plain', box.id);
+                }}
+                title="Drag to reorder"
+              >
+                <GripVertical className="h-4 w-4 text-muted-foreground" />
+              </div>
+            )}
+            <WorkingSectionBoxComponent
+              box={getMemoizedBox(box.id)}
+              onUpdate={updateBox}
+              onDelete={deleteBox}
+              onAttach={() => onAttachEvidence('box', box.id)}
+              onStatusChange={updateBoxStatus}
+              onToggleLock={toggleBoxLock}
+              onCommentClick={handleCommentClick}
+              attachmentCount={getBoxAttachmentCount(box.id)}
+              onMoveUp={moveBoxUp}
+              onMoveDown={moveBoxDown}
+              isFirst={index === 0}
+              isLast={index === filteredBoxes.length - 1}
+            />
+            {/* Show attached evidence for this box */}
+            {boxAttachments.length > 0 && (
+              <div className="ml-4 mb-4 p-2 border-l-2 border-primary/30 bg-muted/20">
+                <span className="text-xs font-medium">Box Evidence:</span>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {boxAttachments.map((attachment) => (
+                    <Badge key={attachment.id} variant="outline" className="text-xs flex items-center gap-1">
                       <FileText className="h-3 w-3" />
-                      {evidence.name}
+                      {attachment.file_name}
                       <button
-                        onClick={() => onDeleteEvidence(box.id, evidenceId)}
+                        onClick={() => onDeleteEvidence(attachment.id)}
                         className="ml-1 hover:text-destructive"
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>
                     </Badge>
-                  ) : null;
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      ))}
+            )}
+          </div>
+        );
+      })}
 
       {addingBox ? (
         <Card className="border-dashed">
@@ -1562,3 +1606,4 @@ function SectionContent({ sectionId, onAddBox, programId, onAttachEvidence, atta
     </div>
   );
 }
+

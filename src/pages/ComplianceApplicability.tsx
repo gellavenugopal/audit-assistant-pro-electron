@@ -372,13 +372,10 @@ const ComplianceApplicability: React.FC = () => {
           </Table>
         </div>
       )}
-
-      {/* Footer */}
-      <div className="text-center text-xs text-slate-500 mt-8">
-        © R. Rampuria &amp; Company | Chartered Accountants | Internal Professional Tool
-      </div>
     </div>
   );
 };
 
 export default ComplianceApplicability;
+
+
