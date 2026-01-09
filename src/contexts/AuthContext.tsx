@@ -116,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             user_name: profileData.full_name,
             action: 'Signed In',
             entity: 'Auth',
+            engagement_id: null,
             details: `User logged in`,
           }]);
         }

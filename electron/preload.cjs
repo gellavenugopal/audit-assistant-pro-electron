@@ -5,6 +5,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // Add any IPC methods you need here
   platform: process.platform,
+  gstzen: {
+    login: (credentials) => ipcRenderer.invoke('gstzen-login', credentials),
+    generateOtp: (data, token) => ipcRenderer.invoke('gstzen-generate-otp', { data, token }),
+    establishSession: (data, token) => ipcRenderer.invoke('gstzen-establish-session', { data, token }),
+    downloadGstr1: (data, token) => ipcRenderer.invoke('gstzen-download-gstr1', { data, token }),
+    request: (endpoint, method, data, token) => ipcRenderer.invoke('gstzen-api-request', { endpoint, method, data, token }),
+  },
   // Example: send a message to main process
   send: (channel, data) => {
     const validChannels = ['toMain'];
@@ -32,6 +39,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Month wise and GST methods
   odbcFetchMonthWiseData: (data) => ipcRenderer.invoke('odbc-fetch-month-wise-data', data),
   odbcFetchGSTNotFeeded: () => ipcRenderer.invoke('odbc-fetch-gst-not-feeded'),
+  // Stock Items methods
+  odbcFetchStockItems: () => ipcRenderer.invoke('odbc-fetch-stock-items'),
 });
 
 // Log when preload script is loaded

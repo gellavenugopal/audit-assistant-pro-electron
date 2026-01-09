@@ -1,0 +1,724 @@
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { ColumnFilter } from '@/components/ui/column-filter';
+import { Plus, Pencil, Wand2, Settings2, Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { classifyStockItem } from '@/utils/fuzzyMatch';
+import { useToast } from '@/hooks/use-toast';
+
+interface StockItem {
+  'Item Name': string;
+  'Stock Group': string;
+  'Primary Group': string;
+  'Opening Value': number;
+  'Closing Value': number;
+  'Stock Category': string;
+  'Composite Key': string;
+}
+
+const STOCK_CATEGORIES = [
+  "Raw Material",
+  "Packaging Material",
+  "Work-in-Progress",
+  "Finished Goods",
+  "Semi-Finished Goods",
+  "Stock-in-Trade",
+  "Consumables",
+  "Spare Parts",
+  "Other"
+];
+
+interface StockItemsTabProps {
+  stockData: StockItem[];
+  onUpdateStockData: (data: StockItem[]) => void;
+  businessType?: string;
+  searchTerm?: string;
+}
+
+export function StockItemsTab({ stockData, onUpdateStockData, businessType = '', searchTerm = '' }: StockItemsTabProps) {
+  const { toast } = useToast();
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editCategory, setEditCategory] = useState<string>('');
+  
+  // Ref to track if auto-classification has already run for this businessType
+  const lastAutoClassifiedRef = useRef<{ businessType: string; count: number } | null>(null);
+  
+  // Column filters and sorting state
+  const [columnFilters, setColumnFilters] = useState<Record<string, Set<string | number>>>({});
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
+  
+  // Selection state for bulk operations
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+  const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
+  const [bulkCategory, setBulkCategory] = useState<string>('');
+  
+  // Single item edit dialog
+  const [isSingleEditDialogOpen, setIsSingleEditDialogOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<StockItem | null>(null);
+  const [editingItemIndex, setEditingItemIndex] = useState<number>(-1);
+  const [singleEditCategory, setSingleEditCategory] = useState<string>('');
+  
+  // Keyboard navigation
+  const [focusedRowIndex, setFocusedRowIndex] = useState<number>(-1);
+  
+  // Helper to get unique column values for filters
+  const getColumnValues = useCallback((column: string) => {
+    if (!stockData || !Array.isArray(stockData)) return [];
+    return stockData
+      .filter(item => item !== null && item !== undefined)
+      .map(item => item[column as keyof StockItem])
+      .filter(v => v !== null && v !== undefined) as (string | number)[];
+  }, [stockData]);
+  
+  // Handlers for column filter changes
+  const handleFilterChange = useCallback((column: string, values: Set<string | number>) => {
+    setColumnFilters(prev => ({ ...prev, [column]: values }));
+  }, []);
+  
+  const handleSort = useCallback((column: string, direction: 'asc' | 'desc' | null) => {
+    setSortColumn(direction ? column : null);
+    setSortDirection(direction);
+  }, []);
+  
+  // Base data - filter out items with both opening AND closing = 0
+  const baseStockData = useMemo(() => {
+    if (!stockData || !Array.isArray(stockData)) return [];
+    return stockData.filter(item => {
+      if (!item) return false;
+      // Use Math.abs since stock values are assets (Dr)
+      const opening = Math.abs(item['Opening Value'] || 0);
+      const closing = Math.abs(item['Closing Value'] || 0);
+      // Keep item if it has any non-zero value
+      return !(opening === 0 && closing === 0);
+    });
+  }, [stockData]);
+  
+  // Filtered data based on all filters (including parent searchTerm)
+  const filteredData = useMemo(() => {
+    let filtered = baseStockData.filter(item => {
+      if (!item) return false;
+      // Check parent search term - with null safety
+      const itemName = item['Item Name'] || '';
+      const stockGroup = item['Stock Group'] || '';
+      const primaryGroup = item['Primary Group'] || '';
+      
+      const matchesSearch = !searchTerm || 
+        itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        stockGroup.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        primaryGroup.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      return matchesSearch;
+    });
+    
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, selectedValues]) => {
+      if (selectedValues.size > 0) {
+        filtered = filtered.filter(item => {
+          const value = item[column as keyof StockItem];
+          return selectedValues.has(value as string | number);
+        });
+      }
+    });
+    
+    // Apply sorting
+    if (sortColumn && sortDirection) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[sortColumn as keyof StockItem];
+        const bVal = b[sortColumn as keyof StockItem];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal || '');
+        const bStr = String(bVal || '');
+        return sortDirection === 'asc' 
+          ? aStr.localeCompare(bStr) 
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
+    return filtered;
+  }, [baseStockData, searchTerm, columnFilters, sortColumn, sortDirection]);
+  
+  // Auto-classify stock items when businessType changes or new items are added
+  useEffect(() => {
+    if (!businessType || !stockData || stockData.length === 0) return;
+    
+    // Guard: Skip if we already ran for this businessType and count
+    const lastRun = lastAutoClassifiedRef.current;
+    if (lastRun && lastRun.businessType === businessType && lastRun.count === stockData.length) {
+      return;
+    }
+    
+    let updated = false;
+    const newData = stockData.map(item => {
+      if (!item) return item;
+      // Only auto-classify if not already classified
+      if (!item['Stock Category'] || item['Stock Category'] === 'Unclassified') {
+        const category = classifyStockItem(
+          item['Item Name'] || '',
+          item['Stock Group'] || '',
+          businessType
+        );
+        if (category && category !== 'Unclassified') {
+          updated = true;
+          return { ...item, 'Stock Category': category };
+        }
+      }
+      return item;
+    });
+    
+    // Update the ref to prevent re-running
+    lastAutoClassifiedRef.current = { businessType, count: stockData.length };
+    
+    if (updated) {
+      onUpdateStockData(newData);
+      toast({
+        title: 'Auto-Classification Complete',
+        description: `Stock items classified based on ${businessType} business rules`,
+      });
+    }
+  }, [businessType, stockData.length]);
+
+  const formatNumber = (num: number): string => {
+    return new Intl.NumberFormat('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(num);
+  };
+
+  const handleEdit = (index: number) => {
+    setEditingIndex(index);
+    setEditCategory(stockData[index]['Stock Category'] || '');
+  };
+
+  const handleSaveEdit = () => {
+    if (editingIndex === null) return;
+    const newData = [...stockData];
+    newData[editingIndex] = {
+      ...newData[editingIndex],
+      'Stock Category': editCategory
+    };
+    onUpdateStockData(newData);
+    setEditingIndex(null);
+    setEditCategory('');
+  };
+
+  const handleDelete = (index: number) => {
+    if (confirm('Are you sure you want to delete this stock item?')) {
+      const newData = stockData.filter((_, i) => i !== index);
+      onUpdateStockData(newData);
+    }
+  };
+  
+  const handleAutoClassifyAll = () => {
+    if (!businessType) {
+      toast({
+        title: 'Business Type Required',
+        description: 'Please select a business type first',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    const newData = stockData.map(item => {
+      if (!item) return item;
+      return {
+        ...item,
+        'Stock Category': classifyStockItem(
+          item['Item Name'] || '',
+          item['Stock Group'] || '',
+          businessType
+        )
+      };
+    }).filter(Boolean);
+    
+    onUpdateStockData(newData);
+    
+    const classified = newData.filter(item => item['Stock Category'] !== 'Unclassified').length;
+    toast({
+      title: 'Auto-Classification Complete',
+      description: `${classified} of ${stockData.length} items classified`,
+    });
+  };
+  
+  // Selection handlers
+  const toggleSelection = useCallback((originalIndex: number) => {
+    setSelectedIndices(prev => {
+      const next = new Set(prev);
+      if (next.has(originalIndex)) {
+        next.delete(originalIndex);
+      } else {
+        next.add(originalIndex);
+      }
+      return next;
+    });
+  }, []);
+  
+  const selectAll = useCallback(() => {
+    const allIndices = new Set(filteredData.map(item => {
+      if (!item) return -1;
+      return stockData.findIndex(s => s && s['Composite Key'] === item['Composite Key']);
+    }).filter(i => i >= 0));
+    setSelectedIndices(allIndices);
+  }, [filteredData, stockData]);
+  
+  const clearSelection = useCallback(() => {
+    setSelectedIndices(new Set());
+  }, []);
+  
+  // Double-click to open edit dialog
+  const handleDoubleClick = useCallback((item: StockItem, originalIndex: number) => {
+    setEditingItem(item);
+    setEditingItemIndex(originalIndex);
+    setSingleEditCategory(item['Stock Category'] || '');
+    setIsSingleEditDialogOpen(true);
+  }, []);
+  
+  // Save single item edit
+  const handleSaveSingleEdit = useCallback(() => {
+    if (editingItemIndex === -1) return;
+    
+    const newData = [...stockData];
+    newData[editingItemIndex] = {
+      ...newData[editingItemIndex],
+      'Stock Category': singleEditCategory
+    };
+    onUpdateStockData(newData);
+    setIsSingleEditDialogOpen(false);
+    setEditingItem(null);
+    setEditingItemIndex(-1);
+    toast({
+      title: 'Stock Item Updated',
+      description: 'Category has been updated successfully',
+    });
+  }, [editingItemIndex, singleEditCategory, stockData, onUpdateStockData, toast]);
+  
+  // Bulk update handler
+  const handleBulkUpdate = useCallback(() => {
+    if (selectedIndices.size === 0 || !bulkCategory) return;
+    
+    const newData = stockData.map((item, index) => {
+      if (selectedIndices.has(index)) {
+        return { ...item, 'Stock Category': bulkCategory };
+      }
+      return item;
+    });
+    
+    onUpdateStockData(newData);
+    setIsBulkUpdateDialogOpen(false);
+    setBulkCategory('');
+    setSelectedIndices(new Set());
+    
+    toast({
+      title: 'Bulk Update Complete',
+      description: `Updated ${selectedIndices.size} items`,
+    });
+  }, [selectedIndices, bulkCategory, stockData, onUpdateStockData, toast]);
+  
+  // Keyboard navigation handler
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (filteredData.length === 0) return;
+    
+    const maxIndex = filteredData.length - 1;
+    
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setFocusedRowIndex(prev => Math.min(prev + 1, maxIndex));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setFocusedRowIndex(prev => Math.max(prev - 1, 0));
+        break;
+      case ' ': // Spacebar to toggle selection
+        e.preventDefault();
+        if (focusedRowIndex >= 0) {
+          const item = filteredData[focusedRowIndex];
+          if (item) {
+            const originalIndex = stockData.findIndex(s => s && s['Composite Key'] === item['Composite Key']);
+            if (originalIndex >= 0) toggleSelection(originalIndex);
+          }
+        }
+        break;
+      case 'Enter': // Enter to edit
+        e.preventDefault();
+        if (focusedRowIndex >= 0) {
+          const item = filteredData[focusedRowIndex];
+          if (item) {
+            const originalIndex = stockData.findIndex(s => s && s['Composite Key'] === item['Composite Key']);
+            if (originalIndex >= 0) handleDoubleClick(item, originalIndex);
+          }
+        }
+        break;
+      case 'a':
+      case 'A':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          selectAll();
+        }
+        break;
+      case 'Escape':
+        clearSelection();
+        setFocusedRowIndex(-1);
+        break;
+    }
+  }, [filteredData, focusedRowIndex, stockData, toggleSelection, handleDoubleClick, selectAll, clearSelection]);
+
+  return (
+    <div className="space-y-0" onKeyDown={handleKeyDown} tabIndex={0}>
+      {baseStockData.length === 0 ? (
+        <div className="border rounded-lg p-8 text-center text-muted-foreground">
+          No stock items loaded. Stock items will be imported from Tally if available.
+        </div>
+      ) : filteredData.length === 0 ? (
+        <div className="border rounded-lg p-8 text-center text-muted-foreground">
+          No items match the current filters.
+        </div>
+      ) : (
+        <div className="border rounded-lg">
+          {/* Compact toolbar row inside table container */}
+          <div className="flex items-center justify-between px-2 py-1 bg-gray-50 border-b" style={{ minHeight: '28px' }}>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              {selectedIndices.size > 0 && (
+                <>
+                  <span className="text-blue-600 font-medium">
+                    {selectedIndices.size} selected
+                  </span>
+                  <Button size="sm" variant="default" className="h-6 px-2 text-xs" onClick={() => setIsBulkUpdateDialogOpen(true)}>
+                    <Settings2 className="w-3 h-3 mr-1" />
+                    Bulk Update
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={clearSelection}>
+                    Clear
+                  </Button>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {businessType && (
+                <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={handleAutoClassifyAll}>
+                  <Wand2 className="w-3 h-3 mr-1" />
+                  Auto-Classify
+                </Button>
+              )}
+              <Button size="sm" variant="outline" className="h-6 px-2 text-xs">
+                <Plus className="w-3 h-3 mr-1" />
+                Add Item
+              </Button>
+            </div>
+          </div>
+          <Table>
+            <TableHeader className="sticky top-0 bg-white">
+              <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={selectedIndices.size === filteredData.length && filteredData.length > 0}
+                    onCheckedChange={(checked) => {
+                      if (checked) selectAll();
+                      else clearSelection();
+                    }}
+                  />
+                </TableHead>
+                <TableHead>
+                  <div className="flex items-center gap-1">
+                    Item Name
+                    <ColumnFilter
+                      column="Item Name"
+                      values={getColumnValues('Item Name')}
+                      selectedValues={columnFilters['Item Name'] || new Set()}
+                      onFilterChange={(values) => handleFilterChange('Item Name', values)}
+                      sortDirection={sortColumn === 'Item Name' ? sortDirection : null}
+                      onSort={(dir) => handleSort('Item Name', dir)}
+                    />
+                  </div>
+                </TableHead>
+                <TableHead>
+                  <div className="flex items-center gap-1">
+                    Stock Group
+                    <ColumnFilter
+                      column="Stock Group"
+                      values={getColumnValues('Stock Group')}
+                      selectedValues={columnFilters['Stock Group'] || new Set()}
+                      onFilterChange={(values) => handleFilterChange('Stock Group', values)}
+                      sortDirection={sortColumn === 'Stock Group' ? sortDirection : null}
+                      onSort={(dir) => handleSort('Stock Group', dir)}
+                    />
+                  </div>
+                </TableHead>
+                <TableHead>
+                  <div className="flex items-center gap-1">
+                    Primary Group
+                    <ColumnFilter
+                      column="Primary Group"
+                      values={getColumnValues('Primary Group')}
+                      selectedValues={columnFilters['Primary Group'] || new Set()}
+                      onFilterChange={(values) => handleFilterChange('Primary Group', values)}
+                      sortDirection={sortColumn === 'Primary Group' ? sortDirection : null}
+                      onSort={(dir) => handleSort('Primary Group', dir)}
+                    />
+                  </div>
+                </TableHead>
+                <TableHead className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    Opening Value
+                    <ColumnFilter
+                      column="Opening Value"
+                      values={getColumnValues('Opening Value')}
+                      selectedValues={columnFilters['Opening Value'] || new Set()}
+                      onFilterChange={(values) => handleFilterChange('Opening Value', values)}
+                      sortDirection={sortColumn === 'Opening Value' ? sortDirection : null}
+                      onSort={(dir) => handleSort('Opening Value', dir)}
+                      isNumeric
+                    />
+                  </div>
+                </TableHead>
+                <TableHead className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    Closing Value
+                    <ColumnFilter
+                      column="Closing Value"
+                      values={getColumnValues('Closing Value')}
+                      selectedValues={columnFilters['Closing Value'] || new Set()}
+                      onFilterChange={(values) => handleFilterChange('Closing Value', values)}
+                      sortDirection={sortColumn === 'Closing Value' ? sortDirection : null}
+                      onSort={(dir) => handleSort('Closing Value', dir)}
+                      isNumeric
+                    />
+                  </div>
+                </TableHead>
+                <TableHead>
+                  <div className="flex items-center gap-1">
+                    Stock Category
+                    <ColumnFilter
+                      column="Stock Category"
+                      values={getColumnValues('Stock Category')}
+                      selectedValues={columnFilters['Stock Category'] || new Set()}
+                      onFilterChange={(values) => handleFilterChange('Stock Category', values)}
+                      sortDirection={sortColumn === 'Stock Category' ? sortDirection : null}
+                      onSort={(dir) => handleSort('Stock Category', dir)}
+                    />
+                  </div>
+                </TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredData.map((item, displayIndex) => {
+                if (!item) return null;
+                // Find original index in stockData for updates
+                const originalIndex = stockData.findIndex(s => s && s['Composite Key'] === item['Composite Key']);
+                const isEditing = editingIndex === originalIndex;
+                const isSelected = selectedIndices.has(originalIndex);
+                const isFocused = focusedRowIndex === displayIndex;
+                
+                return (
+                  <TableRow 
+                    key={item['Composite Key'] || displayIndex} 
+                    className={cn(
+                      "hover:bg-gray-50 cursor-pointer",
+                      isSelected && "bg-blue-50",
+                      isFocused && "ring-2 ring-blue-400 ring-inset"
+                    )}
+                    onClick={() => toggleSelection(originalIndex)}
+                    onDoubleClick={() => handleDoubleClick(item, originalIndex)}
+                  >
+                    <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleSelection(originalIndex)}
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium text-sm">{item['Item Name']}</TableCell>
+                    <TableCell className="text-xs text-gray-600">{item['Stock Group'] || '-'}</TableCell>
+                    <TableCell className="text-xs text-gray-600">{item['Primary Group'] || '-'}</TableCell>
+                    <TableCell className="text-right text-sm">{formatNumber(item['Opening Value'])}</TableCell>
+                    <TableCell className="text-right text-sm font-medium">{formatNumber(item['Closing Value'])}</TableCell>
+                    <TableCell>
+                      {isEditing ? (
+                        <Select value={editCategory} onValueChange={setEditCategory}>
+                          <SelectTrigger className="w-[200px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {STOCK_CATEGORIES.map(cat => (
+                              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className={cn(
+                          "px-2 py-1 rounded text-xs font-medium",
+                          item['Stock Category'] ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"
+                        )}>
+                          {item['Stock Category'] || 'Unclassified'}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex gap-2">
+                        {isEditing ? (
+                          <>
+                            <Button size="sm" variant="outline" onClick={handleSaveEdit}>
+                              Save
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setEditingIndex(null)}>
+                              Cancel
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button size="sm" variant="ghost" onClick={() => handleDoubleClick(item, originalIndex)}>
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => handleDelete(originalIndex)}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      
+      {/* Single Item Edit Dialog */}
+      <Dialog open={isSingleEditDialogOpen} onOpenChange={setIsSingleEditDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Stock Item</DialogTitle>
+            <DialogDescription>
+              Update the classification for this stock item
+            </DialogDescription>
+          </DialogHeader>
+          
+          {editingItem && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">Item Name</Label>
+                <div className="font-medium">{editingItem['Item Name']}</div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Stock Group</Label>
+                  <div className="text-sm">{editingItem['Stock Group'] || '-'}</div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Primary Group</Label>
+                  <div className="text-sm">{editingItem['Primary Group'] || '-'}</div>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Opening Value</Label>
+                  <div className="text-sm">{formatNumber(editingItem['Opening Value'])}</div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Closing Value</Label>
+                  <div className="text-sm">{formatNumber(editingItem['Closing Value'])}</div>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Stock Category</Label>
+                <Select value={singleEditCategory} onValueChange={setSingleEditCategory}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STOCK_CATEGORIES.map(cat => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsSingleEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveSingleEdit}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Bulk Update Dialog */}
+      <Dialog open={isBulkUpdateDialogOpen} onOpenChange={setIsBulkUpdateDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Bulk Update Stock Items</DialogTitle>
+            <DialogDescription>
+              Update classification for {selectedIndices.size} selected items
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Stock Category</Label>
+              <Select value={bulkCategory} onValueChange={setBulkCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STOCK_CATEGORIES.map(cat => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="text-sm text-muted-foreground">
+              This will update the category for all {selectedIndices.size} selected items.
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBulkUpdateDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleBulkUpdate} disabled={!bulkCategory}>
+              Update {selectedIndices.size} Items
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
