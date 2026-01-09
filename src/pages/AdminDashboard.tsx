@@ -51,7 +51,6 @@ import { cn } from '@/lib/utils';
 import { 
   Users, 
   Briefcase, 
-  ClipboardList, 
   AlertTriangle, 
   FileCheck,
   MessageSquare,
@@ -85,7 +84,6 @@ interface UserWithRole {
 interface SystemStats {
   totalUsers: number;
   totalEngagements: number;
-  totalProcedures: number;
   totalRisks: number;
   totalEvidence: number;
   openReviewNotes: number;
@@ -121,7 +119,7 @@ export default function AdminDashboard() {
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   
   // Drilldown state
-  type ActiveCardType = 'overview' | 'users' | 'engagements' | 'procedures' | 'risks' | 'evidence' | 'notes';
+  type ActiveCardType = 'overview' | 'users' | 'engagements' | 'risks' | 'evidence' | 'notes';
   const [activeCard, setActiveCard] = useState<ActiveCardType>('overview');
   const [drilldownData, setDrilldownData] = useState<any[]>([]);
   const [loadingDrilldown, setLoadingDrilldown] = useState(false);
@@ -260,13 +258,11 @@ export default function AdminDashboard() {
       // Fetch system stats
       const [
         { count: engagementCount },
-        { count: procedureCount },
         { count: riskCount },
         { count: evidenceCount },
         { count: openNotesCount }
       ] = await Promise.all([
         supabase.from('engagements').select('*', { count: 'exact', head: true }),
-        supabase.from('audit_procedures').select('*', { count: 'exact', head: true }),
         supabase.from('risks').select('*', { count: 'exact', head: true }),
         supabase.from('evidence_files').select('*', { count: 'exact', head: true }),
         supabase.from('review_notes').select('*', { count: 'exact', head: true }).eq('status', 'open')
@@ -275,7 +271,6 @@ export default function AdminDashboard() {
       setStats({
         totalUsers: profiles.length,
         totalEngagements: engagementCount || 0,
-        totalProcedures: procedureCount || 0,
         totalRisks: riskCount || 0,
         totalEvidence: evidenceCount || 0,
         openReviewNotes: openNotesCount || 0
@@ -492,14 +487,6 @@ export default function AdminDashboard() {
             .limit(25);
           data = engagements || [];
           break;
-        case 'procedures':
-          const { data: procedures } = await supabase
-            .from('standard_programs')
-            .select('id, name, audit_area, engagement_type, is_active')
-            .order('name')
-            .limit(25);
-          data = procedures || [];
-          break;
         case 'risks':
           const { data: risks } = await supabase
             .from('risks')
@@ -545,7 +532,6 @@ export default function AdminDashboard() {
   const statCards = [
     { key: 'users' as ActiveCardType, label: 'Total Users', value: stats?.totalUsers, icon: Users, color: 'text-primary' },
     { key: 'engagements' as ActiveCardType, label: 'Engagements', value: stats?.totalEngagements, icon: Briefcase, color: 'text-info' },
-    { key: 'procedures' as ActiveCardType, label: 'Procedures', value: stats?.totalProcedures, icon: ClipboardList, color: 'text-success' },
     { key: 'risks' as ActiveCardType, label: 'Risks', value: stats?.totalRisks, icon: AlertTriangle, color: 'text-warning' },
     { key: 'evidence' as ActiveCardType, label: 'Evidence Files', value: stats?.totalEvidence, icon: FileCheck, color: 'text-primary' },
     { key: 'notes' as ActiveCardType, label: 'Open Notes', value: stats?.openReviewNotes, icon: MessageSquare, color: 'text-destructive' },
@@ -656,32 +642,6 @@ export default function AdminDashboard() {
                           <TableCell>{eng.name}</TableCell>
                           <TableCell>{eng.financial_year}</TableCell>
                           <TableCell><Badge variant="outline">{eng.status}</Badge></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-                {activeCard === 'procedures' && (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Program Name</TableHead>
-                        <TableHead>Audit Area</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {drilldownData.map((proc: any) => (
-                        <TableRow key={proc.id}>
-                          <TableCell className="font-medium">{proc.name}</TableCell>
-                          <TableCell>{proc.audit_area}</TableCell>
-                          <TableCell>{proc.engagement_type}</TableCell>
-                          <TableCell>
-                            <Badge variant={proc.is_active ? 'default' : 'secondary'}>
-                              {proc.is_active ? 'Active' : 'Inactive'}
-                            </Badge>
-                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

@@ -11,7 +11,6 @@ import { ProtectedEngagementRoute } from "@/components/auth/ProtectedEngagementR
 import { ProtectedAdminRoute } from "@/components/auth/ProtectedAdminRoute";
 import { MainLayout } from "@/components/layout/MainLayout";
 import Dashboard from "./pages/Dashboard";
-import StaffDashboard from "./pages/StaffDashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
 import TrialBalance from "./pages/TrialBalance";
@@ -19,10 +18,8 @@ import TrialBalanceNew from "./pages/TrialBalanceNew";
 import Appointment from "./pages/Appointment";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
-import AuditPrograms from "./pages/AuditPrograms";
-import AuditProgramNew from "./pages/AuditProgramNew";
+import AuditExecution from "./pages/AuditExecution";
 import EvidenceVault from "./pages/EvidenceVault";
-import ProcedureWorkpaper from "./pages/ProcedureWorkpaper";
 import ReviewNotes from "./pages/ReviewNotes";
 import Misstatements from "./pages/Misstatements";
 import AuditTrail from "./pages/AuditTrail";
@@ -32,6 +29,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
 import AuditReport from "./pages/AuditReport";
+import Feedback from "./pages/Feedback";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import GstzenIntegration from "./pages/GstzenIntegration";
@@ -147,21 +145,11 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="/programs"
+                  path="/audit-execution"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <AuditPrograms />
-                      </MainLayout>
-                    </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
-                  path="/procedures/:procedureId/workpaper"
-                  element={
-                    <ProtectedEngagementRoute>
-                      <MainLayout>
-                        <ProcedureWorkpaper />
+                        <AuditExecution />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -237,6 +225,16 @@ const App = () => (
                   }
                 />
                 <Route
+                  path="/feedback"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Feedback />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
                   path="/settings"
                   element={
                     <ProtectedRoute>
@@ -295,31 +293,11 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="/my-dashboard"
-                  element={
-                    <ProtectedEngagementRoute>
-                      <MainLayout>
-                        <StaffDashboard />
-                      </MainLayout>
-                    </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
                   path="/compliance-applicability"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
                         <ComplianceApplicability />
-                      </MainLayout>
-                    </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
-                  path="/programs-new"
-                  element={
-                    <ProtectedEngagementRoute>
-                      <MainLayout>
-                        <AuditProgramNew />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -335,3 +313,8 @@ const App = () => (
 );
 
 export default App;
+
+
+
+
+

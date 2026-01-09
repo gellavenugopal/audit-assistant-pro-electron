@@ -49,6 +49,7 @@ import { useOpeningBalanceMatching } from "@/hooks/useOpeningBalanceMatching";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "lucide-react";
 import DeferredTax from "@/components/audit/DeferredTax";
+import DeferredTaxCalculator from "@/components/audit/DeferredTaxCalculator";
 import {
   Database,
   FileSpreadsheet,
@@ -2542,6 +2543,7 @@ const MCATools = () => {
 const IncomeTaxTools = () => {
   const { toast } = useToast();
   const [pan, setPan] = useState("");
+  const [showDeferredTaxDialog, setShowDeferredTaxDialog] = useState(false);
 
 
   return (
@@ -2568,6 +2570,12 @@ const IncomeTaxTools = () => {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <ToolCard
+          title="Deferred Tax Calculator (AS-22)"
+          description="Calculate Deferred Tax Assets (DTA) and Deferred Tax Liabilities (DTL) as per Accounting Standard 22 for taxes on income."
+          icon={<Scale className="h-5 w-5 text-primary" />}
+          onClick={() => setShowDeferredTaxDialog(true)}
+        />
+        <ToolCard
           title="Check Notices on IT Website"
           description="View pending notices and communications from the Income Tax department for the assessee."
           icon={<Bell className="h-5 w-5 text-primary" />}
@@ -2592,6 +2600,20 @@ const IncomeTaxTools = () => {
           status="coming-soon"
         />
       </div>
+
+      <Dialog open={showDeferredTaxDialog} onOpenChange={setShowDeferredTaxDialog}>
+        <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Deferred Tax Calculator (AS-22)</DialogTitle>
+            <DialogDescription>
+              Calculate Deferred Tax Assets (DTA) and Deferred Tax Liabilities (DTL) as per Accounting Standard 22
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            <DeferredTaxCalculator />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

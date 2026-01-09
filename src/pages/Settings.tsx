@@ -457,10 +457,6 @@ export default function Settings() {
                   description: 'When someone responds to your notes',
                 },
                 {
-                  title: 'Procedure Completion',
-                  description: 'When assigned procedures are completed',
-                },
-                {
                   title: 'Sign-off Requests',
                   description: 'When approval is needed',
                 },

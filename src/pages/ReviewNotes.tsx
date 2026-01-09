@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useReviewNotes } from '@/hooks/useReviewNotes';
 import { useEngagements } from '@/hooks/useEngagements';
-import { useProcedures } from '@/hooks/useProcedures';
 import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { StatusBadge, getStatusVariant, getRiskVariant } from '@/components/ui/status-badge';
@@ -36,7 +35,6 @@ import {
   CheckCircle,
   AlertCircle,
   Clock,
-  FileText,
   Briefcase,
   Trash2,
   Lock
@@ -66,7 +64,6 @@ export default function ReviewNotes() {
     canUnlock
   } = useReviewNotes(currentEngagement?.id);
   const { engagements } = useEngagements();
-  const { procedures } = useProcedures(currentEngagement?.id);
   const { members: teamMembers } = useTeamMembers();
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -82,7 +79,6 @@ export default function ReviewNotes() {
     content: '',
     priority: 'medium',
     engagement_id: currentEngagement?.id || '',
-    procedure_id: '',
     assigned_to: '',
   });
 
@@ -113,7 +109,6 @@ export default function ReviewNotes() {
       content: formData.content,
       priority: formData.priority,
       engagement_id: formData.engagement_id,
-      procedure_id: formData.procedure_id || null,
       assigned_to: formData.assigned_to || null,
     });
 
@@ -122,7 +117,6 @@ export default function ReviewNotes() {
       content: '',
       priority: 'medium',
       engagement_id: currentEngagement?.id || '',
-      procedure_id: '',
       assigned_to: '',
     });
     setIsDialogOpen(false);
@@ -152,10 +146,6 @@ export default function ReviewNotes() {
     await deleteNote(selectedNote.id);
     setSelectedNote(null);
   };
-
-  const filteredProcedures = formData.engagement_id 
-    ? procedures.filter(p => p.engagement_id === formData.engagement_id)
-    : procedures;
 
   const handleUnlock = async (reason: string) => {
     if (!unlockDialogNote) return;
@@ -228,12 +218,6 @@ export default function ReviewNotes() {
             <span>{note.engagement.client_name}</span>
           </div>
         )}
-        {note.procedure && (
-          <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5">
-            <FileText className="h-3 w-3 mr-1" />
-            {note.procedure.area}
-          </span>
-        )}
       </div>
     </div>
   );
@@ -295,7 +279,7 @@ export default function ReviewNotes() {
             <DialogHeader>
               <DialogTitle>Raise Review Note</DialogTitle>
               <DialogDescription>
-                Create a review note for a procedure or engagement.
+                Create a review note for an engagement.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -303,7 +287,7 @@ export default function ReviewNotes() {
                 <Label>Engagement *</Label>
                 <Select 
                   value={formData.engagement_id} 
-                  onValueChange={(v) => setFormData({ ...formData, engagement_id: v, procedure_id: '' })}
+                  onValueChange={(v) => setFormData({ ...formData, engagement_id: v })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select engagement" />
@@ -369,25 +353,6 @@ export default function ReviewNotes() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Link to Procedure (Optional)</Label>
-                <Select 
-                  value={formData.procedure_id} 
-                  onValueChange={(v) => setFormData({ ...formData, procedure_id: v })}
-                  disabled={!formData.engagement_id}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={formData.engagement_id ? "Select procedure" : "Select engagement first"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredProcedures.map(p => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.area} - {p.procedure_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
             </div>
             <div className="flex justify-end gap-3">
@@ -520,14 +485,6 @@ export default function ReviewNotes() {
                     <Label className="text-muted-foreground">Engagement</Label>
                     <p className="text-foreground mt-1">
                       {selectedNote.engagement.client_name} - {selectedNote.engagement.name}
-                    </p>
-                  </div>
-                )}
-                {selectedNote.procedure && (
-                  <div>
-                    <Label className="text-muted-foreground">Procedure</Label>
-                    <p className="text-foreground mt-1">
-                      {selectedNote.procedure.area} - {selectedNote.procedure.procedure_name}
                     </p>
                   </div>
                 )}

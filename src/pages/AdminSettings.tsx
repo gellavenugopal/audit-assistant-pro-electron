@@ -39,12 +39,10 @@ import {
   Building2, 
   Users, 
   UserCog, 
-  FolderOpen,
   Plus,
   Pencil,
   Trash2,
   Loader2,
-  ClipboardList,
   Shield,
   KeyRound,
   CalendarDays,
@@ -57,15 +55,11 @@ import {
   FileText
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
 import { BulkClientImportDialog } from '@/components/admin/BulkClientImportDialog';
 import { BulkTeamImportDialog } from '@/components/admin/BulkTeamImportDialog';
 import { ClientFormDialog, ClientFormData } from '@/components/clients/ClientFormDialog';
 import { PartnersTabContent } from '@/components/admin/PartnersTabContent';
 import { DataIntegrityPanel } from '@/components/admin/DataIntegrityPanel';
-import { ProcedureTemplateCard, ProcedureTemplatePreviewDialog } from '@/components/admin/ProcedureTemplateCard';
-import { ProcedureTemplateDialog } from '@/components/admin/ProcedureTemplateDialog';
-import { useProcedureTemplates, ProcedureTemplate, ProcedureTemplateFormData } from '@/hooks/useProcedureTemplates';
 import { CAROTemplatesTab } from '@/components/admin/CAROTemplatesTab';
 interface FinancialYear {
   id: string;
@@ -76,8 +70,6 @@ interface FinancialYear {
 }
 
 const ROLES = ['partner', 'manager', 'senior', 'staff', 'viewer'] as const;
-const AUDIT_AREAS = ['Revenue', 'Purchases', 'Payroll', 'Fixed Assets', 'Inventory', 'Cash & Bank', 'Receivables', 'Payables', 'Equity', 'Other'];
-
 interface Client {
   id: string;
   name: string;
@@ -103,29 +95,9 @@ interface TeamMember {
   role: string;
 }
 
-interface StandardProgram {
-  id: string;
-  name: string;
-  description: string | null;
-  audit_area: string;
-  engagement_type: string;
-  is_active: boolean;
-  procedures_count?: number;
-}
-
 export default function AdminSettings() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('firm');
-  
-  // Procedure templates hook
-  const { 
-    templates, 
-    loading: loadingTemplates, 
-    createTemplate, 
-    updateTemplate, 
-    deleteTemplate,
-    refetch: refetchTemplates 
-  } = useProcedureTemplates();
   
   // Clients state
   const [clients, setClients] = useState<Client[]>([]);
@@ -140,20 +112,6 @@ export default function AdminSettings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [teamForm, setTeamForm] = useState({ full_name: '', email: '', phone: '', role: 'staff' });
   const [savingTeam, setSavingTeam] = useState(false);
-
-  // Standard programs state
-  const [programs, setPrograms] = useState<StandardProgram[]>([]);
-  const [loadingPrograms, setLoadingPrograms] = useState(true);
-  const [programDialogOpen, setProgramDialogOpen] = useState(false);
-  const [editingProgram, setEditingProgram] = useState<StandardProgram | null>(null);
-  const [programForm, setProgramForm] = useState({ name: '', description: '', audit_area: '', engagement_type: 'statutory' });
-  const [savingProgram, setSavingProgram] = useState(false);
-
-  // Procedure template dialog state
-  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<ProcedureTemplate | null>(null);
-  const [previewTemplate, setPreviewTemplate] = useState<ProcedureTemplate | null>(null);
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
 
   // Financial years state
   const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
@@ -192,7 +150,6 @@ export default function AdminSettings() {
   useEffect(() => {
     fetchClients();
     fetchMembers();
-    fetchPrograms();
     fetchFinancialYears();
     fetchFirmSettings();
   }, []);
@@ -506,99 +463,6 @@ export default function AdminSettings() {
     }
   };
 
-  // ===================== PROGRAMS =====================
-  const fetchPrograms = async () => {
-    setLoadingPrograms(true);
-    try {
-      const { data, error } = await supabase
-        .from('standard_programs')
-        .select('*')
-        .order('audit_area');
-
-      if (error) throw error;
-      setPrograms(data || []);
-    } catch (error) {
-      console.error('Error fetching programs:', error);
-    } finally {
-      setLoadingPrograms(false);
-    }
-  };
-
-  const handleSaveProgram = async () => {
-    if (!programForm.name.trim() || !programForm.audit_area) {
-      toast.error('Name and audit area are required');
-      return;
-    }
-
-    setSavingProgram(true);
-    try {
-      if (editingProgram) {
-        const { error } = await supabase
-          .from('standard_programs')
-          .update({
-            name: programForm.name,
-            description: programForm.description || null,
-            audit_area: programForm.audit_area,
-            engagement_type: programForm.engagement_type,
-          })
-          .eq('id', editingProgram.id);
-
-        if (error) throw error;
-        toast.success('Program updated');
-      } else {
-        const { error } = await supabase
-          .from('standard_programs')
-          .insert({
-            name: programForm.name,
-            description: programForm.description || null,
-            audit_area: programForm.audit_area,
-            engagement_type: programForm.engagement_type,
-            created_by: user?.id,
-          });
-
-        if (error) throw error;
-        toast.success('Program added');
-      }
-
-      setProgramDialogOpen(false);
-      setEditingProgram(null);
-      setProgramForm({ name: '', description: '', audit_area: '', engagement_type: 'statutory' });
-      fetchPrograms();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to save program');
-    } finally {
-      setSavingProgram(false);
-    }
-  };
-
-  const handleDeleteProgram = async (id: string) => {
-    if (!confirm('Are you sure? This will delete all procedures in this program.')) return;
-    
-    try {
-      const { error } = await supabase.from('standard_programs').delete().eq('id', id);
-      if (error) throw error;
-      toast.success('Program deleted');
-      fetchPrograms();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to delete program');
-    }
-  };
-
-  // Template save handler - returns template ID on success for new templates
-  const handleSaveTemplate = async (data: ProcedureTemplateFormData): Promise<string | null> => {
-    if (editingTemplate) {
-      const result = await updateTemplate(editingTemplate.id, data);
-      if (result) {
-        setEditingTemplate(null);
-        return editingTemplate.id;
-      }
-      return null;
-    } else {
-      const templateId = await createTemplate(data);
-      return templateId;
-    }
-  };
-
   // ===================== PASSWORD RESET =====================
   const handleAdminPasswordReset = async () => {
     if (!resetEmail.trim() || !resetPassword.trim()) {
@@ -639,7 +503,7 @@ export default function AdminSettings() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-foreground">Admin Settings</h1>
-          <p className="text-muted-foreground">Manage clients, team, and standard programs</p>
+          <p className="text-muted-foreground">Manage clients, team, and firm settings</p>
         </div>
       </div>
 
@@ -664,10 +528,6 @@ export default function AdminSettings() {
           <TabsTrigger value="roles" className="gap-2">
             <UserCog className="h-4 w-4" />
             Roles
-          </TabsTrigger>
-          <TabsTrigger value="programs" className="gap-2">
-            <FolderOpen className="h-4 w-4" />
-            Programs
           </TabsTrigger>
           <TabsTrigger value="caro-templates" className="gap-2">
             <FileText className="h-4 w-4" />
@@ -1111,198 +971,6 @@ export default function AdminSettings() {
               </Table>
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* PROGRAMS TAB */}
-        <TabsContent value="programs" className="space-y-6">
-          {/* Standard Programs */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <div>
-                <CardTitle>Standard Audit Programs</CardTitle>
-                <CardDescription>Create program bundles that can be imported into engagements</CardDescription>
-              </div>
-              <Dialog open={programDialogOpen} onOpenChange={setProgramDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button onClick={() => { setEditingProgram(null); setProgramForm({ name: '', description: '', audit_area: '', engagement_type: 'statutory' }); }}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Program
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{editingProgram ? 'Edit Program' : 'Add New Program'}</DialogTitle>
-                    <DialogDescription>Define a standard audit program</DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <Label>Program Name *</Label>
-                      <Input value={programForm.name} onChange={e => setProgramForm(f => ({ ...f, name: e.target.value }))} placeholder="Revenue Testing Program" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Audit Area *</Label>
-                      <Select value={programForm.audit_area} onValueChange={v => setProgramForm(f => ({ ...f, audit_area: v }))}>
-                        <SelectTrigger><SelectValue placeholder="Select area" /></SelectTrigger>
-                        <SelectContent>
-                          {AUDIT_AREAS.map(area => <SelectItem key={area} value={area}>{area}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Engagement Type</Label>
-                      <Select value={programForm.engagement_type} onValueChange={v => setProgramForm(f => ({ ...f, engagement_type: v }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="statutory">Statutory Audit</SelectItem>
-                          <SelectItem value="internal">Internal Audit</SelectItem>
-                          <SelectItem value="tax">Tax Audit</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Description</Label>
-                      <Textarea value={programForm.description} onChange={e => setProgramForm(f => ({ ...f, description: e.target.value }))} placeholder="Describe the program..." />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setProgramDialogOpen(false)}>Cancel</Button>
-                    <Button onClick={handleSaveProgram} disabled={savingProgram}>
-                      {savingProgram ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                      {editingProgram ? 'Update' : 'Add'} Program
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Program Name</TableHead>
-                    <TableHead>Audit Area</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Procedures</TableHead>
-                    <TableHead className="w-24">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loadingPrograms ? (
-                    [1, 2].map(i => (
-                      <TableRow key={i}>
-                        <TableCell><Skeleton className="h-4 w-40" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-8" /></TableCell>
-                        <TableCell><Skeleton className="h-8 w-16" /></TableCell>
-                      </TableRow>
-                    ))
-                  ) : programs.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8">
-                        <div className="flex flex-col items-center gap-3">
-                          <FolderOpen className="h-10 w-10 text-muted-foreground/50" />
-                          <p className="text-muted-foreground">No standard programs yet</p>
-                          <Button size="sm" onClick={() => { setEditingProgram(null); setProgramForm({ name: '', description: '', audit_area: '', engagement_type: 'statutory' }); setProgramDialogOpen(true); }}>
-                            <Plus className="h-4 w-4 mr-2" />
-                            Create Your First Program
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    programs.map(program => (
-                      <TableRow key={program.id}>
-                        <TableCell className="font-medium">{program.name}</TableCell>
-                        <TableCell><Badge variant="outline">{program.audit_area}</Badge></TableCell>
-                        <TableCell className="capitalize">{program.engagement_type}</TableCell>
-                        <TableCell>{templates.filter(p => p.program_id === program.id).length}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingProgram(program); setProgramForm({ name: program.name, description: program.description || '', audit_area: program.audit_area, engagement_type: program.engagement_type }); setProgramDialogOpen(true); }}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteProgram(program.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-
-          {/* Procedure Templates */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <ClipboardList className="h-5 w-5" />
-                  Procedure Templates
-                </CardTitle>
-                <CardDescription>Individual procedure templates that can be added to programs or used standalone</CardDescription>
-              </div>
-              <Button 
-                variant="outline" 
-                onClick={() => { setEditingTemplate(null); setTemplateDialogOpen(true); }}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Procedure
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {loadingTemplates ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {[1, 2, 3, 4].map(i => (
-                    <Skeleton key={i} className="h-20 w-full" />
-                  ))}
-                </div>
-              ) : templates.length === 0 ? (
-                <div className="text-center py-8">
-                  <ClipboardList className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
-                  <p className="text-muted-foreground mb-4">No procedure templates yet</p>
-                  <Button 
-                    size="sm" 
-                    onClick={() => { setEditingTemplate(null); setTemplateDialogOpen(true); }}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Your First Template
-                  </Button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {templates.map(template => (
-                    <ProcedureTemplateCard
-                      key={template.id}
-                      template={template}
-                      programName={programs.find(p => p.id === template.program_id)?.name}
-                      onEdit={() => { setEditingTemplate(template); setTemplateDialogOpen(true); }}
-                      onDelete={() => deleteTemplate(template.id)}
-                      onPreview={() => { setPreviewTemplate(template); setPreviewDialogOpen(true); }}
-                    />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Procedure Template Dialog */}
-          <ProcedureTemplateDialog
-            open={templateDialogOpen}
-            onOpenChange={setTemplateDialogOpen}
-            template={editingTemplate}
-            programs={programs}
-            onSave={handleSaveTemplate}
-          />
-          
-          {/* Template Preview Dialog */}
-          <ProcedureTemplatePreviewDialog
-            open={previewDialogOpen}
-            onOpenChange={setPreviewDialogOpen}
-            template={previewTemplate}
-          />
         </TabsContent>
 
         {/* SECURITY TAB */}

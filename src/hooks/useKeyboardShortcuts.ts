@@ -22,7 +22,6 @@ export const navigationShortcuts = [
   { key: 'b', route: '/trial-balance-new', description: 'Trial Balance New', category: 'Navigation', requiresEngagement: true },
   { key: 'm', route: '/materiality', description: 'Materiality', category: 'Navigation', requiresEngagement: true },
   { key: 'r', route: '/risks', description: 'Risk Register', category: 'Navigation', requiresEngagement: true },
-  { key: 'p', route: '/programs', description: 'Audit Programs', category: 'Navigation', requiresEngagement: true },
   { key: 'v', route: '/evidence', description: 'Evidence Vault', category: 'Navigation', requiresEngagement: true },
   { key: 'n', route: '/review-notes', description: 'Review Notes', category: 'Navigation', requiresEngagement: true },
   { key: 'i', route: '/misstatements', description: 'Misstatements', category: 'Navigation', requiresEngagement: true },
