@@ -21,8 +21,11 @@ import {
     Loader2,
     ArrowLeft,
     RefreshCw,
-    AlertCircle
+    RotateCw,
+    AlertCircle,
+    FileSpreadsheet
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { gstzenApi } from "@/services/gstzen-api";
 import { useToast } from "@/components/ui/use-toast";
 import { Gstr1ReportType } from "@/types/gstzen";
@@ -113,23 +116,82 @@ export default function Gstr1Dashboard() {
         }
     }, [gstin, month, activeSection]);
 
-    const fetchSectionData = async () => {
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+    const [exporting, setExporting] = useState(false);
+
+    // Helper to get cache key
+    const getCacheKey = (secId: string) => `gstr1_${gstin?.gstin}_${month}_${secId}`;
+
+    // Unified fetcher: Cache-first strategy
+    const getCachedOrFetchSectionData = async (secId: string, forceRefresh: boolean = false) => {
+        if (!gstin?.gstin) return { data: [], timestamp: null };
+
+        const key = getCacheKey(secId);
+
+        // 1. Try Cache
+        if (!forceRefresh) {
+            try {
+                const cachedDocs = sessionStorage.getItem(key);
+                if (cachedDocs) {
+                    const parsed = JSON.parse(cachedDocs);
+                    if (parsed && Array.isArray(parsed.data)) {
+                        console.log(`[Cache Hit] Section: ${secId}`);
+                        return { data: parsed.data, timestamp: parsed.timestamp ? new Date(parsed.timestamp) : null };
+                    }
+                }
+            } catch (e) {
+                console.warn("Failed to parse cached data", e);
+                sessionStorage.removeItem(key);
+            }
+        }
+
+        // 2. Network Fetch
+        console.log(`[Network Fetch] Section: ${secId}`);
+        const result = await gstzenApi.fetchGstr1SectionData(gstin.gstin, month, secId);
+        const data = result || [];
+        const timestamp = new Date();
+
+        try {
+            sessionStorage.setItem(key, JSON.stringify({ data, timestamp: timestamp.toISOString() }));
+        } catch (e) {
+            console.warn("Failed to save to cache (quota exceeded?)", e);
+        }
+
+        return { data, timestamp };
+    };
+
+    const fetchSectionData = async (force: boolean = false) => {
         if (!gstin?.gstin) return;
         setLoading(true);
-        setData([]); // Clear old data
+        // Don't clear data immediately if refreshing, to avoid flickering if possible, 
+        // but resetting might be safer to show loading state. 
+        if (!force) setData([]);
+
         try {
-            const result = await gstzenApi.fetchGstr1SectionData(
-                gstin.gstin,
-                month,
-                activeSection
-            );
-            setData(result || []);
+            const { data: sectionData, timestamp } = await getCachedOrFetchSectionData(activeSection, force);
+            setData(sectionData);
+            setLastUpdated(timestamp);
+            if (sectionData.length > 0 || force) {
+                // If we successfully got data (cached or new), we assume session is active if it was a network call
+                // But strictly speaking, if it's cached, we don't know if session is active.
+                // However, for UX, if we have data, we show it. 
+                // If force=true, we definitely made an API call.
+                // Let's rely on the previous logic: if result exists (which it does), set active.
+                // Actually, if it's cached, we might not want to falsely say "Portal Connected" if the token expired.
+                // But the user just wants to see data.
+                // We can keep the existing side-effect:
+                setHasActiveSession(true);
+            }
         } catch (error) {
             console.error("Fetch Data Error", error);
-            // Silent error or toast? Silent is better for grid navigation
+            setData([]);
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleRefresh = () => {
+        fetchSectionData(true);
     };
 
     const handleSyncClick = () => {
@@ -151,6 +213,157 @@ export default function Gstr1Dashboard() {
         date.setMonth(m - 1);
         return date.toLocaleString('default', { month: 'long' });
     }
+
+
+
+    // Helper functions for totals (reused from Gstr1DataGrid)
+    const calculateTotalTaxable = (row: any) => {
+        let total = 0;
+        if (row.inv) {
+            row.inv.forEach((inv: any) => {
+                inv.itms?.forEach((item: any) => total += (item.itm_det?.txval || 0));
+            });
+        }
+        if (row.nt) {
+            row.nt.forEach((note: any) => {
+                note.itms?.forEach((item: any) => total += (item.itm_det?.txval || 0));
+            });
+        }
+        return total;
+    }
+
+    const calculateTotalTax = (row: any) => {
+        let total = 0;
+        if (row.inv) {
+            row.inv.forEach((inv: any) => {
+                inv.itms?.forEach((item: any) => {
+                    const d = item.itm_det;
+                    if (d) total += (d.iamt || 0) + (d.camt || 0) + (d.samt || 0);
+                });
+            });
+        }
+        if (row.nt) {
+            row.nt.forEach((note: any) => {
+                note.itms?.forEach((item: any) => {
+                    const d = item.itm_det;
+                    if (d) total += (d.iamt || 0) + (d.camt || 0) + (d.samt || 0);
+                });
+            });
+        }
+        return total;
+    }
+
+    const formatDataForExport = (data: any[], section: string) => {
+        return data.map(row => {
+            switch (section) {
+                case 'b2b':
+                case 'b2ba':
+                case 'b2cl':
+                case 'b2cla':
+                case 'cdnr':
+                case 'cdnra':
+                case 'exp':
+                case 'expa':
+                    return {
+                        "GSTIN/UIN": row.ctin || row.etin || "-",
+                        "Inv No": row.inv?.[0]?.inum || "-",
+                        "Date": row.inv?.[0]?.idt || "-",
+                        "Value": row.inv?.[0]?.val || 0,
+                        "POS": row.inv?.[0]?.pos || row.pos || "-",
+                        "Taxable Amt": calculateTotalTaxable(row),
+                        "Total Tax": calculateTotalTax(row)
+                    };
+                case 'b2cs':
+                case 'b2csa':
+                    return {
+                        "Type": row.typ || "B2CS",
+                        "POS": row.pos || "-",
+                        "Rate": row.rt ? `${row.rt}%` : "-",
+                        "Taxable Value": row.txval || 0,
+                        "Total Tax": (row.iamt || 0) + (row.camt || 0) + (row.samt || 0)
+                    };
+                case 'hsnsum':
+                    return {
+                        "HSN Code": row.hsn_sc,
+                        "Description": row.desc,
+                        "UQC": row.uqc,
+                        "Qty": row.qty,
+                        "Total Value": row.val || 0,
+                        "Taxable Value": row.txval || 0,
+                        "Total Tax": (row.iamt || 0) + (row.camt || 0) + (row.samt || 0)
+                    };
+                case 'docs':
+                    return {
+                        "Nature of Doc": row.doc_det?.doc_desc || "-",
+                        "From No": row.doc_det?.from || "-",
+                        "To No": row.doc_det?.to || "-",
+                        "Total Issued": row.doc_det?.totnum || 0,
+                        "Cancelled": row.doc_det?.cancel || 0,
+                        "Net Issued": row.doc_det?.net_issue || 0
+                    };
+                default:
+                    return row;
+            }
+        });
+    };
+
+    const handleExportToExcel = async () => {
+        if (!gstin) return;
+
+        setExporting(true);
+        try {
+            const wb = XLSX.utils.book_new();
+            let hasData = false;
+
+            // Iterate through all sections to fetch and export data
+            for (const section of SECTIONS) {
+                try {
+                    // Use the unified fetcher (cache-first)
+                    const { data: sectionData } = await getCachedOrFetchSectionData(section.id, false);
+
+                    if (sectionData.length > 0) {
+                        hasData = true;
+                        const formattedData = formatDataForExport(sectionData, section.id);
+                        const ws = XLSX.utils.json_to_sheet(formattedData);
+
+                        // Excel constraint: Sheet names max 31 chars
+                        const safeSheetName = section.label.substring(0, 31).replace(/[\\/?*[\]]/g, ' ');
+
+                        XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
+                    }
+                } catch (err) {
+                    console.error(`Failed to export section ${section.id}`, err);
+                }
+            }
+
+            if (!hasData) {
+                toast({
+                    title: "No Data to Export",
+                    description: "No data found in any section for this period.",
+                    variant: "destructive"
+                });
+                return;
+            }
+
+            const fileName = `GSTR1_${gstin.gstin}_AllSections_${month}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+
+            toast({
+                title: "Export Successful",
+                description: `Full report exported to ${fileName}`
+            });
+
+        } catch (error) {
+            console.error("Export Error", error);
+            toast({
+                title: "Export Failed",
+                description: "An error occurred while generating the Excel file.",
+                variant: "destructive"
+            });
+        } finally {
+            setExporting(false);
+        }
+    };
 
     return (
         <div className="container mx-auto py-6 space-y-6 max-w-7xl animate-fade-in">
@@ -214,9 +427,26 @@ export default function Gstr1Dashboard() {
                         </Select>
                     </div>
 
+                    <Button onClick={() => handleRefresh()} variant="outline" className="ml-2 mt-5">
+                        <RotateCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        Refresh Data
+                    </Button>
                     <Button onClick={handleSyncClick} variant="outline" className="ml-2 mt-5">
                         <RefreshCw className="mr-2 h-4 w-4" />
                         Sync from Portal
+                    </Button>
+                    {lastUpdated && (
+                        <div className="absolute top-full mt-1 right-0 text-xs text-muted-foreground mr-4">
+                            Last updated: {lastUpdated.toLocaleTimeString()}
+                        </div>
+                    )}
+                    <Button onClick={handleExportToExcel} variant="outline" className="ml-2 mt-5" disabled={exporting}>
+                        {exporting ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                            <FileSpreadsheet className="mr-2 h-4 w-4" />
+                        )}
+                        {exporting ? "Exporting..." : "Export All to Excel"}
                     </Button>
                 </div>
             </div>
