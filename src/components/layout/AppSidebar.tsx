@@ -74,7 +74,7 @@ export function AppSidebar() {
     if (!name) return name;
     return (
       <>
-        <span className="text-primary font-semibold">{name[0]}</span>
+        <span className="underline underline-offset-2">{name[0]}</span>
         <span>{name.slice(1)}</span>
       </>
     );

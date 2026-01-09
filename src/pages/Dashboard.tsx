@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { RiskSummary } from '@/components/dashboard/RiskSummary';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
@@ -28,10 +28,10 @@ export default function Dashboard() {
   const materialitySource = view === 'engagement' ? activeEngagement : stats.latestEngagement;
   
   const formatCurrency = (amount: number | null) => {
-    if (!amount) return '—';
-    if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
-    if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
-    return `₹${amount.toLocaleString('en-IN')}`;
+    if (!amount) return 'â€”';
+    if (amount >= 10000000) return `â‚¹${(amount / 10000000).toFixed(1)}Cr`;
+    if (amount >= 100000) return `â‚¹${(amount / 100000).toFixed(1)}L`;
+    return `â‚¹${amount.toLocaleString('en-IN')}`;
   };
 
   return (
@@ -107,7 +107,7 @@ export default function Dashboard() {
               variant={stats.risks.high > 2 ? 'danger' : stats.risks.high > 0 ? 'warning' : 'success'}
             />
             <StatCard
-              title={view === 'engagement' ? 'Materiality' : 'Latest Materiality'}
+              title={view === 'engagement' ? 'Materiality & Risk Assessment' : 'Latest Materiality & Risk Assessment'}
               value={formatCurrency(materialitySource?.materiality_amount || null)}
               subtitle={`PM: ${formatCurrency(materialitySource?.performance_materiality || null)}`}
               icon={TrendingUp}

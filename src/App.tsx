@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { HashRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { EngagementProvider } from "@/contexts/EngagementContext";
 import { TallyProvider } from "@/contexts/TallyContext";
@@ -25,18 +25,19 @@ import Misstatements from "./pages/Misstatements";
 import AuditTrail from "./pages/AuditTrail";
 import Completion from "./pages/Completion";
 import Settings from "./pages/Settings";
+import Feedback from "./pages/Feedback";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
 import AuditReport from "./pages/AuditReport";
-import Feedback from "./pages/Feedback";
-import Auth from "./pages/Auth";
-import NotFound from "./pages/NotFound";
+import ComplianceApplicability from "./pages/ComplianceApplicability";
 import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from "./pages/Gstr1Dashboard";
-import ComplianceApplicability from "./pages/ComplianceApplicability";
+import Auth from "./pages/Auth";
+import NotFound from "./pages/NotFound";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
+
 
 const queryClient = new QueryClient();
 
@@ -45,7 +46,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <HashRouter>
         <AuthProvider>
           <EngagementProvider>
             <TallyProvider>
@@ -149,7 +150,27 @@ const App = () => (
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <AuditExecution />
+                        <AuditPrograms />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/programs-new"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <AuditProgramNew />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/procedures/:procedureId/workpaper"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <ProcedureWorkpaper />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -245,6 +266,16 @@ const App = () => (
                   }
                 />
                 <Route
+                  path="/feedback"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <Feedback />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
                   path="/gstr1-integration"
                   element={
                     <ProtectedRoute>
@@ -307,7 +338,7 @@ const App = () => (
             </TallyProvider>
           </EngagementProvider>
         </AuthProvider>
-      </BrowserRouter>
+      </HashRouter>
     </TooltipProvider>
   </QueryClientProvider>
 );

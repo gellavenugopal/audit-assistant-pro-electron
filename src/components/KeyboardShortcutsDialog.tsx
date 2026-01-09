@@ -27,7 +27,7 @@ const ShortcutRow = ({ keys, description }: ShortcutRowProps) => (
             className={[
               'px-2 py-1 text-xs font-semibold rounded border shadow-sm',
               modifierKeys.has(key.toUpperCase())
-                ? 'bg-primary/15 text-primary border-primary/40'
+                ? 'bg-muted text-foreground border-border underline underline-offset-2'
                 : 'bg-muted text-foreground border-border',
             ].join(' ')}
           >

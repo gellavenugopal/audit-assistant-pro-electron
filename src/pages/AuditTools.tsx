@@ -1,4 +1,5 @@
 import React, { useState, useRef, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { PDFDocument } from "pdf-lib";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -122,10 +123,11 @@ const ToolCard = ({ title, description, icon, status = "available", onClick }: T
 type ConnectionMode = "odbc" | "excel";
 
 const TallyTools = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { currentEngagement } = useEngagement();
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>("odbc");
-  
+
   // Trial Balance fetch state
   const [showTBDialog, setShowTBDialog] = useState(false);
   const [tbFromDate, setTbFromDate] = useState("2024-04-01");
@@ -133,7 +135,7 @@ const TallyTools = () => {
   const [isFetchingTB, setIsFetchingTB] = useState(false);
   const [fetchedTBData, setFetchedTBData] = useState<TallyTrialBalanceLine[] | null>(null);
   const [tbSearchTerm, setTbSearchTerm] = useState("");
-  
+
 
   // Month wise data fetch state
   const [showMonthWiseDialog, setShowMonthWiseDialog] = useState(false);
@@ -142,33 +144,33 @@ const TallyTools = () => {
   const [isFetchingMW, setIsFetchingMW] = useState(false);
   const [fetchedMWData, setFetchedMWData] = useState<{ plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[] } | null>(null);
   const [mwSearchTerm, setMwSearchTerm] = useState("");
-  
+
   // GST Not Feeded state
   const [showGSTNotFeedDialog, setShowGSTNotFeedDialog] = useState(false);
   const [isFetchingGSTNotFeed, setIsFetchingGSTNotFeed] = useState(false);
   const [fetchedGSTNotFeedData, setFetchedGSTNotFeedData] = useState<TallyGSTNotFeedLine[] | null>(null);
   const [gstSearchTerm, setGstSearchTerm] = useState("");
-  
+
 
   // Negative Ledgers state
   const [showNegativeLedgersDialog, setShowNegativeLedgersDialog] = useState(false);
   const [negativeLedgersTab, setNegativeLedgersTab] = useState("debtors");
   const [negativeLedgersSearchTerm, setNegativeLedgersSearchTerm] = useState("");
-  
+
   // No Transactions state
   const [showNoTransactionsDialog, setShowNoTransactionsDialog] = useState(false);
   const [noTransactionsSearchTerm, setNoTransactionsSearchTerm] = useState("");
-  
+
   // ODBC Info Dialog state
   const [showODBCInfoDialog, setShowODBCInfoDialog] = useState(false);
-  
+
   // Opening Balance Matching state
   const [showOpeningBalanceDialog, setShowOpeningBalanceDialog] = useState(false);
   const openingBalanceMatching = useOpeningBalanceMatching();
-  
+
   // ODBC connection (only connection method)
   const odbcConnection = useTallyODBC();
-  
+
   // Use ODBC connection
   const isConnected = odbcConnection.isConnected;
   const isConnecting = odbcConnection.isConnecting;
@@ -183,31 +185,15 @@ const TallyTools = () => {
   };
 
   const handleFetchTrialBalance = async () => {
-    if (!isConnected) {
-      toast({
-        title: "Not Connected",
-        description: "Please connect to Tally ODBC first",
-        variant: "destructive",
-      });
-      return;
-    }
-    
     setIsFetchingTB(true);
     try {
-      const lines = await odbcConnection.fetchTrialBalance(tbFromDate, tbToDate);
-      if (lines && lines.length > 0) {
-        setFetchedTBData(lines);
+      const result = await odbcConnection.fetchTrialBalance();
+      if (result && result.data && result.data.length > 0) {
+        setFetchedTBData(result.data);
         toast({
           title: "Trial Balance Fetched",
-          description: `Retrieved ${lines.length} ledger accounts from Tally`,
+          description: `Retrieved ${result.data.length} ledger accounts from Tally`,
         });
-      } else {
-        toast({
-          title: "No Data Found",
-          description: "No trial balance data was returned from Tally. Please check your connection and date range.",
-          variant: "destructive",
-        });
-        setFetchedTBData([]);
       }
     } catch (error) {
       toast({
@@ -215,7 +201,6 @@ const TallyTools = () => {
         description: error instanceof Error ? error.message : "Unknown error",
         variant: "destructive",
       });
-      setFetchedTBData([]);
     } finally {
       setIsFetchingTB(false);
     }
@@ -247,7 +232,7 @@ const TallyTools = () => {
       return data.map(line => {
         const hierarchy = [line.accountHead];
         const category = getCategory(line.primaryGroup, line.isRevenue);
-        
+
         // Build hierarchy based on category
         if (category === 'Income') {
           hierarchy.push(line.parent || 'Income Accounts');
@@ -284,7 +269,7 @@ const TallyTools = () => {
           hierarchy.push('');
           hierarchy.push('');
         }
-        
+
         return {
           "Account Head": hierarchy[0],
           "Parent 1": hierarchy[1],
@@ -338,10 +323,10 @@ const TallyTools = () => {
 
     const fileName = `Trial_Balance_${tbFromDate}_to_${tbToDate}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
+
     const plCount = fetchedTBData.filter(line => line.isRevenue).length;
     const bsCount = fetchedTBData.filter(line => !line.isRevenue).length;
-    
+
     toast({
       title: "Export Complete",
       description: `Saved ${plCount} P&L and ${bsCount} Balance Sheet items to ${fileName}`,
@@ -357,11 +342,11 @@ const TallyTools = () => {
       });
       return;
     }
-    
+
     setIsFetchingMW(true);
     try {
       const result = await odbcConnection.fetchMonthWise(mwFyStartYear, mwTargetMonth);
-      
+
       if (result) {
         setFetchedMWData(result);
         toast({
@@ -384,9 +369,9 @@ const TallyTools = () => {
 
   const handleExportMonthWiseToExcel = () => {
     if (!fetchedMWData || (fetchedMWData.plLines.length === 0 && fetchedMWData.bsLines.length === 0)) return;
-    
+
     const { plLines: plItems, bsLines: bsItems, months } = fetchedMWData;
-    
+
     // Sort items
     plItems.sort((a, b) => {
       if (a.primaryGroup !== b.primaryGroup) return a.primaryGroup.localeCompare(b.primaryGroup);
@@ -396,7 +381,7 @@ const TallyTools = () => {
       if (a.primaryGroup !== b.primaryGroup) return a.primaryGroup.localeCompare(b.primaryGroup);
       return a.accountName.localeCompare(b.accountName);
     });
-    
+
     const formatRow = (line: TallyMonthWiseLine, isPL: boolean) => {
       const row: Record<string, string | number> = {
         "Ledger Name": line.accountName,
@@ -473,15 +458,15 @@ const TallyTools = () => {
       });
       return;
     }
-    
+
     setIsFetchingGSTNotFeed(true);
     try {
       if (!window.electronAPI || typeof window.electronAPI.odbcFetchGSTNotFeeded !== 'function') {
         throw new Error('Electron API not available. Please restart the application.');
       }
-      
+
       const result = await window.electronAPI.odbcFetchGSTNotFeeded();
-      
+
       if (result && result.success) {
         setFetchedGSTNotFeedData(result.lines || []);
         if (result.lines && result.lines.length > 0) {
@@ -535,26 +520,26 @@ const TallyTools = () => {
   // Tally convention: Negative = Debit, Positive = Credit
   const getNegativeLedgers = () => {
     if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [] };
-    
+
     // Debtors should have Dr balance (negative), so Cr balance (positive/closingBalance > 0) is opposite
-    const debtors = fetchedTBData.filter(line => 
+    const debtors = fetchedTBData.filter(line =>
       line.primaryGroup === "Sundry Debtors" && line.closingBalance > 0
     );
-    
+
     // Creditors should have Cr balance (positive), so Dr balance (negative/closingBalance < 0) is opposite
-    const creditors = fetchedTBData.filter(line => 
+    const creditors = fetchedTBData.filter(line =>
       line.primaryGroup === "Sundry Creditors" && line.closingBalance < 0
     );
-    
+
     // Assets should have Dr balance (negative), so Cr balance (positive) is opposite
     const assetGroups = ["Fixed Assets", "Current Assets", "Investments", "Bank Accounts", "Cash-in-Hand", "Deposits (Asset)", "Loans & Advances (Asset)", "Stock-in-Hand", "Bank OD Accounts"];
-    const assets = fetchedTBData.filter(line => 
+    const assets = fetchedTBData.filter(line =>
       assetGroups.includes(line.primaryGroup) && line.closingBalance > 0
     );
-    
+
     // Liabilities should have Cr balance (positive), so Dr balance (negative) is opposite
     const liabilityGroups = ["Capital Account", "Reserves & Surplus", "Loans (Liability)", "Secured Loans", "Unsecured Loans", "Current Liabilities", "Provisions", "Duties & Taxes"];
-    const liabilities = fetchedTBData.filter(line => 
+    const liabilities = fetchedTBData.filter(line =>
       liabilityGroups.includes(line.primaryGroup) && line.closingBalance < 0
     );
 
@@ -564,7 +549,7 @@ const TallyTools = () => {
   // Ledgers with No Transactions - only opening balance, no transactions during the year
   const getNoTransactionLedgers = () => {
     if (!fetchedTBData) return [];
-    
+
     // A ledger has no transactions if:
     // 1. Total Debit and Total Credit are zero (or very small, < 0.01 to account for rounding)
     // 2. Opening Balance exists (non-zero, >= 0.01 to exclude negligible balances)
@@ -572,20 +557,20 @@ const TallyTools = () => {
     //    Formula: Closing Balance = Opening Balance + Total Debit - Total Credit
     //    If Total Debit = 0 and Total Credit = 0, then Closing = Opening
     const threshold = 0.01; // Small threshold for rounding differences
-    
+
     return fetchedTBData.filter(line => {
       // Check if there are no transactions (both debit and credit totals are effectively zero)
-      const hasNoTransactions = 
-        Math.abs(line.totalDebit) < threshold && 
+      const hasNoTransactions =
+        Math.abs(line.totalDebit) < threshold &&
         Math.abs(line.totalCredit) < threshold;
-      
+
       // Must have a meaningful opening balance (exclude zero-balance accounts)
       const hasOpeningBalance = Math.abs(line.openingBalance) >= threshold;
-      
+
       // Verify closing balance equals opening balance (safety check for data integrity)
       // This ensures: Closing = Opening + Debit - Credit = Opening + 0 - 0 = Opening
       const balanceUnchanged = Math.abs(line.closingBalance - line.openingBalance) < threshold;
-      
+
       // All three conditions must be true
       return hasNoTransactions && hasOpeningBalance && balanceUnchanged;
     });
@@ -593,7 +578,7 @@ const TallyTools = () => {
 
   const handleExportNegativeLedgersToExcel = () => {
     const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
-    
+
     const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => {
       const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
       const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
@@ -606,7 +591,7 @@ const TallyTools = () => {
         "Amount": expectedNature === "Dr" ? closingCr : closingDr,
       };
     };
-    
+
     const wb = XLSX.utils.book_new();
 
     if (debtors.length > 0) {
@@ -640,7 +625,7 @@ const TallyTools = () => {
 
   const handleExportNoTransactionLedgersToExcel = () => {
     const noTransactionLedgers = getNoTransactionLedgers();
-    
+
     if (noTransactionLedgers.length === 0) {
       toast({
         title: "No Data",
@@ -649,13 +634,13 @@ const TallyTools = () => {
       });
       return;
     }
-    
+
     const data = noTransactionLedgers.map(line => {
       const openingDr = line.openingBalance > 0 ? line.openingBalance : 0;
       const openingCr = line.openingBalance < 0 ? Math.abs(line.openingBalance) : 0;
       const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
       const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
-      
+
       return {
         "Account Name": line.accountHead,
         "Primary Group": line.primaryGroup,
@@ -673,14 +658,14 @@ const TallyTools = () => {
         "Type": line.isRevenue ? "P&L" : "BS",
       };
     });
-    
+
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
     XLSX.utils.book_append_sheet(wb, ws, "No_Transactions");
-    
+
     const fileName = `No_Transaction_Ledgers_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
-    
+
     toast({
       title: "Export Complete",
       description: `Saved ${noTransactionLedgers.length} ledgers with no transactions to ${fileName}`,
@@ -688,7 +673,7 @@ const TallyTools = () => {
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-IN', { 
+    return new Intl.NumberFormat('en-IN', {
       style: 'decimal',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
@@ -699,9 +684,9 @@ const TallyTools = () => {
   const filteredTBData = useMemo(() => {
     if (!fetchedTBData) return null;
     if (!tbSearchTerm.trim()) return fetchedTBData;
-    
+
     const searchLower = tbSearchTerm.toLowerCase().trim();
-    return fetchedTBData.filter(line => 
+    return fetchedTBData.filter(line =>
       line.accountHead.toLowerCase().includes(searchLower) ||
       line.accountCode.toLowerCase().includes(searchLower) ||
       line.primaryGroup.toLowerCase().includes(searchLower) ||
@@ -716,16 +701,16 @@ const TallyTools = () => {
   // - But we use Math.abs() to ensure they're always positive for totals
   // - Opening and Closing balances follow Tally convention: negative = Debit, positive = Credit
   const totalOpeningBalance = filteredTBData?.reduce((sum, line) => sum + line.openingBalance, 0) || 0;
-  
+
   // Total Debit and Credit should be absolute values (sum of all debit/credit amounts)
   const totalDebit = filteredTBData?.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0) || 0;
   const totalCredit = filteredTBData?.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0) || 0;
-  
+
   // Total Closing Balance: Sum of individual closing balances
   // OR can be calculated as: Opening + Debit - Credit (accounting formula)
   const totalClosingBalanceSum = filteredTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
   const totalClosingBalanceCalculated = totalOpeningBalance + totalDebit - totalCredit;
-  
+
   // Use the sum of individual closing balances (more accurate)
   // But verify it matches the formula (allow small rounding differences)
   const totalClosingBalance = totalClosingBalanceSum;
@@ -802,9 +787,9 @@ const TallyTools = () => {
                   <Database className="h-4 w-4 text-muted-foreground" />
                   <span className="font-medium text-sm">ODBC Connection Active</span>
                 </div>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => odbcConnection.disconnect()}
                   className="h-7 px-2 text-muted-foreground hover:text-destructive"
                 >
@@ -954,15 +939,6 @@ const TallyTools = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <Alert variant="warning" className="mb-4">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Important:</strong> Tally ODBC returns balances as of Tally's <strong>current date setting</strong>, not the selected date range.
-              <br />
-              <strong>Before fetching:</strong> Please set Tally's date to the <strong>"To Date"</strong> ({tbToDate}) to get accurate balances for the selected period.
-            </AlertDescription>
-          </Alert>
-
           <div className="space-y-4">
             {/* Period Selection */}
             <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
@@ -986,7 +962,7 @@ const TallyTools = () => {
                   className="w-40"
                 />
               </div>
-              <Button onClick={handleFetchTrialBalance} disabled={isFetchingTB || !isConnected}>
+              <Button onClick={handleFetchTrialBalance} disabled={isFetchingTB}>
                 {isFetchingTB ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1071,7 +1047,6 @@ const TallyTools = () => {
                     </tbody>
                     <tfoot className="bg-muted font-medium sticky bottom-0">
                       <tr className="border-t-2">
-                        <td className="p-2 font-medium">Total:</td>
                         <td className="p-2 text-right font-medium">Total:</td>
                         <td className="p-2 text-right font-mono">{formatCurrency(totalOpeningBalance)}</td>
                         <td className="p-2 text-right font-mono">{formatCurrency(totalDebit)}</td>
@@ -1087,7 +1062,6 @@ const TallyTools = () => {
                 <div className="p-4 border-t bg-muted/30">
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-sm text-muted-foreground">
-                      {fetchedTBData.length} accounts
                       {tbSearchTerm ? (
                         <>
                           {filteredTBData?.length || 0} of {fetchedTBData.length} accounts
@@ -1105,15 +1079,15 @@ const TallyTools = () => {
                         <FileSpreadsheet className="h-4 w-4 mr-2" />
                         Export to Excel
                       </Button>
-                      <Button 
+                      <Button
                         onClick={() => {
                           if (!currentEngagement) {
                             toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
                             return;
                           }
-                          toast({ 
-                            title: "Save to Trial Balance", 
-                            description: "Navigate to Trial Balance page and use Import to save this data" 
+                          toast({
+                            title: "Save to Trial Balance",
+                            description: "Navigate to Trial Balance page and use Import to save this data"
                           });
                           setShowTBDialog(false);
                         }}
@@ -1143,7 +1117,7 @@ const TallyTools = () => {
                         // Verify calculation: Closing should equal Opening + Debit - Credit
                         const difference = Math.abs(totalClosingBalanceSum - totalClosingBalanceCalculated);
                         const isCalculationCorrect = difference < 100; // Allow small rounding differences
-                        
+
                         if (!isCalculationCorrect) {
                           return (
                             <div className="mt-1">
@@ -1151,18 +1125,43 @@ const TallyTools = () => {
                                 Calculation Mismatch: {formatCurrency(difference)}
                               </Badge>
                               <p className="text-xs text-muted-foreground mt-1">
-                                Sum: {formatCurrency(totalClosingBalanceSum)} | 
+                                Sum: {formatCurrency(totalClosingBalanceSum)} |
                                 Calc: {formatCurrency(totalClosingBalanceCalculated)}
                               </p>
                             </div>
                           );
                         }
-                        
+
                         // Check if trial balance is balanced (Total Debit = Total Credit for a balanced TB)
                         // But this depends on account types, so we just verify the calculation is correct
                         return null;
                       })()}
                     </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setFetchedTBData(null)}>
+                      Clear
+                    </Button>
+                    <Button variant="outline" onClick={handleExportToExcel}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export to Excel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (!currentEngagement) {
+                          toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
+                          return;
+                        }
+                        toast({
+                          title: "Save to Trial Balance",
+                          description: "Navigate to Trial Balance page and use Import to save this data"
+                        });
+                        setShowTBDialog(false);
+                      }}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Use in Trial Balance
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -1187,129 +1186,6 @@ const TallyTools = () => {
           setMwSearchTerm("");
         }
       }}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              Get Month wise Data from Tally
-            </DialogTitle>
-            <DialogDescription>
-              Extract month wise data for analysis. P&L shows movement, Balance Sheet shows closing balances.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {/* Period Selection */}
-            <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg flex-wrap">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="mwFyStartYear">FY Starting Year:</Label>
-                <Select
-                  value={String(mwFyStartYear)}
-                  onValueChange={(v) => setMwFyStartYear(Number(v))}
-                >
-                  <SelectTrigger className="w-28">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[2020, 2021, 2022, 2023, 2024, 2025, 2026].map(year => (
-                      <SelectItem key={year} value={String(year)}>{year}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="mwTargetMonth">Target Month:</Label>
-                <Select value={mwTargetMonth} onValueChange={setMwTargetMonth}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"].map(month => (
-                      <SelectItem key={month} value={month}>{month}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={handleFetchMonthWiseData} disabled={isFetchingMW || !isConnected}>
-                {isFetchingMW ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Fetching...
-                  </>
-                ) : (
-                  <>
-                    <Download className="h-4 w-4 mr-2" />
-                    Fetch Month Wise Data
-                  </>
-                )}
-              </Button>
-            </div>
-
-            {/* Results Table */}
-            {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (
-              <div className="border rounded-lg overflow-hidden">
-                <div className="max-h-[400px] overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted sticky top-0">
-                      <tr>
-                        <th className="text-left p-2 font-medium min-w-[200px]">Ledger Name</th>
-                        <th className="text-left p-2 font-medium min-w-[120px]">Primary Group</th>
-                        <th className="text-center p-2 font-medium text-xs">Type</th>
-                        {fetchedMWData.months.map(month => (
-                          <th key={month} className="text-right p-2 font-medium min-w-[80px]">{month}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...fetchedMWData.plLines, ...fetchedMWData.bsLines].slice(0, 100).map((line, idx) => (
-                        <tr key={idx} className="border-t hover:bg-muted/50">
-                          <td className="p-2">{line.accountName}</td>
-                          <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                          <td className="p-2 text-center">
-                            <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
-                              {line.isRevenue ? "P&L" : "BS"}
-                            </Badge>
-                          </td>
-                          {fetchedMWData.months.map((month, monthIdx) => {
-                            // For P&L items, show movement (current - previous)
-                            // For BS items, show absolute closing balance
-                            let displayValue = 0;
-                            if (line.isRevenue) {
-                              // P&L: Calculate movement
-                              if (monthIdx === 0) {
-                                // First month: closing - opening
-                                displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
-                              } else {
-                                // Subsequent months: current closing - previous closing
-                                const prevMonth = fetchedMWData.months[monthIdx - 1];
-                                displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
-                              }
-                            } else {
-                              // BS: Show absolute closing balance
-                              displayValue = line.monthlyBalances[month] || 0;
-                            }
-                            
-                            return (
-                              <td key={month} className="p-2 text-right font-mono text-xs">
-                                {displayValue !== 0 
-                                  ? formatCurrency(displayValue) 
-                                  : '-'}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Month wise Data Dialog */}
-      <Dialog open={showMonthWiseDialog} onOpenChange={setShowMonthWiseDialog}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1401,117 +1277,117 @@ const TallyTools = () => {
             {fetchedMWData && (fetchedMWData.plLines.length > 0 || fetchedMWData.bsLines.length > 0) && (() => {
               // Filter data based on search term
               const allLines = [...fetchedMWData.plLines, ...fetchedMWData.bsLines];
-              const filteredLines = mwSearchTerm.trim() 
+              const filteredLines = mwSearchTerm.trim()
                 ? allLines.filter(line => {
-                    const searchLower = mwSearchTerm.toLowerCase().trim();
-                    return line.accountName.toLowerCase().includes(searchLower) ||
-                           line.primaryGroup.toLowerCase().includes(searchLower);
-                  })
+                  const searchLower = mwSearchTerm.toLowerCase().trim();
+                  return line.accountName.toLowerCase().includes(searchLower) ||
+                    line.primaryGroup.toLowerCase().includes(searchLower);
+                })
                 : allLines;
-              
+
               const filteredPlCount = filteredLines.filter(l => l.isRevenue).length;
               const filteredBsCount = filteredLines.filter(l => !l.isRevenue).length;
               const displayLines = filteredLines.slice(0, 100);
-              
-              return (
-              <div className="border rounded-lg overflow-hidden">
-                <div className="max-h-[400px] overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted sticky top-0">
-                      <tr>
-                        <th className="text-left p-2 font-medium min-w-[200px]">Ledger Name</th>
-                        <th className="text-left p-2 font-medium min-w-[120px]">Primary Group</th>
-                        <th className="text-center p-2 font-medium text-xs">Type</th>
-                        {fetchedMWData.months.map(month => (
-                          <th key={month} className="text-right p-2 font-medium min-w-[80px]">{month}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {displayLines.length > 0 ? (
-                        displayLines.map((line, idx) => (
-                          <tr key={idx} className="border-t hover:bg-muted/50">
-                            <td className="p-2">{line.accountName}</td>
-                            <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                            <td className="p-2 text-center">
-                              <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
-                                {line.isRevenue ? "P&L" : "BS"}
-                              </Badge>
-                            </td>
-                            {fetchedMWData.months.map((month, monthIdx) => {
-                              // For P&L items, show movement (current - previous)
-                              // For BS items, show absolute closing balance
-                              let displayValue = 0;
-                              if (line.isRevenue) {
-                                // P&L: Calculate movement
-                                if (monthIdx === 0) {
-                                  // First month: closing - opening
-                                  displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
-                                } else {
-                                  // Subsequent months: current closing - previous closing
-                                  const prevMonth = fetchedMWData.months[monthIdx - 1];
-                                  displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
-                                }
-                              } else {
-                                // BS: Show absolute closing balance
-                                displayValue = line.monthlyBalances[month] || 0;
-                              }
-                              
-                              return (
-                                <td key={month} className="p-2 text-right font-mono text-xs">
-                                  {displayValue !== 0 
-                                    ? formatCurrency(displayValue) 
-                                    : '-'}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))
-                      ) : mwSearchTerm ? (
-                        <tr>
-                          <td colSpan={3 + fetchedMWData.months.length} className="p-4 text-center text-muted-foreground">
-                            No accounts found matching "{mwSearchTerm}"
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
 
-                {/* Summary & Export */}
-                <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    {mwSearchTerm ? (
-                      <>
-                        {filteredLines.length} of {allLines.length} accounts
-                        {filteredLines.length > 0 && (
-                          <span className="ml-1">({filteredPlCount} P&L, {filteredBsCount} BS)</span>
-                        )}
-                        {mwSearchTerm && <span className="ml-1">(filtered)</span>}
-                      </>
-                    ) : (
-                      <>
-                        {allLines.length} accounts ({fetchedMWData.plLines.length} P&L, {fetchedMWData.bsLines.length} BS)
-                      </>
-                    )}
-                    {displayLines.length < filteredLines.length && (
-                      <span className="ml-2 text-amber-600">(showing first {displayLines.length} of {filteredLines.length})</span>
-                    )}
-                    {!mwSearchTerm && allLines.length > 100 && (
-                      <span className="ml-2 text-amber-600">(showing first 100)</span>
-                    )}
+              return (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="max-h-[400px] overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted sticky top-0">
+                        <tr>
+                          <th className="text-left p-2 font-medium min-w-[200px]">Ledger Name</th>
+                          <th className="text-left p-2 font-medium min-w-[120px]">Primary Group</th>
+                          <th className="text-center p-2 font-medium text-xs">Type</th>
+                          {fetchedMWData.months.map(month => (
+                            <th key={month} className="text-right p-2 font-medium min-w-[80px]">{month}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {displayLines.length > 0 ? (
+                          displayLines.map((line, idx) => (
+                            <tr key={idx} className="border-t hover:bg-muted/50">
+                              <td className="p-2">{line.accountName}</td>
+                              <td className="p-2 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                              <td className="p-2 text-center">
+                                <Badge variant={line.isRevenue ? "secondary" : "outline"} className="text-[10px]">
+                                  {line.isRevenue ? "P&L" : "BS"}
+                                </Badge>
+                              </td>
+                              {fetchedMWData.months.map((month, monthIdx) => {
+                                // For P&L items, show movement (current - previous)
+                                // For BS items, show absolute closing balance
+                                let displayValue = 0;
+                                if (line.isRevenue) {
+                                  // P&L: Calculate movement
+                                  if (monthIdx === 0) {
+                                    // First month: closing - opening
+                                    displayValue = (line.monthlyBalances[month] || 0) - (line.openingBalance || 0);
+                                  } else {
+                                    // Subsequent months: current closing - previous closing
+                                    const prevMonth = fetchedMWData.months[monthIdx - 1];
+                                    displayValue = (line.monthlyBalances[month] || 0) - (line.monthlyBalances[prevMonth] || 0);
+                                  }
+                                } else {
+                                  // BS: Show absolute closing balance
+                                  displayValue = line.monthlyBalances[month] || 0;
+                                }
+
+                                return (
+                                  <td key={month} className="p-2 text-right font-mono text-xs">
+                                    {displayValue !== 0
+                                      ? formatCurrency(displayValue)
+                                      : '-'}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))
+                        ) : mwSearchTerm ? (
+                          <tr>
+                            <td colSpan={3 + fetchedMWData.months.length} className="p-4 text-center text-muted-foreground">
+                              No accounts found matching "{mwSearchTerm}"
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setFetchedMWData(null)}>
-                      Clear
-                    </Button>
-                    <Button variant="outline" onClick={handleExportMonthWiseToExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export to Excel
-                    </Button>
+
+                  {/* Summary & Export */}
+                  <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
+                    <div className="text-sm text-muted-foreground">
+                      {mwSearchTerm ? (
+                        <>
+                          {filteredLines.length} of {allLines.length} accounts
+                          {filteredLines.length > 0 && (
+                            <span className="ml-1">({filteredPlCount} P&L, {filteredBsCount} BS)</span>
+                          )}
+                          {mwSearchTerm && <span className="ml-1">(filtered)</span>}
+                        </>
+                      ) : (
+                        <>
+                          {allLines.length} accounts ({fetchedMWData.plLines.length} P&L, {fetchedMWData.bsLines.length} BS)
+                        </>
+                      )}
+                      {displayLines.length < filteredLines.length && (
+                        <span className="ml-2 text-amber-600">(showing first {displayLines.length} of {filteredLines.length})</span>
+                      )}
+                      {!mwSearchTerm && allLines.length > 100 && (
+                        <span className="ml-2 text-amber-600">(showing first 100)</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => setFetchedMWData(null)}>
+                        Clear
+                      </Button>
+                      <Button variant="outline" onClick={handleExportMonthWiseToExcel}>
+                        <FileSpreadsheet className="h-4 w-4 mr-2" />
+                        Export to Excel
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
               );
             })()}
 
@@ -1595,7 +1471,7 @@ const TallyTools = () => {
                       const filtered = fetchedGSTNotFeedData.filter(line => {
                         const searchLower = gstSearchTerm.toLowerCase().trim();
                         return line.ledgerName.toLowerCase().includes(searchLower) ||
-                               line.primaryGroup.toLowerCase().includes(searchLower);
+                          line.primaryGroup.toLowerCase().includes(searchLower);
                       });
                       return filtered.length;
                     })()} of {fetchedGSTNotFeedData.length} ledgers
@@ -1607,76 +1483,76 @@ const TallyTools = () => {
             {/* Results Table */}
             {fetchedGSTNotFeedData && fetchedGSTNotFeedData.length > 0 && (() => {
               // Filter data based on search term
-              const filteredData = gstSearchTerm.trim() 
+              const filteredData = gstSearchTerm.trim()
                 ? fetchedGSTNotFeedData.filter(line => {
-                    const searchLower = gstSearchTerm.toLowerCase().trim();
-                    return line.ledgerName.toLowerCase().includes(searchLower) ||
-                           line.primaryGroup.toLowerCase().includes(searchLower);
-                  })
+                  const searchLower = gstSearchTerm.toLowerCase().trim();
+                  return line.ledgerName.toLowerCase().includes(searchLower) ||
+                    line.primaryGroup.toLowerCase().includes(searchLower);
+                })
                 : fetchedGSTNotFeedData;
-              
+
               return (
-              <div className="border rounded-lg overflow-hidden">
-                <div className="max-h-[400px] overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted sticky top-0">
-                      <tr>
-                        <th className="text-left p-3 font-medium">#</th>
-                        <th className="text-left p-3 font-medium">Ledger Name</th>
-                        <th className="text-left p-3 font-medium">Primary Group</th>
-                        <th className="text-left p-3 font-medium">GST Registration Type</th>
-                        <th className="text-left p-3 font-medium">Party GSTIN</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredData.length > 0 ? (
-                        filteredData.map((line, idx) => (
-                          <tr key={idx} className="border-t hover:bg-muted/50">
-                            <td className="p-3 text-muted-foreground">{idx + 1}</td>
-                            <td className="p-3 font-medium">{line.ledgerName}</td>
-                            <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
-                            <td className="p-3">
-                              <Badge variant="secondary">{line.registrationType || line.gstRegistrationType || "Unknown"}</Badge>
-                            </td>
-                            <td className="p-3">
-                              <Badge variant="destructive">Not Feeded</Badge>
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="max-h-[400px] overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted sticky top-0">
+                        <tr>
+                          <th className="text-left p-3 font-medium">#</th>
+                          <th className="text-left p-3 font-medium">Ledger Name</th>
+                          <th className="text-left p-3 font-medium">Primary Group</th>
+                          <th className="text-left p-3 font-medium">GST Registration Type</th>
+                          <th className="text-left p-3 font-medium">Party GSTIN</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredData.length > 0 ? (
+                          filteredData.map((line, idx) => (
+                            <tr key={idx} className="border-t hover:bg-muted/50">
+                              <td className="p-3 text-muted-foreground">{idx + 1}</td>
+                              <td className="p-3 font-medium">{line.ledgerName}</td>
+                              <td className="p-3 text-muted-foreground text-xs">{line.primaryGroup}</td>
+                              <td className="p-3">
+                                <Badge variant="secondary">{line.registrationType || line.gstRegistrationType || "Unknown"}</Badge>
+                              </td>
+                              <td className="p-3">
+                                <Badge variant="destructive">Not Feeded</Badge>
+                              </td>
+                            </tr>
+                          ))
+                        ) : gstSearchTerm ? (
+                          <tr>
+                            <td colSpan={5} className="p-4 text-center text-muted-foreground">
+                              No ledgers found matching "{gstSearchTerm}"
                             </td>
                           </tr>
-                        ))
-                      ) : gstSearchTerm ? (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-center text-muted-foreground">
-                            No ledgers found matching "{gstSearchTerm}"
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
 
-                {/* Summary & Export */}
-                <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    {gstSearchTerm ? (
-                      <>
-                        {filteredData.length} of {fetchedGSTNotFeedData.length} ledgers with missing GSTIN
-                        {gstSearchTerm && <span className="ml-1">(filtered)</span>}
-                      </>
-                    ) : (
-                      `Found ${fetchedGSTNotFeedData.length} ledgers with missing GSTIN`
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setFetchedGSTNotFeedData(null)}>
-                      Clear
-                    </Button>
-                    <Button variant="outline" onClick={handleExportGSTNotFeedToExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export to Excel
-                    </Button>
+                  {/* Summary & Export */}
+                  <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
+                    <div className="text-sm text-muted-foreground">
+                      {gstSearchTerm ? (
+                        <>
+                          {filteredData.length} of {fetchedGSTNotFeedData.length} ledgers with missing GSTIN
+                          {gstSearchTerm && <span className="ml-1">(filtered)</span>}
+                        </>
+                      ) : (
+                        `Found ${fetchedGSTNotFeedData.length} ledgers with missing GSTIN`
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => setFetchedGSTNotFeedData(null)}>
+                        Clear
+                      </Button>
+                      <Button variant="outline" onClick={handleExportGSTNotFeedToExcel}>
+                        <FileSpreadsheet className="h-4 w-4 mr-2" />
+                        Export to Excel
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
               );
             })()}
 
@@ -1713,7 +1589,7 @@ const TallyTools = () => {
           <div className="space-y-4">
             {(() => {
               const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
-              
+
               // Filter function for search
               const filterData = (data: TallyTrialBalanceLine[]) => {
                 if (!negativeLedgersSearchTerm.trim()) return data;
@@ -1724,15 +1600,15 @@ const TallyTools = () => {
                   (line.parent && line.parent.toLowerCase().includes(searchLower))
                 );
               };
-              
+
               const filteredDebtors = filterData(debtors);
               const filteredCreditors = filterData(creditors);
               const filteredAssets = filterData(assets);
               const filteredLiabilities = filterData(liabilities);
-              
+
               const totalCount = debtors.length + creditors.length + assets.length + liabilities.length;
               const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length;
-              
+
               const renderTable = (data: TallyTrialBalanceLine[], filteredData: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
                 <div className="border rounded-lg overflow-hidden">
                   <div className="max-h-[350px] overflow-auto">
@@ -1815,7 +1691,7 @@ const TallyTools = () => {
                           </Button>
                         )}
                       </div>
-                      
+
                       {negativeLedgersSearchTerm && (
                         <div className="text-sm text-muted-foreground">
                           Showing {filteredTotalCount} of {totalCount} accounts
@@ -1888,7 +1764,7 @@ const TallyTools = () => {
                               Showing {filteredTotalCount} of {totalCount} accounts with opposite balances
                               <span className="ml-1">(filtered)</span>
                               <span className="ml-2 text-xs">
-                                (Debtors: {filteredDebtors.length}/{debtors.length}, Creditors: {filteredCreditors.length}/{creditors.length}, 
+                                (Debtors: {filteredDebtors.length}/{debtors.length}, Creditors: {filteredCreditors.length}/{creditors.length},
                                 Assets: {filteredAssets.length}/{assets.length}, Liabilities: {filteredLiabilities.length}/{liabilities.length})
                               </span>
                             </>
@@ -1934,17 +1810,17 @@ const TallyTools = () => {
           <div className="space-y-4">
             {(() => {
               const noTransactionLedgers = getNoTransactionLedgers();
-              
+
               // Filter data based on search term
-              const filteredData = noTransactionsSearchTerm.trim() 
+              const filteredData = noTransactionsSearchTerm.trim()
                 ? noTransactionLedgers.filter(line => {
-                    const searchLower = noTransactionsSearchTerm.toLowerCase().trim();
-                    return line.accountHead.toLowerCase().includes(searchLower) ||
-                           line.primaryGroup.toLowerCase().includes(searchLower) ||
-                           (line.parent && line.parent.toLowerCase().includes(searchLower));
-                  })
+                  const searchLower = noTransactionsSearchTerm.toLowerCase().trim();
+                  return line.accountHead.toLowerCase().includes(searchLower) ||
+                    line.primaryGroup.toLowerCase().includes(searchLower) ||
+                    (line.parent && line.parent.toLowerCase().includes(searchLower));
+                })
                 : noTransactionLedgers;
-              
+
               if (noTransactionLedgers.length === 0) {
                 return (
                   <Alert>
@@ -1979,7 +1855,7 @@ const TallyTools = () => {
                       </Button>
                     )}
                   </div>
-                  
+
                   {noTransactionsSearchTerm && (
                     <div className="text-sm text-muted-foreground">
                       Showing {filteredData.length} of {noTransactionLedgers.length} ledgers
@@ -2152,7 +2028,7 @@ const TallyTools = () => {
               Compare opening balances between Old and New Tally instances. Generate XML to import old balances into new Tally.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-6 py-4">
             {/* Step 1: Fetch Old Tally Data */}
             <div className="space-y-3">
@@ -2319,9 +2195,9 @@ const TallyTools = () => {
                     onClick={() => {
                       // Export to Excel instead of XML
                       if (!openingBalanceMatching.comparisonResult) return;
-                      
+
                       const wb = XLSX.utils.book_new();
-                      
+
                       // Balance Mismatches Sheet
                       if (openingBalanceMatching.comparisonResult.balanceMismatches.length > 0) {
                         const balanceData = openingBalanceMatching.comparisonResult.balanceMismatches.map((row, idx) => ({
@@ -2339,7 +2215,7 @@ const TallyTools = () => {
                         const wsBalance = XLSX.utils.json_to_sheet(balanceData);
                         XLSX.utils.book_append_sheet(wb, wsBalance, "Balance Mismatches");
                       }
-                      
+
                       // Name Mismatches Sheet
                       if (openingBalanceMatching.comparisonResult.nameMismatches.length > 0) {
                         const nameData = openingBalanceMatching.comparisonResult.nameMismatches.map((row, idx) => ({
@@ -2353,10 +2229,10 @@ const TallyTools = () => {
                         const wsName = XLSX.utils.json_to_sheet(nameData);
                         XLSX.utils.book_append_sheet(wb, wsName, "Ledger Name Mismatches");
                       }
-                      
+
                       const fileName = `Balance_Comparison_${new Date().toISOString().split('T')[0]}.xlsx`;
                       XLSX.writeFile(wb, fileName);
-                      
+
                       toast({
                         title: "Excel Downloaded",
                         description: `${fileName} has been downloaded`,
@@ -2410,6 +2286,7 @@ const TallyTools = () => {
 
 const GSTTools = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   return (
     <div className="space-y-6">
@@ -2423,8 +2300,8 @@ const GSTTools = () => {
                 To use GST tools, you'll need to authenticate with the GST portal using your credentials or API access.
               </p>
             </div>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="sm"
               className="bg-white dark:bg-gray-800 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-900/30 shrink-0"
               onClick={() => toast({ title: "GST Authentication", description: "GST portal authentication will be available soon" })}
@@ -2442,7 +2319,7 @@ const GSTTools = () => {
           description="Download GSTR1 reports directly from GST portal for audit and reconciliation purposes."
           icon={<Download className="h-5 w-5 text-primary" />}
           status="available"
-          onClick={() => window.location.href = '/gstr1-integration'}
+          onClick={() => navigate('/gstr1-integration')}
         />
         <ToolCard
           title="Reconcile with Books"
@@ -2625,7 +2502,7 @@ const PDFTools = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
-  
+
   // Split PDF specific state
   const [splitMode, setSplitMode] = useState<'range' | 'every' | 'specific'>('range');
   const [pageRange, setPageRange] = useState({ start: 1, end: 1 });
@@ -2633,9 +2510,9 @@ const PDFTools = () => {
   const [specificPages, setSpecificPages] = useState('');
   const [totalPages, setTotalPages] = useState<number | null>(null);
 
-  const toolsConfig: Record<string, { 
-    title: string; 
-    accept: string; 
+  const toolsConfig: Record<string, {
+    title: string;
+    accept: string;
     multiple: boolean;
     description: string;
   }> = {
@@ -2724,17 +2601,17 @@ const PDFTools = () => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const files = Array.from(e.dataTransfer.files);
       const config = selectedTool ? toolsConfig[selectedTool] : null;
-      
+
       if (config) {
         const validFiles = files.filter(file => {
           const ext = '.' + file.name.split('.').pop()?.toLowerCase();
           return config.accept.split(',').some(accept => accept.trim() === ext);
         });
-        
+
         if (validFiles.length > 0) {
           if (config.multiple) {
             setSelectedFiles(validFiles);
@@ -2782,7 +2659,7 @@ const PDFTools = () => {
     }
 
     setIsProcessing(true);
-    
+
     try {
       if (selectedTool === "Merge PDFs") {
         // Merge PDF functionality
@@ -2802,17 +2679,17 @@ const PDFTools = () => {
         // Process each PDF file
         for (let i = 0; i < selectedFiles.length; i++) {
           const file = selectedFiles[i];
-          
+
           try {
             // Read the file as array buffer
             const arrayBuffer = await file.arrayBuffer();
-            
+
             // Load the PDF
             const pdf = await PDFDocument.load(arrayBuffer);
-            
+
             // Get all pages from the PDF
             const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-            
+
             // Add each page to the merged PDF
             pages.forEach((page) => {
               mergedPdf.addPage(page);
@@ -2833,7 +2710,7 @@ const PDFTools = () => {
         const mergedPdfBytes = await mergedPdf.save();
 
         // Create a blob and download
-        const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+        const blob = new Blob([new Uint8Array(mergedPdfBytes)], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -2879,7 +2756,7 @@ const PDFTools = () => {
             // Extract page range
             const start = Math.max(1, Math.min(pageRange.start, pageCount));
             const end = Math.max(start, Math.min(pageRange.end, pageCount));
-            
+
             if (start > end) {
               toast({
                 title: "Invalid range",
@@ -2907,21 +2784,21 @@ const PDFTools = () => {
 
             // Create multiple PDFs, each with splitEvery pages
             const baseFileName = file.name.replace('.pdf', '');
-            
+
             for (let startPage = 0; startPage < pageCount; startPage += splitEvery) {
               const endPage = Math.min(startPage + splitEvery - 1, pageCount - 1);
               const newPdf = await PDFDocument.create();
-              
-              const pages = await newPdf.copyPages(sourcePdf, 
+
+              const pages = await newPdf.copyPages(sourcePdf,
                 Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i)
               );
-              
+
               pages.forEach((page) => {
                 newPdf.addPage(page);
               });
 
               const pdfBytes = await newPdf.save();
-              const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+              const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;
@@ -2988,18 +2865,18 @@ const PDFTools = () => {
           });
 
           const pdfBytes = await newPdf.save();
-          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          
+
           let fileName = file.name.replace('.pdf', '');
           if (splitMode === 'range') {
             a.download = `${fileName}_pages_${pageRange.start}_to_${pageRange.end}.pdf`;
           } else {
             a.download = `${fileName}_extracted_pages.pdf`;
           }
-          
+
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
@@ -3080,20 +2957,19 @@ const PDFTools = () => {
           title="Convert Word to PDF"
           description="Convert Microsoft Word documents (.doc, .docx) to PDF format."
           icon={<FileType className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Word to PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Convert Excel to PDF"
           description="Convert Microsoft Excel spreadsheets (.xls, .xlsx) to PDF format."
           icon={<FileSpreadsheet className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Excel to PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Redact Personal Information"
           description="Automatically detect and redact PII like Aadhaar, PAN, bank account numbers from documents."
           icon={<Eye className="h-5 w-5 text-primary" />}
-          status="beta"
-          onClick={() => handleToolClick("Redact PII")}
+          status="coming-soon"
         />
         <ToolCard
           title="OCR - Extract Text from PDF"
@@ -3105,7 +2981,7 @@ const PDFTools = () => {
           title="Compress PDF"
           description="Reduce PDF file size while maintaining quality for easier sharing and storage."
           icon={<FilePlus className="h-5 w-5 text-primary" />}
-          onClick={() => handleToolClick("Compress PDF")}
+          status="coming-soon"
         />
         <ToolCard
           title="Add Watermark"
@@ -3129,7 +3005,7 @@ const PDFTools = () => {
               {config?.description}
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
             {/* File Drop Zone */}
             <div
@@ -3437,43 +3313,43 @@ export default function AuditTools() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="flex flex-wrap h-auto gap-1 bg-muted/50 p-1">
-          <TabsTrigger 
-            value="tally" 
+          <TabsTrigger
+            value="tally"
             className="flex items-center gap-2"
           >
             <Database className="h-4 w-4" />
             Tally Tools
           </TabsTrigger>
-          <TabsTrigger 
-            value="gst" 
+          <TabsTrigger
+            value="gst"
             className="flex items-center gap-2"
           >
             <Receipt className="h-4 w-4" />
             GST Related
           </TabsTrigger>
-          <TabsTrigger 
-            value="mca" 
+          <TabsTrigger
+            value="mca"
             className="flex items-center gap-2"
           >
             <Building2 className="h-4 w-4" />
             MCA Data
           </TabsTrigger>
-          <TabsTrigger 
-            value="incometax" 
+          <TabsTrigger
+            value="incometax"
             className="flex items-center gap-2"
           >
             <FileText className="h-4 w-4" />
             Income Tax
           </TabsTrigger>
-          <TabsTrigger 
-            value="pdf" 
+          <TabsTrigger
+            value="pdf"
             className="flex items-center gap-2"
           >
             <FileType className="h-4 w-4" />
             PDF Tools
           </TabsTrigger>
-          <TabsTrigger 
-            value="analytics" 
+          <TabsTrigger
+            value="analytics"
             className="flex items-center gap-2"
           >
             <Calculator className="h-4 w-4" />
