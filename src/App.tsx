@@ -150,7 +150,7 @@ const App = () => (
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <AuditPrograms />
+                        <AuditExecution />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -160,17 +160,7 @@ const App = () => (
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <AuditProgramNew />
-                      </MainLayout>
-                    </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
-                  path="/procedures/:procedureId/workpaper"
-                  element={
-                    <ProtectedEngagementRoute>
-                      <MainLayout>
-                        <ProcedureWorkpaper />
+                        <AuditExecution />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
