@@ -2,7 +2,9 @@
 
 ## Overview
 
-This document provides comprehensive documentation of the database architecture for the Audit Management System. The database is hosted on Lovable Cloud (Supabase-powered backend) and contains **63 tables** organized into logical domains.
+This document provides comprehensive documentation of the database architecture for the Audit Management System. The database is hosted on Lovable Cloud (Supabase-powered backend) and contains **64 tables** organized into logical domains.
+
+**Last Updated:** 2026-01-09
 
 ---
 
@@ -10,14 +12,88 @@ This document provides comprehensive documentation of the database architecture 
 
 1. [Core Domain Tables](#core-domain-tables)
 2. [Audit Workflow Tables](#audit-workflow-tables)
-3. [Audit Report Tables](#audit-report-tables)
-4. [Trial Balance Tables](#trial-balance-tables)
-5. [Going Concern Tables](#going-concern-tables)
-6. [Rule Engine Tables](#rule-engine-tables)
-7. [System & Configuration Tables](#system--configuration-tables)
-8. [Entity Relationship Diagram](#entity-relationship-diagram)
-9. [Table Dependencies](#table-dependencies)
-10. [RLS Policies Summary](#rls-policies-summary)
+3. [Audit Program Tables](#audit-program-tables)
+4. [Audit Report Tables](#audit-report-tables)
+5. [Trial Balance Tables](#trial-balance-tables)
+6. [Going Concern Tables](#going-concern-tables)
+7. [Rule Engine Tables](#rule-engine-tables)
+8. [Template Tables](#template-tables)
+9. [System & Configuration Tables](#system--configuration-tables)
+10. [Entity Relationship Diagram](#entity-relationship-diagram)
+11. [Table Dependencies](#table-dependencies)
+12. [RLS Policies Summary](#rls-policies-summary)
+13. [Helper Functions](#helper-functions)
+
+---
+
+## Complete Table List (64 Tables)
+
+| # | Table Name | Category |
+|---|------------|----------|
+| 1 | `activity_logs` | System |
+| 2 | `aile_mapping_rules` | Rule Engine |
+| 3 | `aile_rule_sets` | Rule Engine |
+| 4 | `audit_procedures` | Audit Workflow |
+| 5 | `audit_program_attachments` | Audit Program |
+| 6 | `audit_program_boxes` | Audit Program |
+| 7 | `audit_program_sections` | Audit Program |
+| 8 | `audit_programs_new` | Audit Program |
+| 9 | `audit_report_comments` | Audit Report |
+| 10 | `audit_report_document_versions` | Audit Report |
+| 11 | `audit_report_documents` | Audit Report |
+| 12 | `audit_report_evidence` | Audit Report |
+| 13 | `audit_report_exports` | Audit Report |
+| 14 | `audit_report_main_content` | Audit Report |
+| 15 | `audit_report_setup` | Audit Report |
+| 16 | `audit_trail` | System |
+| 17 | `caro_clause_library` | Audit Report |
+| 18 | `caro_clause_responses` | Audit Report |
+| 19 | `caro_standard_answers` | Audit Report |
+| 20 | `clients` | Core |
+| 21 | `engagement_assignments` | Core |
+| 22 | `engagement_letter_templates` | Audit Program |
+| 23 | `engagements` | Core |
+| 24 | `evidence_files` | Audit Workflow |
+| 25 | `evidence_links` | Audit Workflow |
+| 26 | `feedback_attachments` | System |
+| 27 | `feedback_reports` | System |
+| 28 | `financial_years` | Core |
+| 29 | `firm_settings` | Core |
+| 30 | `fs_templates` | System |
+| 31 | `gc_annexure_borrowings` | Going Concern |
+| 32 | `gc_annexure_cash_flows` | Going Concern |
+| 33 | `gc_annexure_net_worth` | Going Concern |
+| 34 | `gc_annexure_profitability` | Going Concern |
+| 35 | `gc_annexure_ratios` | Going Concern |
+| 36 | `going_concern_checklist_items` | Going Concern |
+| 37 | `going_concern_workpapers` | Going Concern |
+| 38 | `key_audit_matters` | Audit Report |
+| 39 | `notifications` | System |
+| 40 | `partners` | Core |
+| 41 | `procedure_assignees` | Audit Workflow |
+| 42 | `procedure_checklist_items` | Audit Workflow |
+| 43 | `procedure_evidence_requirements` | Audit Workflow |
+| 44 | `procedure_template_checklist_items` | Template |
+| 45 | `procedure_template_evidence_requirements` | Template |
+| 46 | `profiles` | Core |
+| 47 | `review_notes` | Audit Workflow |
+| 48 | `risks` | Audit Workflow |
+| 49 | `rule_engine_group_rules` | Rule Engine |
+| 50 | `rule_engine_keyword_rules` | Rule Engine |
+| 51 | `rule_engine_override_rules` | Rule Engine |
+| 52 | `rule_engine_validation_rules` | Rule Engine |
+| 53 | `schedule_iii_config` | Trial Balance |
+| 54 | `standard_procedures` | Template |
+| 55 | `standard_programs` | Template |
+| 56 | `tally_bridge_requests` | System |
+| 57 | `tally_bridge_sessions` | System |
+| 58 | `tb_new_classification_mappings` | Trial Balance |
+| 59 | `tb_new_entity_info` | Trial Balance |
+| 60 | `tb_new_ledgers` | Trial Balance |
+| 61 | `tb_new_sessions` | Trial Balance |
+| 62 | `tb_new_stock_items` | Trial Balance |
+| 63 | `trial_balance_lines` | Trial Balance |
+| 64 | `user_roles` | Core |
 
 ---
 
@@ -136,6 +212,7 @@ Audit engagement master data.
 | status | text | NO | 'planning' | Status: planning/fieldwork/review/completion |
 | partner_id | uuid | YES | - | FK → profiles.user_id |
 | manager_id | uuid | YES | - | FK → profiles.user_id |
+| firm_id | uuid | YES | - | FK → firm_settings.id |
 | materiality_amount | numeric | YES | - | Overall materiality |
 | performance_materiality | numeric | YES | - | Performance materiality |
 | trivial_threshold | numeric | YES | - | Trivial threshold |
@@ -150,6 +227,7 @@ Audit engagement master data.
 - `client_id` → `clients.id`
 - `partner_id` → `profiles.user_id`
 - `manager_id` → `profiles.user_id`
+- `firm_id` → `firm_settings.id`
 
 ---
 
@@ -296,8 +374,18 @@ Uploaded evidence files.
 | workpaper_ref | text | YES | - | Workpaper reference |
 | approval_stage | text | NO | 'draft' | Approval stage |
 | uploaded_by | uuid | NO | - | Uploader |
-| prepared_by/reviewed_by/approved_by | uuid | YES | - | Approval chain |
+| prepared_by | uuid | YES | - | Preparer |
+| prepared_at | timestamptz | YES | - | Prep timestamp |
+| reviewed_by | uuid | YES | - | Reviewer |
+| reviewed_at | timestamptz | YES | - | Review timestamp |
+| approved_by | uuid | YES | - | Approver |
+| approved_at | timestamptz | YES | - | Approval timestamp |
 | locked | boolean | NO | false | Lock status |
+| locked_by | uuid | YES | - | Who locked |
+| locked_at | timestamptz | YES | - | Lock timestamp |
+| unlocked_by | uuid | YES | - | Who unlocked |
+| unlocked_at | timestamptz | YES | - | Unlock timestamp |
+| unlock_reason | text | YES | - | Unlock reason |
 | created_at | timestamptz | NO | now() | Creation timestamp |
 | updated_at | timestamptz | NO | now() | Update timestamp |
 
@@ -388,13 +476,18 @@ Structured audit programs.
 |--------|------|----------|---------|-------------|
 | id | uuid | NO | gen_random_uuid() | Primary key |
 | engagement_id | uuid | NO | - | FK → engagements.id |
-| client_id | uuid | NO | - | FK → clients.id |
-| financial_year_id | uuid | NO | - | FK → financial_years.id |
+| client_id | uuid | YES | - | FK → clients.id |
+| financial_year_id | uuid | YES | - | FK → financial_years.id |
 | name | text | NO | - | Program name |
 | description | text | YES | - | Description |
 | workpaper_reference | text | YES | - | Workpaper ref |
 | status | text | NO | 'draft' | Status |
-| prepared_by/reviewed_by/approved_by | uuid | YES | - | Approval chain |
+| prepared_by | uuid | YES | - | Preparer |
+| prepared_at | timestamptz | YES | - | Prep timestamp |
+| reviewed_by | uuid | YES | - | Reviewer |
+| reviewed_at | timestamptz | YES | - | Review timestamp |
+| approved_by | uuid | YES | - | Approver |
+| approved_at | timestamptz | YES | - | Approval timestamp |
 | created_by | uuid | NO | - | Creator |
 | created_at | timestamptz | YES | now() | Creation timestamp |
 | updated_at | timestamptz | YES | now() | Update timestamp |
@@ -411,6 +504,9 @@ Sections within audit programs.
 | name | text | NO | - | Section name |
 | order | integer | NO | 0 | Display order |
 | is_expanded | boolean | YES | false | UI state |
+| is_applicable | boolean | YES | true | Applicability |
+| status | text | YES | - | Section status |
+| locked | boolean | YES | false | Lock status |
 | created_at | timestamptz | YES | now() | Creation timestamp |
 | updated_at | timestamptz | YES | now() | Update timestamp |
 
@@ -426,6 +522,8 @@ Content boxes within sections.
 | header | text | NO | - | Box header |
 | content | text | YES | '' | Box content |
 | order | integer | NO | 0 | Display order |
+| status | text | YES | - | Box status |
+| locked | boolean | YES | false | Lock status |
 | created_by | uuid | NO | - | Creator |
 | created_at | timestamptz | YES | now() | Creation timestamp |
 | updated_at | timestamptz | YES | now() | Update timestamp |
@@ -452,9 +550,40 @@ Attachments for audit programs.
 
 ---
 
+### 22. `engagement_letter_templates` *(NEW)*
+Templates for engagement letters in the Planning module.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | uuid | NO | gen_random_uuid() | Primary key |
+| template_type | text | NO | - | Type: statutory_audit/tax_audit/internal_audit/limited_review |
+| template_name | text | NO | - | Human-readable template name |
+| template_description | text | YES | - | Optional description |
+| file_content | text | NO | - | Base64-encoded file content |
+| file_name | text | NO | - | Original file name |
+| file_size_bytes | integer | YES | - | File size in bytes |
+| mime_type | text | YES | - | MIME type of file |
+| available_variables | jsonb | YES | - | Available merge variables |
+| version_number | integer | NO | 1 | Auto-incrementing version |
+| is_active | boolean | NO | true | Active status |
+| uploaded_by | uuid | NO | - | Who uploaded |
+| uploaded_at | timestamptz | NO | now() | Upload timestamp |
+| updated_by | uuid | YES | - | Who last updated |
+| updated_at | timestamptz | NO | now() | Update timestamp |
+| admin_notes | text | YES | - | Admin-only notes |
+
+**Template Types:** `statutory_audit`, `tax_audit`, `internal_audit`, `limited_review`
+
+**Indexes:**
+- `idx_engagement_letter_templates_type` on `template_type`
+- `idx_engagement_letter_templates_active` on `is_active`
+- `idx_engagement_letter_templates_uploaded_by` on `uploaded_by`
+
+---
+
 ## Audit Report Tables
 
-### 22. `audit_report_setup`
+### 23. `audit_report_setup`
 Audit report configuration.
 
 | Column | Type | Nullable | Default | Description |
@@ -488,7 +617,7 @@ Audit report configuration.
 
 ---
 
-### 23. `audit_report_main_content`
+### 24. `audit_report_main_content`
 Main audit report content and opinions.
 
 | Column | Type | Nullable | Default | Description |
@@ -506,6 +635,10 @@ Main audit report content and opinions.
 | include_kam | boolean | YES | false | Include KAM |
 | is_finalized | boolean | YES | false | Finalized |
 | version_number | integer | YES | 1 | Version |
+| firm_name | text | YES | - | Firm name |
+| firm_registration_no | text | YES | - | Firm reg no |
+| partner_name | text | YES | - | Partner name |
+| membership_no | text | YES | - | Membership no |
 | created_by | text | NO | - | Creator |
 | created_at | timestamptz | YES | now() | Creation timestamp |
 | updated_at | timestamptz | YES | now() | Update timestamp |
@@ -514,7 +647,7 @@ Main audit report content and opinions.
 
 ---
 
-### 24. `audit_report_documents`
+### 25. `audit_report_documents`
 Versioned document sections.
 
 | Column | Type | Nullable | Default | Description |
@@ -533,7 +666,78 @@ Versioned document sections.
 
 ---
 
-### 25. `key_audit_matters`
+### 26. `audit_report_document_versions`
+Version history for documents.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | uuid | NO | gen_random_uuid() | Primary key |
+| document_id | uuid | NO | - | FK → audit_report_documents.id |
+| version_number | integer | NO | - | Version number |
+| content_json | jsonb | YES | - | Content snapshot |
+| content_html | text | YES | - | HTML snapshot |
+| change_reason | text | YES | - | Change reason |
+| changed_by | uuid | NO | - | Who made change |
+| created_at | timestamptz | NO | now() | Creation timestamp |
+
+---
+
+### 27. `audit_report_comments`
+Comments on audit report sections.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | uuid | NO | gen_random_uuid() | Primary key |
+| engagement_id | uuid | NO | - | FK → engagements.id |
+| document_id | uuid | YES | - | FK → audit_report_documents.id |
+| clause_id | text | YES | - | Clause reference |
+| comment_text | text | NO | - | Comment content |
+| comment_type | text | YES | - | Comment type |
+| status | text | YES | 'open' | Status |
+| assigned_to | uuid | YES | - | Assignee |
+| response_text | text | YES | - | Response |
+| resolved_by | uuid | YES | - | Resolver |
+| resolved_at | timestamptz | YES | - | Resolution time |
+| created_by | uuid | NO | - | Creator |
+| created_at | timestamptz | NO | now() | Creation timestamp |
+
+---
+
+### 28. `audit_report_evidence`
+Evidence linked to audit report.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | uuid | NO | gen_random_uuid() | Primary key |
+| engagement_id | uuid | NO | - | FK → engagements.id |
+| clause_id | text | YES | - | Clause reference |
+| evidence_file_id | uuid | YES | - | FK → evidence_files.id |
+| working_paper_ref | text | YES | - | WP reference |
+| description | text | YES | - | Description |
+| notes | text | YES | - | Notes |
+| uploaded_by | uuid | NO | - | Uploader |
+| uploaded_at | timestamptz | NO | now() | Upload time |
+
+---
+
+### 29. `audit_report_exports`
+Export history for reports.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | uuid | NO | gen_random_uuid() | Primary key |
+| engagement_id | uuid | NO | - | FK → engagements.id |
+| export_type | text | NO | - | Export format |
+| export_version | integer | NO | - | Export version |
+| file_name | text | YES | - | File name |
+| file_path | text | YES | - | Storage path |
+| is_final | boolean | YES | false | Is final export |
+| created_by | uuid | NO | - | Creator |
+| created_at | timestamptz | NO | now() | Creation timestamp |
+
+---
+
+### 30. `key_audit_matters`
 Key Audit Matters (KAM).
 
 | Column | Type | Nullable | Default | Description |
@@ -550,7 +754,7 @@ Key Audit Matters (KAM).
 
 ---
 
-### 26-28. CARO Tables
+### 31-33. CARO Tables
 
 #### `caro_clause_library`
 Master library of CARO clauses.
@@ -563,6 +767,9 @@ Master library of CARO clauses.
 | negative_wording | Negative reporting template |
 | na_wording | Not applicable template |
 | questions | JSONB - Follow-up questions |
+| applicability_conditions | JSONB - Applicability rules |
+| evidence_checklist | JSONB - Required evidence |
+| reviewer_prompts | JSONB - Reviewer guidance |
 
 #### `caro_clause_responses`
 Engagement-specific CARO responses.
@@ -574,16 +781,25 @@ Engagement-specific CARO responses.
 | is_applicable | Applicability status |
 | conclusion_text | Final conclusion |
 | answers | JSONB - Question answers |
+| table_data | JSONB - Tabular data |
 | status | not_started/in_progress/completed |
+| approval chain | prepared_by, reviewed_by, approved_by |
 
 #### `caro_standard_answers`
 Firm-level standard CARO templates.
+
+| Key Columns | Description |
+|-------------|-------------|
+| clause_id | CARO clause reference |
+| positive_wording | Custom positive template |
+| negative_wording | Custom negative template |
+| na_wording | Custom N/A template |
 
 ---
 
 ## Trial Balance Tables
 
-### 29. `trial_balance_lines`
+### 34. `trial_balance_lines`
 Main trial balance data (v1 - Schedule III focused).
 
 | Column | Type | Nullable | Default | Description |
@@ -616,7 +832,7 @@ Main trial balance data (v1 - Schedule III focused).
 
 ---
 
-### 30. `schedule_iii_config`
+### 35. `schedule_iii_config`
 Schedule III configuration per engagement.
 
 | Column | Type | Nullable | Default | Description |
@@ -631,7 +847,7 @@ Schedule III configuration per engagement.
 
 ---
 
-### 31-34. Trial Balance New Tables (v2)
+### 36-40. Trial Balance New Tables (v2)
 
 #### `tb_new_entity_info`
 Entity information for TB New module.
@@ -671,7 +887,7 @@ Saved workspaces/sessions.
 
 ## Going Concern Tables
 
-### 35. `going_concern_workpapers`
+### 41. `going_concern_workpapers`
 Main going concern workpaper.
 
 | Column | Type | Nullable | Default | Description |
@@ -683,14 +899,19 @@ Main going concern workpaper.
 | topic | text | YES | 'Going Concern' | Topic |
 | conclusion | text | YES | - | Overall conclusion |
 | status | text | YES | 'draft' | Status |
-| prepared_by/reviewed_by/approved_by | uuid | YES | - | Approval chain |
+| prepared_by | uuid | YES | - | Preparer |
+| prepared_at | timestamptz | YES | - | Prep timestamp |
+| reviewed_by | uuid | YES | - | Reviewer |
+| reviewed_at | timestamptz | YES | - | Review timestamp |
+| approved_by | uuid | YES | - | Approver |
+| approved_at | timestamptz | YES | - | Approval timestamp |
 | created_by | uuid | NO | - | Creator |
 | created_at | timestamptz | NO | now() | Creation timestamp |
 | updated_at | timestamptz | NO | now() | Update timestamp |
 
 ---
 
-### 36. `going_concern_checklist_items`
+### 42. `going_concern_checklist_items`
 Checklist items for going concern.
 
 | Key Columns | Description |
@@ -705,7 +926,7 @@ Checklist items for going concern.
 
 ---
 
-### 37-41. Going Concern Annexures
+### 43-47. Going Concern Annexures
 
 | Table | Purpose |
 |-------|---------|
@@ -721,7 +942,7 @@ All annexures reference `going_concern_workpapers.id` via `workpaper_id`.
 
 ## Rule Engine Tables
 
-### 42. `aile_rule_sets`
+### 48. `aile_rule_sets`
 Rule set containers.
 
 | Column | Type | Nullable | Default | Description |
@@ -737,7 +958,7 @@ Rule set containers.
 
 ---
 
-### 43. `aile_mapping_rules`
+### 49. `aile_mapping_rules`
 AILE/FS area mapping rules.
 
 | Key Columns | Description |
@@ -755,7 +976,7 @@ AILE/FS area mapping rules.
 
 ---
 
-### 44-47. Additional Rule Tables
+### 50-53. Additional Rule Tables
 
 | Table | Purpose |
 |-------|---------|
@@ -768,7 +989,7 @@ AILE/FS area mapping rules.
 
 ## Template Tables
 
-### 48. `standard_programs`
+### 54. `standard_programs`
 Standard audit program templates.
 
 | Column | Type | Nullable | Default | Description |
@@ -785,7 +1006,7 @@ Standard audit program templates.
 
 ---
 
-### 49. `standard_procedures`
+### 55. `standard_procedures`
 Standard procedure templates.
 
 | Key Columns | Description |
@@ -800,7 +1021,7 @@ Standard procedure templates.
 
 ---
 
-### 50-51. Procedure Template Items
+### 56-57. Procedure Template Items
 
 | Table | Purpose |
 |-------|---------|
@@ -811,7 +1032,7 @@ Standard procedure templates.
 
 ## System Tables
 
-### 52. `activity_logs`
+### 58. `activity_logs`
 System activity/audit trail.
 
 | Column | Type | Nullable | Default | Description |
@@ -822,7 +1043,7 @@ System activity/audit trail.
 | action | text | NO | - | Action performed |
 | entity | text | NO | - | Entity type |
 | entity_id | uuid | YES | - | Entity ID |
-| engagement_id | uuid | YES | - | FK ? engagements.id (nullable) |
+| engagement_id | uuid | YES | - | Related engagement |
 | details | text | YES | - | Action details |
 | metadata | jsonb | YES | '{}' | Additional metadata |
 | ip_address | text | YES | - | IP address |
@@ -830,56 +1051,7 @@ System activity/audit trail.
 
 ---
 
-### 53. `feedback_reports`
-Product feedback submissions.
-
-| Column | Type | Nullable | Default | Description |
-|--------|------|----------|---------|-------------|
-| id | uuid | NO | gen_random_uuid() | Primary key |
-| firm_id | uuid | YES | - | FK ? firm_settings.id |
-| firm_name | text | YES | - | Firm name snapshot |
-| user_id | uuid | YES | - | FK ? profiles.user_id |
-| user_name | text | YES | - | Submitter name |
-| user_email | text | YES | - | Submitter email |
-| user_mobile | text | YES | - | Submitter phone |
-| feedback_type | text | NO | - | Bug / Improve / New Feature |
-| module_area | text | NO | - | Module / area |
-| title | text | NO | - | Summary (5?120 chars) |
-| description | text | NO | - | Full description |
-| impact | text | NO | - | Low / Medium / High |
-| severity | text | YES | - | Bug severity |
-| reproducibility | text | YES | - | Always / Sometimes / Once |
-| steps_to_reproduce | text | YES | - | Steps |
-| expected_result | text | YES | - | Expected behavior |
-| actual_result | text | YES | - | Actual behavior |
-| suggestion | text | YES | - | Improvement / desired outcome |
-| business_justification | text | YES | - | Business rationale |
-| app_version | text | YES | - | App version |
-| build_number | text | YES | - | Build number |
-| device_details | text | YES | - | Browser/OS/device |
-| platform_details | text | YES | - | Platform info |
-| submitted_at | timestamptz | NO | now() | Submission time |
-| submitted_at_ist | timestamptz | YES | - | IST timestamp |
-| status | text | NO | 'submitted' | Workflow status |
-
----
-
-### 54. `feedback_attachments`
-Attachment metadata for feedback.
-
-| Column | Type | Nullable | Default | Description |
-|--------|------|----------|---------|-------------|
-| id | uuid | NO | gen_random_uuid() | Primary key |
-| feedback_id | uuid | NO | - | FK ? feedback_reports.id |
-| file_name | text | NO | - | File name |
-| file_path | text | NO | - | Storage path |
-| file_size | bigint | NO | - | File size |
-| mime_type | text | YES | - | MIME type |
-| created_at | timestamptz | NO | now() | Uploaded at |
-
----
-
-### 55. `audit_trail`
+### 59. `audit_trail`
 Detailed change history.
 
 | Column | Type | Nullable | Default | Description |
@@ -897,7 +1069,7 @@ Detailed change history.
 
 ---
 
-### 56. `fs_templates`
+### 60. `fs_templates`
 Financial statement templates.
 
 | Key Columns | Description |
@@ -908,12 +1080,21 @@ Financial statement templates.
 
 ---
 
-### 57-58. Tally Bridge Tables
+### 61-62. Tally Bridge Tables
 
 | Table | Purpose |
 |-------|---------|
 | `tally_bridge_sessions` | Active Tally connections |
 | `tally_bridge_requests` | Tally XML request queue |
+
+---
+
+### 63-64. Feedback Tables
+
+| Table | Purpose |
+|-------|---------|
+| `feedback_reports` | User feedback and bug reports |
+| `feedback_attachments` | Attachments for feedback |
 
 ---
 
@@ -1014,7 +1195,7 @@ Financial statement templates.
 | Table | Depends On |
 |-------|------------|
 | `profiles` | `firm_settings` |
-| `engagements` | `clients`, `profiles` |
+| `engagements` | `clients`, `profiles`, `firm_settings` |
 | `engagement_assignments` | `engagements` |
 | `audit_procedures` | `engagements`, `profiles`, `standard_procedures` |
 | `procedure_assignees` | `audit_procedures` |
@@ -1028,9 +1209,14 @@ Financial statement templates.
 | `audit_program_sections` | `audit_programs_new` |
 | `audit_program_boxes` | `audit_program_sections` |
 | `audit_program_attachments` | `audit_programs_new`, `audit_program_sections`, `audit_program_boxes` |
+| `engagement_letter_templates` | None (standalone) |
 | `audit_report_setup` | `engagements`, `partners` |
 | `audit_report_main_content` | `engagements` |
 | `audit_report_documents` | `engagements` |
+| `audit_report_document_versions` | `audit_report_documents` |
+| `audit_report_comments` | `engagements`, `audit_report_documents` |
+| `audit_report_evidence` | `engagements`, `evidence_files` |
+| `audit_report_exports` | `engagements` |
 | `key_audit_matters` | `engagements` |
 | `caro_clause_responses` | `engagements` |
 | `trial_balance_lines` | `engagements` |
@@ -1043,18 +1229,30 @@ Financial statement templates.
 | `procedure_template_*` | `standard_procedures` |
 | `tb_new_ledgers` | `engagements`, `tb_new_entity_info` |
 | `tb_new_stock_items` | `engagements`, `tb_new_entity_info` |
+| `feedback_attachments` | `feedback_reports` |
 
 ---
 
 ## RLS Policies Summary
 
-The database has **172 RLS policies** enforcing access control:
+The database has **180+ RLS policies** enforcing access control across all tables.
+
+### Helper Functions Used
+
+| Function | Purpose |
+|----------|---------|
+| `has_role(user_id, role)` | Check if user has specific role |
+| `has_engagement_access(user_id, engagement_id)` | Check engagement access |
+| `get_user_firm_id()` | Get current user's firm ID |
+| `is_admin_user(user_id)` | Check if user is a partner |
+| `is_manager_or_above(user_id)` | Check if user is manager or partner |
 
 ### Key Access Patterns
 
 1. **Engagement-based Access**
    - Most tables use `has_engagement_access(auth.uid(), engagement_id)` function
    - Users can only access data for engagements they're assigned to
+   - Firm-based access via `get_user_firm_id()` for shared visibility
 
 2. **Role-based Permissions**
    - `has_role(auth.uid(), 'partner')` - Partner-only actions
@@ -1065,14 +1263,143 @@ The database has **172 RLS policies** enforcing access control:
    - `auth.uid() = created_by` for insert operations
    - Ensures users can only create records for themselves
 
-### Policy Examples
+4. **Firm-based Access** *(NEW)*
+   - `firm_id = get_user_firm_id()` for multi-tenant data isolation
+   - Applied to engagements and related tables
+
+### Detailed Policy Matrix
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |-------|--------|--------|--------|--------|
-| engagements | has_engagement_access | created_by = auth.uid() | has_engagement_access | partner/manager only |
-| audit_procedures | engagement access | engagement access | engagement access | partner/manager only |
-| risks | engagement access | created_by + access | engagement access | partner/manager only |
-| profiles | authenticated | via trigger | own profile | admin only |
+| **Core Tables** | | | | |
+| `profiles` | authenticated | via trigger | own profile | admin only |
+| `user_roles` | authenticated | trigger only | trigger only | - |
+| `firm_settings` | authenticated | partner/manager | partner/manager | - |
+| `partners` | authenticated | partner/manager | partner/manager | partner only |
+| `clients` | authenticated | partner/manager | partner/manager | partner only |
+| `engagements` | firm_id match OR assigned | created_by = auth.uid() | firm_id match OR assigned | partner/manager |
+| `engagement_assignments` | authenticated | partner/manager | partner/manager | partner/manager |
+| `financial_years` | authenticated | partner/manager | partner/manager | partner/manager |
+| **Audit Workflow** | | | | |
+| `audit_procedures` | engagement access | engagement access | engagement access | partner/manager |
+| `procedure_assignees` | via procedure access | via procedure access | partner/manager | partner/manager |
+| `procedure_checklist_items` | via procedure access | via procedure access | via procedure access | partner/manager |
+| `procedure_evidence_requirements` | via procedure access | via procedure access | via procedure access | partner/manager |
+| `evidence_files` | engagement access | uploader + access | engagement access | uploader + access |
+| `evidence_links` | via procedure access | via procedure access | - | own links OR partner/manager |
+| `risks` | engagement access | created_by + access | engagement access | partner/manager |
+| `review_notes` | engagement access | engagement access | engagement access | partner/manager |
+| `notifications` | own notifications | any authenticated | own notifications | own notifications |
+| **Audit Program** | | | | |
+| `audit_programs_new` | firm_id match OR assigned | created_by + engagement access | firm_id match OR assigned | creator OR partner |
+| `audit_program_sections` | via program access | via program access | via program access | creator OR partner |
+| `audit_program_boxes` | via section access | via section access | via section access | creator OR partner |
+| `audit_program_attachments` | via program access | via program access | uploader OR partner/manager | uploader OR partner |
+| `engagement_letter_templates` | active templates OR manager+ | partner only | partner only | partner only |
+| **Audit Report** | | | | |
+| `audit_report_setup` | engagement access | engagement access | engagement access | - |
+| `audit_report_main_content` | engagement access | engagement access | engagement access | engagement access |
+| `audit_report_documents` | engagement access | engagement access | engagement access | engagement access |
+| `audit_report_document_versions` | via document access | via document access | - | - |
+| `audit_report_comments` | engagement access | engagement access | engagement access | engagement access |
+| `audit_report_evidence` | engagement access | engagement access | engagement access | engagement access |
+| `audit_report_exports` | engagement access | engagement access | - | - |
+| `key_audit_matters` | engagement access | engagement access | engagement access | engagement access |
+| `caro_clause_library` | authenticated | partner/manager | partner/manager | partner/manager |
+| `caro_clause_responses` | engagement access | engagement access | engagement access | engagement access |
+| `caro_standard_answers` | partner/manager | partner/manager | partner/manager | partner/manager |
+| **Trial Balance** | | | | |
+| `trial_balance_lines` | engagement access | engagement access | engagement access | engagement access |
+| `schedule_iii_config` | engagement access | engagement access | engagement access | engagement access |
+| `tb_new_*` | engagement access | engagement access | engagement access | engagement access |
+| **Going Concern** | | | | |
+| `going_concern_workpapers` | via assignment | via assignment | via assignment | via assignment |
+| `going_concern_checklist_items` | via workpaper access | via workpaper access | via workpaper access | via workpaper access |
+| `gc_annexure_*` | via workpaper access | via workpaper access | via workpaper access | via workpaper access |
+| **Rule Engine** | | | | |
+| `aile_rule_sets` | authenticated | partner/manager | partner/manager | partner/manager |
+| `aile_mapping_rules` | authenticated | partner/manager | partner/manager | partner/manager |
+| `rule_engine_*` | authenticated | partner/manager | partner/manager | partner/manager |
+| **Templates** | | | | |
+| `standard_programs` | authenticated | partner/manager | partner/manager | partner/manager |
+| `standard_procedures` | authenticated | partner/manager | partner/manager | partner/manager |
+| `procedure_template_*` | authenticated | partner/manager | partner/manager | partner/manager |
+| `fs_templates` | authenticated | authenticated | authenticated | authenticated |
+| **System** | | | | |
+| `activity_logs` | authenticated | own logs | - | partner/manager |
+| `audit_trail` | own OR partner/manager | own entry | - | - |
+| `tally_bridge_sessions` | public (temp) | public (temp) | public (temp) | public (temp) |
+| `tally_bridge_requests` | public (temp) | public (temp) | public (temp) | public (temp) |
+| `feedback_reports` | own OR partner | own | partner only | - |
+| `feedback_attachments` | via feedback access | via feedback access | - | - |
+
+---
+
+## Helper Functions
+
+### `has_role(user_id UUID, check_role app_role)`
+Checks if a user has a specific role.
+
+```sql
+CREATE FUNCTION public.has_role(user_id UUID, check_role app_role)
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.user_roles 
+    WHERE user_roles.user_id = $1 AND role = $2
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+```
+
+### `has_engagement_access(user_id UUID, engagement_id UUID)`
+Checks if a user has access to an engagement.
+
+```sql
+CREATE FUNCTION public.has_engagement_access(user_id UUID, engagement_id UUID)
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.engagements e
+    WHERE e.id = $2 AND (
+      e.created_by = $1 OR
+      e.partner_id = $1 OR
+      e.manager_id = $1 OR
+      EXISTS (
+        SELECT 1 FROM public.engagement_assignments ea
+        WHERE ea.engagement_id = e.id AND ea.user_id = $1
+      )
+    )
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+```
+
+### `get_user_firm_id()`
+Returns the firm_id of the currently authenticated user.
+
+```sql
+CREATE FUNCTION public.get_user_firm_id()
+RETURNS UUID AS $$
+  SELECT firm_id FROM public.profiles WHERE user_id = auth.uid();
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+```
+
+### `is_admin_user(user_id UUID)`
+Checks if a user is a partner (admin).
+
+```sql
+CREATE FUNCTION public.is_admin_user(user_id UUID)
+RETURNS BOOLEAN AS $$
+  SELECT has_role($1, 'partner');
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+```
+
+### `is_manager_or_above(user_id UUID)`
+Checks if a user is a manager or partner.
+
+```sql
+CREATE FUNCTION public.is_manager_or_above(user_id UUID)
+RETURNS BOOLEAN AS $$
+  SELECT has_role($1, 'partner') OR has_role($1, 'manager');
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+```
 
 ---
 
@@ -1081,6 +1408,7 @@ The database has **172 RLS policies** enforcing access control:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-01-08 | Initial documentation |
+| 1.1 | 2026-01-09 | Added `engagement_letter_templates` table, updated table count to 64, added complete table list, expanded RLS policies summary, added helper functions documentation, added `firm_id` to engagements |
 
 ---
 
@@ -1091,3 +1419,5 @@ The database has **172 RLS policies** enforcing access control:
 3. **Soft Deletes**: Some tables use `is_active` boolean instead of hard deletes
 4. **JSONB Fields**: Complex nested data stored in JSONB for flexibility
 5. **Denormalization**: Some fields like `client_name` in engagements are denormalized for performance
+6. **Multi-tenancy**: Firm-based isolation using `firm_id` and `get_user_firm_id()` function
+7. **Version Control**: Template tables use auto-incrementing version numbers
