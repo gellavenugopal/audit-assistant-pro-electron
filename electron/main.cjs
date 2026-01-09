@@ -100,43 +100,16 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('odbc-fetch-trial-balance', async (event, fromDate, toDate) => {
-  try {
-    if (!odbcConnection) {
-      return { success: false, error: 'Not connected to Tally ODBC' };
-    }
-    
-    // Note: Tally ODBC doesn't directly support date filtering in SELECT queries
-    // The balances returned are as of the current Tally date setting
-    // To get period-specific balances, Tally's date should be set before querying
-    // For now, we fetch all ledgers - the balances reflect Tally's current date context
-    
-    // Convert dates to Tally format (DD-MMM-YYYY) for potential future use
-    const formatDateForTally = (dateStr) => {
-      if (!dateStr) return null;
-      const d = new Date(dateStr);
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const day = String(d.getDate()).padStart(2, '0');
-      const month = months[d.getMonth()];
-      const year = d.getFullYear();
-      return `${day}-${month}-${year}`;
-    };
-    
-    const toDateFormatted = formatDateForTally(toDate);
-    console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
-    console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
-    
-    // First, get company name
-    let companyName = '';
     try {
       if (!odbcConnection) {
         return { success: false, error: 'Not connected to Tally ODBC' };
       }
-
+      
       // Note: Tally ODBC doesn't directly support date filtering in SELECT queries
       // The balances returned are as of the current Tally date setting
       // To get period-specific balances, Tally's date should be set before querying
       // For now, we fetch all ledgers - the balances reflect Tally's current date context
-
+      
       // Convert dates to Tally format (DD-MMM-YYYY) for potential future use
       const formatDateForTally = (dateStr) => {
         if (!dateStr) return null;
@@ -147,11 +120,11 @@ function registerIpcHandlers() {
         const year = d.getFullYear();
         return `${day}-${month}-${year}`;
       };
-
+      
       const toDateFormatted = formatDateForTally(toDate);
       console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
       console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
-
+      
       // First, get company name
       let companyName = '';
       try {
@@ -175,6 +148,32 @@ function registerIpcHandlers() {
 
       const result = await odbcConnection.query(query);
 
+      // Also fetch stock items to include opening stock
+      let stockItems = [];
+      let totalOpeningStock = 0;
+      let totalClosingStock = 0;
+      try {
+        const stockQuery = `
+          SELECT $Name, $OpeningValue, $ClosingValue
+          FROM StockItem
+        `;
+        const stockResult = await odbcConnection.query(stockQuery);
+        if (stockResult && stockResult.length > 0) {
+          stockItems = stockResult;
+          totalOpeningStock = stockResult.reduce((sum, row) => {
+            const val = parseFloat(row['$OpeningValue']) || 0;
+            return sum + Math.abs(val);
+          }, 0);
+          totalClosingStock = stockResult.reduce((sum, row) => {
+            const val = parseFloat(row['$ClosingValue']) || 0;
+            return sum + Math.abs(val);
+          }, 0);
+          console.log(`Trial Balance: Found ${stockResult.length} stock items. Opening Stock: ${totalOpeningStock}, Closing Stock: ${totalClosingStock}`);
+        }
+      } catch (stockErr) {
+        console.warn('Could not fetch stock items (may not be available):', stockErr.message);
+      }
+
       // Process the data to match the Excel template format
       // Parse numeric values properly - Tally may return strings
       const parseNumeric = (val) => {
@@ -197,51 +196,47 @@ function registerIpcHandlers() {
         isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
       }));
 
-      console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
+      // Add opening stock as a separate line item if stock items exist
+      // Check if there's already a Stock-in-Hand ledger
+      const hasStockLedger = processedData.some(line => 
+        line.primaryGroup?.toLowerCase().includes('stock') ||
+        line.accountHead?.toLowerCase().includes('stock-in-hand')
+      );
 
-      return { success: true, data: processedData, companyName };
+      if (totalOpeningStock > 0 && !hasStockLedger) {
+        // Add opening stock as a ledger entry
+        processedData.push({
+          accountHead: 'Opening Stock (from Stock Items)',
+          openingBalance: -totalOpeningStock, // Negative because it's an asset (debit balance in Tally convention)
+          totalDebit: 0,
+          totalCredit: 0,
+          closingBalance: -totalClosingStock, // Negative because it's an asset
+          accountCode: 'STOCK-OPENING',
+          branch: 'HO',
+          primaryGroup: 'Stock-in-Hand',
+          parent: 'Current Assets',
+          isRevenue: false,
+        });
+        console.log(`Trial Balance: Added opening stock entry: ${totalOpeningStock}`);
+      } else if (totalOpeningStock > 0 && hasStockLedger) {
+        console.log(`Trial Balance: Stock ledger already exists, opening stock value: ${totalOpeningStock}`);
+      }
+
+      console.log(`Trial Balance: Processed ${processedData.length} ledgers (including stock if applicable)`);
+
+      return { 
+        success: true, 
+        data: processedData, 
+        companyName,
+        stockInfo: {
+          itemCount: stockItems.length,
+          openingStock: totalOpeningStock,
+          closingStock: totalClosingStock
+        }
+      };
     } catch (error) {
       return { success: false, error: error.message };
     }
-    
-    const query = `
-      SELECT $Name, $_PrimaryGroup, $Parent, $IsRevenue, 
-             $OpeningBalance, $ClosingBalance, $DebitTotals, $CreditTotals,
-             $Code, $Branch
-      FROM Ledger
-      ORDER BY $_PrimaryGroup, $Name
-    `;
-    
-    const result = await odbcConnection.query(query);
-    
-    // Process the data to match the Excel template format
-    // Parse numeric values properly - Tally may return strings
-    const parseNumeric = (val) => {
-      if (val === null || val === undefined || val === '') return 0;
-      const num = parseFloat(val);
-      return isNaN(num) ? 0 : num;
-    };
-    
-    const processedData = result.map(row => ({
-      accountHead: row['$Name'] || '',
-      openingBalance: parseNumeric(row['$OpeningBalance']),
-      totalDebit: parseNumeric(row['$DebitTotals']),
-      totalCredit: parseNumeric(row['$CreditTotals']),
-      closingBalance: parseNumeric(row['$ClosingBalance']),
-      accountCode: row['$Code'] || '',
-      branch: row['$Branch'] || 'HO',
-      // Add hierarchy data
-      primaryGroup: row['$_PrimaryGroup'] || '',
-      parent: row['$Parent'] || '',
-      isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
-    }));
-    
-    console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
-    
-    return { success: true, data: processedData, companyName: companyName };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
 });
 
   ipcMain.handle('odbc-fetch-month-wise', async (event, fyStartYear, targetMonth) => {
