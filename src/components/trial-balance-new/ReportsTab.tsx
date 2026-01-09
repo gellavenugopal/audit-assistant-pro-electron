@@ -14,12 +14,12 @@ import { TrialBalanceLine } from '@/hooks/useTrialBalance';
 import { convertLedgerRowsToTrialBalanceLines } from '@/utils/trialBalanceNewAdapter';
 import { computePLNoteValues } from '@/utils/computePLNoteValues';
 import { computeBSNoteValues } from '@/utils/computeBSNoteValues';
-import { ScheduleIIIBalanceSheet } from '@/components/trial-balance/ScheduleIIIBalanceSheet';
-import { ScheduleIIIProfitLoss } from '@/components/trial-balance/ScheduleIIIProfitLoss';
-import { CashFlowStatement } from '@/components/trial-balance/CashFlowStatement';
-import { ChangesInInventoriesNote } from '@/components/trial-balance/ChangesInInventoriesNote';
-import { CostOfMaterialsConsumedNote } from '@/components/trial-balance/CostOfMaterialsConsumedNote';
-import { NotesManagementTab } from '@/components/trial-balance/capital-notes/NotesManagementTab';
+import { ScheduleIIIBalanceSheet } from '@/components/trial-balance-new/reports/ScheduleIIIBalanceSheet';
+import { ScheduleIIIProfitLoss } from '@/components/trial-balance-new/reports/ScheduleIIIProfitLoss';
+import { CashFlowStatement } from '@/components/trial-balance-new/reports/CashFlowStatement';
+import { ChangesInInventoriesNote } from '@/components/trial-balance-new/reports/pl-notes/ChangesInInventoriesNote';
+import { CostOfMaterialsConsumedNote } from '@/components/trial-balance-new/reports/pl-notes/CostOfMaterialsConsumedNote';
+import { NotesManagementTab } from '@/components/trial-balance-new/reports/capital-notes/NotesManagementTab';
 import { 
   RevenueFromOperationsNote,
   OtherIncomeNote,
@@ -27,11 +27,11 @@ import {
   FinanceCostNote,
   DepreciationNote,
   OtherExpensesNote 
-} from '@/components/trial-balance/pl-notes';
-import { FormatSelector } from '@/components/trial-balance/FormatSelector';
-import { NoteNumberSettings } from '@/components/trial-balance/NoteNumberSettings';
-import { EnhancedNoteNumberSettings } from '@/components/trial-balance/EnhancedNoteNumberSettings';
-import { NoteNumberSummary } from '@/components/trial-balance/NoteNumberSummary';
+} from '@/components/trial-balance-new/reports/pl-notes';
+import { FormatSelector } from '@/components/trial-balance-new/FormatSelector';
+import { NoteNumberSettings } from '@/components/trial-balance-new/NoteNumberSettings';
+import { EnhancedNoteNumberSettings } from '@/components/trial-balance-new/EnhancedNoteNumberSettings';
+import { NoteNumberSummary } from '@/components/trial-balance-new/NoteNumberSummary';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useToast } from '@/hooks/use-toast';

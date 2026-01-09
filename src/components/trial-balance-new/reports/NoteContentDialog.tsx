@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CostOfMaterialsConsumedNote } from './CostOfMaterialsConsumedNote';
-import { ChangesInInventoriesNote } from './ChangesInInventoriesNote';
-import { LedgerAnnexureContent } from './LedgerAnnexureDialog';
+import { CostOfMaterialsConsumedNote } from './pl-notes/CostOfMaterialsConsumedNote';
+import { ChangesInInventoriesNote } from './pl-notes/ChangesInInventoriesNote';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { NoteLedgerItem } from './ScheduleIIIProfitLoss';
 
 interface StockItem {
@@ -178,12 +178,32 @@ export function NoteContentDialog({
             <p className="text-sm text-muted-foreground mb-4">
               Ledger-wise details showing {ledgers.length} ledger(s) with total of {formatCurrency(total)}
             </p>
-            <LedgerAnnexureContent
-              ledgers={ledgers}
-              total={total}
-              formatCurrency={formatCurrency}
-              onExport={() => {}}
-            />
+            <div className="max-h-[400px] overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Ledger Name</TableHead>
+                    <TableHead>Group</TableHead>
+                    <TableHead className="text-right">Opening Balance</TableHead>
+                    <TableHead className="text-right">Closing Balance</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ledgers.map((ledger, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell>{ledger.ledgerName}</TableCell>
+                      <TableCell className="text-muted-foreground text-xs">{ledger.groupName}</TableCell>
+                      <TableCell className="text-right font-mono text-xs">{formatCurrency(ledger.openingBalance)}</TableCell>
+                      <TableCell className="text-right font-mono">{formatCurrency(ledger.closingBalance)}</TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="font-semibold border-t-2">
+                    <TableCell colSpan={3} className="text-right">Total:</TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(total)}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
           </div>
         )}
       </DialogContent>

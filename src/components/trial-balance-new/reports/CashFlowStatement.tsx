@@ -1,4 +1,10 @@
-import { TrialBalanceLine } from '@/hooks/useTrialBalance';
+/**
+ * Cash Flow Statement Component
+ * MIGRATION NOTE: Refactored to consume ONLY the unified ClassifiedLedger model (LedgerRow)
+ * from trial-balance-new. NO dependencies on old TrialBalanceLine, fs_area, or aile.
+ */
+
+import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import {
   Table,
   TableBody,
@@ -10,7 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 
 interface Props {
-  lines: TrialBalanceLine[];
+  lines: LedgerRow[];  // Changed from TrialBalanceLine to LedgerRow
 }
 
 interface LineItem {
@@ -32,67 +38,72 @@ export function CashFlowStatement({ lines }: Props) {
     return `₹${amount.toLocaleString('en-IN')}`;
   };
 
-  const getAmountByFsArea = (fsArea: string) => {
+  // Helper to get amount by H2/H3 classification (replaces fs_area)
+  const getAmountByH2 = (h2Value: string) => {
     return Math.abs(lines
-      .filter(l => l.fs_area === fsArea)
-      .reduce((sum, l) => sum + Number(l.closing_balance), 0));
+      .filter(l => l['H2'] === h2Value)
+      .reduce((sum, l) => sum + Number(l['Closing Balance']), 0));
   };
 
-  const getMovement = (fsArea: string) => {
+  const getMovementByH2 = (h2Value: string) => {
     return lines
-      .filter(l => l.fs_area === fsArea)
+      .filter(l => l['H2'] === h2Value)
       .reduce((sum, l) => {
-        const opening = Number(l.opening_balance);
-        const closing = Number(l.closing_balance);
+        const opening = Number(l['Opening Balance']);
+        const closing = Number(l['Closing Balance']);
         return sum + (closing - opening);
       }, 0);
   };
 
   // Operating Activities
-  const revenueFromOperations = getAmountByFsArea('Revenue');
+  const revenueFromOperations = getAmountByH2('Revenue from operations');
   const totalExpenses = Math.abs(lines
-    .filter(l => l.aile === 'Expense')
-    .reduce((sum, l) => sum + Number(l.closing_balance), 0));
+    .filter(l => l['H1'] === 'Profit and Loss' && 
+      ((l['H2'] || '').toLowerCase().includes('expense') || 
+       (l['H2'] || '').toLowerCase().includes('cost')))
+    .reduce((sum, l) => sum + Number(l['Closing Balance']), 0));
   
   const depreciation = lines
-    .filter(l => l.account_name.toLowerCase().includes('depreciation'))
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+    .filter(l => (l['Ledger Name'] || '').toLowerCase().includes('depreciation') ||
+                 (l['H3'] || '').toLowerCase().includes('depreciation'))
+    .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'])), 0);
 
   const profitBeforeTax = revenueFromOperations - totalExpenses;
   
   // Working capital changes
-  const receivablesChange = -getMovement('Receivables');
-  const inventoryChange = -getMovement('Inventory');
-  const payablesChange = getMovement('Payables');
+  const receivablesChange = -getMovementByH2('Trade receivables');
+  const inventoryChange = -getMovementByH2('Inventories');
+  const payablesChange = getMovementByH2('Trade payables');
   
   const cashFromOperations = profitBeforeTax + depreciation + receivablesChange + inventoryChange + payablesChange;
   
   const taxPaid = lines
-    .filter(l => l.account_name.toLowerCase().includes('tax'))
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance)), 0);
+    .filter(l => (l['Ledger Name'] || '').toLowerCase().includes('tax') ||
+                 (l['H3'] || '').toLowerCase().includes('tax'))
+    .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'])), 0);
 
   const netCashFromOperating = cashFromOperations - taxPaid;
 
   // Investing Activities
-  const fixedAssetsPurchase = -getMovement('Fixed Assets');
-  const investmentsChange = -getMovement('Investments');
+  const fixedAssetsPurchase = -getMovementByH2('Property, plant and equipment');
+  const investmentsChange = -getMovementByH2('Investments');
   const netCashFromInvesting = fixedAssetsPurchase + investmentsChange;
 
   // Financing Activities  
-  const borrowingsChange = getMovement('Borrowings');
-  const equityChange = getMovement('Equity');
-  const financeCharges = -getAmountByFsArea('Finance');
+  const borrowingsChange = getMovementByH2('Borrowings');
+  const equityChange = getMovementByH2('Equity share capital');
+  const financeCharges = -getAmountByH2('Finance costs');
   const netCashFromFinancing = borrowingsChange + equityChange + financeCharges;
 
   const netChange = netCashFromOperating + netCashFromInvesting + netCashFromFinancing;
 
   const openingCash = lines
-    .filter(l => l.fs_area === 'Cash')
-    .reduce((sum, l) => sum + Number(l.opening_balance), 0);
+    .filter(l => l['H2'] === 'Cash and cash equivalents')
+    .reduce((sum, l) => sum + Number(l['Opening Balance']), 0);
   
   const closingCash = lines
-    .filter(l => l.fs_area === 'Cash')
-    .reduce((sum, l) => sum + Number(l.closing_balance), 0);
+    .filter(l => l['H2'] === 'Cash and cash equivalents')
+    .reduce((sum, l) => sum + Number(l['Closing Balance']), 0);
 
   const items: LineItem[] = [
     { label: 'A. CASH FLOW FROM OPERATING ACTIVITIES', amount: 0, isHeader: true },

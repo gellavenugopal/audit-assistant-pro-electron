@@ -14,7 +14,7 @@ import Dashboard from "./pages/Dashboard";
 import StaffDashboard from "./pages/StaffDashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
-import TrialBalance from "./pages/TrialBalance";
+// import TrialBalance from "./pages/TrialBalance"; // DEPRECATED - Migrated to TrialBalanceNew
 import TrialBalanceNew from "./pages/TrialBalanceNew";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
@@ -85,12 +85,13 @@ const App = () => (
                     </ProtectedRoute>
                   }
                 />
+                {/* Old Trial Balance route - DEPRECATED, redirecting to new */}
                 <Route
                   path="/trial-balance"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <TrialBalance />
+                        <TrialBalanceNew />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
