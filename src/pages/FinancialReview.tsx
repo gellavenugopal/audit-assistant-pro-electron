@@ -135,7 +135,7 @@ function applyAutoH1H2Classification(rows: LedgerRow[]): LedgerRow[] {
   });
 }
 
-export default function TrialBalanceNew() {
+export default function FinancialReview() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
   const odbcConnection = useTallyODBC();
