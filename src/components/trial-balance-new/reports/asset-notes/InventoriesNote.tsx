@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { formatIndianNumber } from '@/utils/format';
+import { formatIndianNumber } from '@/utils/formatNumber';
 
 interface InventoriesNoteProps {
   stockData: any[];

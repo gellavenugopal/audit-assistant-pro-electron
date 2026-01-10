@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
-import { formatIndianNumber } from '@/utils/format';
+import { formatIndianNumber } from '@/utils/formatNumber';
 
 interface NonCurrentInvestmentsNoteProps {
   data: LedgerRow[];
