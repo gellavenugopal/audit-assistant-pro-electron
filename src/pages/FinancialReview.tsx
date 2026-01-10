@@ -135,7 +135,7 @@ function applyAutoH1H2Classification(rows: LedgerRow[]): LedgerRow[] {
   });
 }
 
-export default function TrialBalanceNew() {
+export default function FinancialReview() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
   const odbcConnection = useTallyODBC();
@@ -236,6 +236,8 @@ export default function TrialBalanceNew() {
   const [h1Filter, setH1Filter] = useState<string>('all');
   const [h2Filter, setH2Filter] = useState<string>('all');
   const [h3Filter, setH3Filter] = useState<string>('all');
+  const [h4Filter, setH4Filter] = useState<string>('all');
+  const [h5Filter, setH5Filter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [balanceFilter, setBalanceFilter] = useState<string>('all'); // all, positive, negative, zero
   const [fromDate, setFromDate] = useState<string>('2024-04-01');
@@ -244,6 +246,7 @@ export default function TrialBalanceNew() {
   const [isFetching, setIsFetching] = useState(false);
   const [isEntityDialogOpen, setIsEntityDialogOpen] = useState(false);
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number>(-1); // For shift+click range selection
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [isSingleEditDialogOpen, setIsSingleEditDialogOpen] = useState(false);
   const [editingLedger, setEditingLedger] = useState<LedgerRow | null>(null);
@@ -321,14 +324,24 @@ export default function TrialBalanceNew() {
   const filteredActualData = useMemo(() => {
     let filtered = actualData;
     
-    // Search filter
+    // UNIVERSAL SEARCH FILTER - Works on ALL columns including numeric
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(row => 
-        (row['Ledger Name'] || '').toLowerCase().includes(searchLower) ||
-        (row['Primary Group'] || '').toLowerCase().includes(searchLower) ||
-        (row['Parent Group'] || '').toLowerCase().includes(searchLower)
-      );
+      filtered = filtered.filter(row => {
+        // Build searchable string including ALL text and numeric columns
+        const searchableString = [
+          row['Ledger Name'] || '',
+          row['Primary Group'] || '',
+          row['Parent Group'] || '',
+          // Include numeric columns as formatted strings
+          (row['Opening Balance'] || 0).toString(),
+          (row['Debit'] || 0).toString(),
+          (row['Credit'] || 0).toString(),
+          (row['Closing Balance'] || 0).toString()
+        ].join('|').toLowerCase();
+        
+        return searchableString.includes(searchLower);
+      });
     }
     
     // Group filter
@@ -382,15 +395,30 @@ export default function TrialBalanceNew() {
   const filteredData = useMemo(() => {
     let filtered = currentData;
     
-    // Search filter
+    // UNIVERSAL SEARCH FILTER - Works on ALL columns including numeric
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(row => 
-        (row['Ledger Name'] || '').toLowerCase().includes(searchLower) ||
-        (row['Primary Group'] || '').toLowerCase().includes(searchLower) ||
-        (row['H1'] || '').toLowerCase().includes(searchLower) ||
-        (row['H2'] || '').toLowerCase().includes(searchLower)
-      );
+      filtered = filtered.filter(row => {
+        // Build searchable string including ALL text and numeric columns
+        const searchableString = [
+          row['Ledger Name'] || '',
+          row['Primary Group'] || '',
+          row['Parent Group'] || '',
+          row['H1'] || '',
+          row['H2'] || '',
+          row['H3'] || '',
+          row['H4'] || '',
+          row['H5'] || '',
+          row['Status'] || '',
+          // Include numeric columns as formatted strings
+          (row['Opening Balance'] || 0).toString(),
+          (row['Debit'] || 0).toString(),
+          (row['Credit'] || 0).toString(),
+          (row['Closing Balance'] || 0).toString()
+        ].join('|').toLowerCase();
+        
+        return searchableString.includes(searchLower);
+      });
     }
     
     // Status filter
@@ -411,6 +439,16 @@ export default function TrialBalanceNew() {
     // H3 filter
     if (h3Filter !== 'all') {
       filtered = filtered.filter(row => (row['H3'] || '') === h3Filter);
+    }
+    
+    // H4 filter
+    if (h4Filter !== 'all') {
+      filtered = filtered.filter(row => (row['H4'] || '') === h4Filter);
+    }
+    
+    // H5 filter
+    if (h5Filter !== 'all') {
+      filtered = filtered.filter(row => (row['H5'] || '') === h5Filter);
     }
     
     // Apply column filters
@@ -442,7 +480,158 @@ export default function TrialBalanceNew() {
     }
     
     return filtered;
-  }, [currentData, searchTerm, statusFilter, h1Filter, h2Filter, h3Filter, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection]);
+  }, [currentData, searchTerm, statusFilter, h1Filter, h2Filter, h3Filter, h4Filter, h5Filter, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection]);
+  
+  // Classification status counter
+  const classificationStatus = useMemo(() => {
+    const total = actualData.length; // Total rows in Actual TB
+    const classified = currentData.filter(row => row.H1 && row.H1.trim() !== '').length; // Rows with H1 filled
+    return {
+      total,
+      classified,
+      unclassified: total - classified,
+      percentageComplete: total > 0 ? Math.round((classified / total) * 100) : 0
+    };
+  }, [actualData, currentData]);
+  
+  // Selected rows that are in filtered view (for accurate bulk action count)
+  const selectedFilteredCount = useMemo(() => {
+    // Get indices of filtered rows
+    const filteredIndices = new Set(
+      filteredData.map(row => 
+        currentData.findIndex(r => r['Composite Key'] === row['Composite Key'])
+      ).filter(idx => idx !== -1)
+    );
+    
+    // Count how many selected indices are in filtered set
+    return Array.from(selectedRowIndices).filter(idx => filteredIndices.has(idx)).length;
+  }, [selectedRowIndices, filteredData, currentData]);
+  
+  // Exception Report - Detect balance anomalies
+  const exceptions = useMemo(() => {
+    const exceptionList: Array<{
+      ledgerName: string;
+      group: string;
+      opening: number;
+      debit: number;
+      credit: number;
+      closing: number;
+      reason: string;
+      severity: 'high' | 'medium' | 'low';
+    }> = [];
+    
+    currentData.forEach(row => {
+      const ledgerName = row['Ledger Name'] || '';
+      const parentGroup = (row['Parent Group'] || '').toLowerCase();
+      const primaryGroup = (row['Primary Group'] || '').toLowerCase();
+      const opening = row['Opening Balance'] || 0;
+      const debit = row['Debit'] || 0;
+      const credit = row['Credit'] || 0;
+      const closing = row['Closing Balance'] || 0;
+      
+      // Sundry Debtors with Credit balance
+      if ((parentGroup.includes('sundry debtors') || parentGroup.includes('sundry debtor') || 
+           primaryGroup.includes('sundry debtors') || primaryGroup.includes('sundry debtor')) && closing < 0) {
+        exceptionList.push({
+          ledgerName,
+          group: row['Parent Group'] || row['Primary Group'] || '',
+          opening, debit, credit, closing,
+          reason: 'Sundry Debtors with Credit balance',
+          severity: 'high'
+        });
+      }
+      
+      // Sundry Creditors with Debit balance
+      if ((parentGroup.includes('sundry creditors') || parentGroup.includes('sundry creditor') || 
+           primaryGroup.includes('sundry creditors') || primaryGroup.includes('sundry creditor')) && closing > 0) {
+        exceptionList.push({
+          ledgerName,
+          group: row['Parent Group'] || row['Primary Group'] || '',
+          opening, debit, credit, closing,
+          reason: 'Sundry Creditors with Debit balance',
+          severity: 'high'
+        });
+      }
+      
+      // Loans / Bank OD / CC with Debit balance (should be credit)
+      if ((parentGroup.includes('loan') || parentGroup.includes('bank od') || parentGroup.includes('bank o/d') ||
+           parentGroup.includes('cash credit') || parentGroup.includes('cc limit') ||
+           primaryGroup.includes('loan') || primaryGroup.includes('bank od') || primaryGroup.includes('cash credit')) && closing > 0) {
+        exceptionList.push({
+          ledgerName,
+          group: row['Parent Group'] || row['Primary Group'] || '',
+          opening, debit, credit, closing,
+          reason: 'Loans/Bank OD/CC with Debit balance',
+          severity: 'high'
+        });
+      }
+      
+      // Bank accounts with Credit balance (overdraft not in OD group)
+      if ((parentGroup.includes('bank account') || primaryGroup.includes('bank account')) && 
+          !parentGroup.includes('od') && !parentGroup.includes('o/d') && closing < 0) {
+        exceptionList.push({
+          ledgerName,
+          group: row['Parent Group'] || row['Primary Group'] || '',
+          opening, debit, credit, closing,
+          reason: 'Bank Account with Credit balance',
+          severity: 'medium'
+        });
+      }
+      
+      // Loans & Advances (Assets) with Credit balance
+      if ((parentGroup.includes('loans and advances') || parentGroup.includes('loans & advances') ||
+           primaryGroup.includes('loans and advances') || primaryGroup.includes('loans & advances')) && closing < 0) {
+        exceptionList.push({
+          ledgerName,
+          group: row['Parent Group'] || row['Primary Group'] || '',
+          opening, debit, credit, closing,
+          reason: 'Loans & Advances (Asset) with Credit balance',
+          severity: 'high'
+        });
+      }
+    });
+    
+    return exceptionList;
+  }, [currentData]);
+  
+  // Cascading dropdown options for H1-H5 (based on current selections)
+  const cascadingOptions = useMemo(() => {
+    // Get unique H1 values
+    const h1Options = Array.from(new Set(currentData.map(row => row['H1']).filter(v => v && v.trim() !== ''))).sort();
+    
+    // Get H2 values filtered by selected H1
+    const h2Options = h1Filter !== 'all' 
+      ? Array.from(new Set(currentData.filter(row => row['H1'] === h1Filter).map(row => row['H2']).filter(v => v && v.trim() !== ''))).sort()
+      : Array.from(new Set(currentData.map(row => row['H2']).filter(v => v && v.trim() !== ''))).sort();
+    
+    // Get H3 values filtered by selected H1 and H2
+    const h3Options = h2Filter !== 'all'
+      ? Array.from(new Set(currentData.filter(row => (h1Filter === 'all' || row['H1'] === h1Filter) && row['H2'] === h2Filter).map(row => row['H3']).filter(v => v && v.trim() !== ''))).sort()
+      : h1Filter !== 'all'
+      ? Array.from(new Set(currentData.filter(row => row['H1'] === h1Filter).map(row => row['H3']).filter(v => v && v.trim() !== ''))).sort()
+      : Array.from(new Set(currentData.map(row => row['H3']).filter(v => v && v.trim() !== ''))).sort();
+    
+    // Get H4 values filtered by selected H1, H2, and H3
+    const h4Options = h3Filter !== 'all'
+      ? Array.from(new Set(currentData.filter(row => 
+          (h1Filter === 'all' || row['H1'] === h1Filter) && 
+          (h2Filter === 'all' || row['H2'] === h2Filter) && 
+          row['H3'] === h3Filter
+        ).map(row => row['H4']).filter(v => v && v.trim() !== ''))).sort()
+      : Array.from(new Set(currentData.map(row => row['H4']).filter(v => v && v.trim() !== ''))).sort();
+    
+    // Get H5 values filtered by selected H1, H2, H3, and H4
+    const h5Options = h4Filter !== 'all'
+      ? Array.from(new Set(currentData.filter(row => 
+          (h1Filter === 'all' || row['H1'] === h1Filter) && 
+          (h2Filter === 'all' || row['H2'] === h2Filter) && 
+          (h3Filter === 'all' || row['H3'] === h3Filter) && 
+          row['H4'] === h4Filter
+        ).map(row => row['H5']).filter(v => v && v.trim() !== ''))).sort()
+      : Array.from(new Set(currentData.map(row => row['H5']).filter(v => v && v.trim() !== ''))).sort();
+    
+    return { h1Options, h2Options, h3Options, h4Options, h5Options };
+  }, [currentData, h1Filter, h2Filter, h3Filter, h4Filter]);
   
   // Totals calculation - based on active tab
   const totals = useMemo(() => {
@@ -562,18 +751,8 @@ export default function TrialBalanceNew() {
         return;
       }
       
-      // Convert to LedgerRow format - NEW LOGIC: show row only if NOT all 5 columns are zero
+      // Convert to LedgerRow format and apply hard filter for Actual TB
       const processedData: LedgerRow[] = lines
-        .filter(line => {
-          // Show row ONLY IF at least one column is non-zero
-          const opening = line.openingBalance || 0;
-          const debit = Math.abs(line.totalDebit || 0);
-          const credit = Math.abs(line.totalCredit || 0);
-          const closing = line.closingBalance || 0;
-          
-          // Hide only if ALL are zero
-          return !(opening === 0 && debit === 0 && credit === 0 && closing === 0);
-        })
         .map(line => ({
           'Ledger Name': line.accountHead,
           'Primary Group': line.primaryGroup || '',
@@ -585,21 +764,27 @@ export default function TrialBalanceNew() {
           'Closing Balance': line.closingBalance || 0,
           'Is Revenue': line.isRevenue ? 'Yes' : 'No',
           'Sheet Name': 'TB CY'
-        }));
+        }))
+        .filter(row => {
+          // HARD FILTER: Hide completely inactive ledgers (Opening=0 AND Debit=0 AND Credit=0 AND Closing=0)
+          const opening = row['Opening Balance'] || 0;
+          const debit = row['Debit'] || 0;
+          const credit = row['Credit'] || 0;
+          const closing = row['Closing Balance'] || 0;
+          return !(opening === 0 && debit === 0 && credit === 0 && closing === 0);
+        });
       
-      // Store actual data (unclassified)
+      // Store actual data (unclassified) - FILTERED DATA (no completely inactive ledgers)
       setActualData(processedData);
       
-      // For classification: Exclude rows where BOTH Opening=0 AND Closing=0
-      const dataToClassify = processedData.filter(row => {
-        const opening = row['Opening Balance'] || 0;
-        const closing = row['Closing Balance'] || 0;
-        // Include if either opening or closing is non-zero
-        return !(opening === 0 && closing === 0);
-      });
+      // Classify ALL data (no filtering before classification)
+      const classified = classifyDataframeBatch(processedData, savedMappings, businessType, constitution);
       
-      // Auto-classify the filtered data (now handles IsRevenue internally)
-      const classified = classifyDataframeBatch(dataToClassify, savedMappings, businessType, constitution);
+      // VALIDATION: Log data integrity
+      console.log(`[DATA INTEGRITY] Ingested: ${lines.length}, Processed: ${processedData.length}, Classified: ${classified.length}`);
+      if (processedData.length !== classified.length) {
+        console.error(`[CRITICAL] Data loss detected: ${processedData.length - classified.length} rows lost during classification`);
+      }
       
       // Import directly based on selected period type
       if (importPeriodType === 'current') {
@@ -884,30 +1069,29 @@ export default function TrialBalanceNew() {
   const toggleRowSelection = useCallback((index: number, event?: React.MouseEvent) => {
     setSelectedRowIndices(prev => {
       const newSet = new Set(prev);
-      if (event?.ctrlKey || event?.metaKey) {
-        // Toggle selection
+      
+      if (event?.shiftKey && lastSelectedIndex !== -1) {
+        // SHIFT+CLICK: Range selection from last selected to current
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        for (let i = start; i <= end; i++) {
+          newSet.add(i);
+        }
+      } else {
+        // REGULAR CLICK: Toggle single row selection
         if (newSet.has(index)) {
           newSet.delete(index);
         } else {
           newSet.add(index);
         }
-      } else if (event?.shiftKey && prev.size > 0) {
-        // Range selection
-        const indices = Array.from(prev);
-        const lastIndex = indices[indices.length - 1];
-        const start = Math.min(lastIndex, index);
-        const end = Math.max(lastIndex, index);
-        for (let i = start; i <= end; i++) {
-          newSet.add(i);
-        }
-      } else {
-        // Single selection
-        newSet.clear();
-        newSet.add(index);
       }
+      
       return newSet;
     });
-  }, []);
+    
+    // Update last selected index for shift+click
+    setLastSelectedIndex(index);
+  }, [lastSelectedIndex]);
 
   // Excel-like keyboard navigation
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
@@ -1882,21 +2066,21 @@ export default function TrialBalanceNew() {
             variant="outline"
             size="sm"
             onClick={() => {
-              if (selectedRowIndices.size === 0) {
+              if (selectedFilteredCount === 0) {
                 toast({
                   title: 'No Selection',
-                  description: 'Please select rows to update',
+                  description: 'Please select visible filtered rows to update',
                   variant: 'destructive'
                 });
                 return;
               }
               setIsBulkUpdateDialogOpen(true);
             }}
-            disabled={currentData.length === 0 || selectedRowIndices.size === 0}
+            disabled={currentData.length === 0 || selectedFilteredCount === 0}
             className="h-8"
           >
             <Settings className="w-3 h-3 mr-1.5" />
-            Update {selectedRowIndices.size > 0 && `(${selectedRowIndices.size})`}
+            Update {selectedFilteredCount > 0 && `(${selectedFilteredCount})`}
           </Button>
 
           {/* Export Dropdown */}
@@ -2111,9 +2295,9 @@ export default function TrialBalanceNew() {
 
           {/* Selection Info & Add Line */}
           <div className="flex items-center gap-2">
-            {selectedRowIndices.size > 0 && (
+            {selectedFilteredCount > 0 && (
               <Badge variant="default" className="h-9 px-3">
-                {selectedRowIndices.size} selected
+                {selectedFilteredCount} of {filteredData.length} selected
               </Badge>
             )}
             <Button 
@@ -2123,7 +2307,7 @@ export default function TrialBalanceNew() {
               className="h-9"
             >
               <Plus className="w-4 h-4 mr-1" />
-              Add Line
+              {activeTab === 'stock-items' ? 'Add Item' : 'Add Ledger'}
             </Button>
           </div>
         </div>
@@ -2137,26 +2321,26 @@ export default function TrialBalanceNew() {
         </div>
       
         {/* Modern Tabs Navigation */}
-        <div className="bg-white border-b">
+        <div className="bg-white border-b py-0.5">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="h-7 bg-transparent border-b-0 px-2 gap-0 rounded-none justify-start">
+            <TabsList className="h-6 bg-transparent border-b-0 px-2 gap-0 rounded-none justify-start">
               <TabsTrigger 
                 value="actual-tb"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 px-2 py-0"
               >
                 <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Actual TB
               </TabsTrigger>
               <TabsTrigger 
                 value="classified-tb"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
               >
                 <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Classified TB
               </TabsTrigger>
               <TabsTrigger 
                 value="stock-items"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
               >
                 <Package className="w-3 h-3 mr-1" />
                 Stock Items
@@ -2168,14 +2352,23 @@ export default function TrialBalanceNew() {
               </TabsTrigger>
               <TabsTrigger 
                 value="reports"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
               >
                 <FileText className="w-3 h-3 mr-1" />
                 Financial Statements
               </TabsTrigger>
               <TabsTrigger 
+                value="exceptions"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
+              >
+                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Exception Report
+              </TabsTrigger>
+              <TabsTrigger 
                 value="notes"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
               >
                 <FileText className="w-3 h-3 mr-1" />
                 Notes
@@ -2190,7 +2383,7 @@ export default function TrialBalanceNew() {
             
             {/* ACTUAL TRIAL BALANCE TAB */}
             <TabsContent value="actual-tb" className="mt-0 p-1">
-              <div className="border rounded overflow-hidden" style={{ height: 'calc(100vh - 180px)' }}>
+              <div className="border rounded overflow-y-auto" style={{ height: 'calc(100vh - 180px)' }}>
             <Table>
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
@@ -2441,6 +2634,129 @@ export default function TrialBalanceNew() {
 
             {/* CLASSIFIED TRIAL BALANCE TAB */}
             <TabsContent value="classified-tb" className="mt-0 p-4">
+              {/* Classification Status Banner */}
+              {classificationStatus.unclassified > 0 && (
+                <div className="flex items-center justify-between mb-2 p-2 bg-blue-50 border border-blue-200 rounded">
+                  <div className="flex items-center gap-2 text-sm text-blue-800">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Some ledgers are not yet classified</span>
+                  </div>
+                  <Badge variant="outline" className="text-xs bg-white">
+                    Classified: {classificationStatus.classified} / Total: {classificationStatus.total} ({classificationStatus.percentageComplete}%)
+                  </Badge>
+                </div>
+              )}
+              
+              {/* Cascading H1-H5 Filters */}
+              <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 border rounded flex-wrap">
+                <span className="text-xs font-semibold text-gray-700">Hierarchy Filters:</span>
+                
+                <Select value={h1Filter} onValueChange={(value) => {
+                  setH1Filter(value);
+                  if (value === 'all') {
+                    setH2Filter('all');
+                    setH3Filter('all');
+                    setH4Filter('all');
+                    setH5Filter('all');
+                  }
+                }}>
+                  <SelectTrigger className="w-[180px] h-7 text-xs">
+                    <SelectValue placeholder="H1 - All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">H1 - All</SelectItem>
+                    {cascadingOptions.h1Options.map(opt => (
+                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                
+                <Select value={h2Filter} onValueChange={(value) => {
+                  setH2Filter(value);
+                  if (value === 'all') {
+                    setH3Filter('all');
+                    setH4Filter('all');
+                    setH5Filter('all');
+                  }
+                }} disabled={h1Filter === 'all' && cascadingOptions.h2Options.length === 0}>
+                  <SelectTrigger className="w-[180px] h-7 text-xs">
+                    <SelectValue placeholder="H2 - All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">H2 - All</SelectItem>
+                    {cascadingOptions.h2Options.map(opt => (
+                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                
+                <Select value={h3Filter} onValueChange={(value) => {
+                  setH3Filter(value);
+                  if (value === 'all') {
+                    setH4Filter('all');
+                    setH5Filter('all');
+                  }
+                }} disabled={h2Filter === 'all' && cascadingOptions.h3Options.length === 0}>
+                  <SelectTrigger className="w-[180px] h-7 text-xs">
+                    <SelectValue placeholder="H3 - All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">H3 - All</SelectItem>
+                    {cascadingOptions.h3Options.map(opt => (
+                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                
+                <Select value={h4Filter} onValueChange={(value) => {
+                  setH4Filter(value);
+                  if (value === 'all') {
+                    setH5Filter('all');
+                  }
+                }} disabled={h3Filter === 'all' && cascadingOptions.h4Options.length === 0}>
+                  <SelectTrigger className="w-[180px] h-7 text-xs">
+                    <SelectValue placeholder="H4 - All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">H4 - All</SelectItem>
+                    {cascadingOptions.h4Options.map(opt => (
+                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                
+                <Select value={h5Filter} onValueChange={setH5Filter} disabled={h4Filter === 'all' && cascadingOptions.h5Options.length === 0}>
+                  <SelectTrigger className="w-[180px] h-7 text-xs">
+                    <SelectValue placeholder="H5 - All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">H5 - All</SelectItem>
+                    {cascadingOptions.h5Options.map(opt => (
+                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                
+                {(h1Filter !== 'all' || h2Filter !== 'all' || h3Filter !== 'all' || h4Filter !== 'all' || h5Filter !== 'all') && (
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="h-7 text-xs px-2"
+                    onClick={() => {
+                      setH1Filter('all');
+                      setH2Filter('all');
+                      setH3Filter('all');
+                      setH4Filter('all');
+                      setH5Filter('all');
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                )}
+              </div>
+              
               <div className="border rounded-lg overflow-hidden">
             <Table>
               <TableHeader className="sticky top-0 bg-white z-10">
@@ -2448,16 +2764,19 @@ export default function TrialBalanceNew() {
                   <TableHead className="w-12 sticky top-0 bg-white">
                     <input
                       type="checkbox"
-                      checked={selectedRowIndices.size === currentData.length && currentData.length > 0}
+                      checked={selectedFilteredCount === filteredData.length && filteredData.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          // Select all original indices
-                          setSelectedRowIndices(new Set(currentData.map((_, i) => i)));
+                          // Select all VISIBLE FILTERED rows
+                          const visibleIndices = filteredData.map(row => 
+                            currentData.findIndex(r => r['Composite Key'] === row['Composite Key'])
+                          ).filter(idx => idx !== -1);
+                          setSelectedRowIndices(new Set(visibleIndices));
                         } else {
                           setSelectedRowIndices(new Set());
                         }
                       }}
-                      title="Select All / Deselect All"
+                      title="Select All Visible / Deselect All"
                     />
                   </TableHead>
                   <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Ledger Name'] }}>
@@ -2846,6 +3165,136 @@ export default function TrialBalanceNew() {
                 entityType={entityType}
                 signingDetails={signingDetails}
               />
+            </TabsContent>
+            
+            {/* EXCEPTION REPORT TAB */}
+            <TabsContent value="exceptions" className="mt-0 p-4">
+              <div className="space-y-3">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold">Exception Report</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Review ledgers with unusual balance patterns based on group mappings
+                    </p>
+                  </div>
+                  <Badge variant={exceptions.length > 0 ? "destructive" : "outline"} className="text-xs">
+                    {exceptions.length} {exceptions.length === 1 ? 'Exception' : 'Exceptions'} Found
+                  </Badge>
+                </div>
+                
+                {/* Exception Table */}
+                {exceptions.length === 0 ? (
+                  <div className="border rounded-lg p-8 text-center">
+                    <svg className="w-16 h-16 mx-auto text-green-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <h3 className="text-lg font-semibold mb-2 text-green-700">No Exceptions Found</h3>
+                    <p className="text-muted-foreground">
+                      All ledgers have expected balance patterns based on their group classifications
+                    </p>
+                  </div>
+                ) : (
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-white z-10">
+                        <TableRow>
+                          <TableHead className="w-10 text-center">
+                            <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                          </TableHead>
+                          <TableHead>Ledger Name</TableHead>
+                          <TableHead>Group</TableHead>
+                          <TableHead className="text-right">Opening</TableHead>
+                          <TableHead className="text-right">Debit</TableHead>
+                          <TableHead className="text-right">Credit</TableHead>
+                          <TableHead className="text-right">Closing</TableHead>
+                          <TableHead>Issue</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {exceptions.map((exception, idx) => (
+                          <TableRow 
+                            key={idx} 
+                            className={cn(
+                              "cursor-pointer",
+                              exception.severity === 'high' ? 'bg-red-50 hover:bg-red-100' :
+                              exception.severity === 'medium' ? 'bg-yellow-50 hover:bg-yellow-100' :
+                              'bg-blue-50 hover:bg-blue-100'
+                            )}
+                            onClick={() => {
+                              // Find the ledger in Classified TB and switch to that tab
+                              const ledgerIndex = currentData.findIndex(
+                                row => row['Ledger Name'] === exception.ledgerName
+                              );
+                              if (ledgerIndex !== -1) {
+                                setActiveTab('classified');
+                                // Small delay to ensure tab switch happens first
+                                setTimeout(() => {
+                                  // Scroll to and highlight the row
+                                  const rowElement = document.querySelector(
+                                    `[data-ledger-row="${ledgerIndex}"]`
+                                  );
+                                  if (rowElement) {
+                                    rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  }
+                                }, 100);
+                              }
+                            }}
+                          >
+                            <TableCell className="text-center">
+                              {exception.severity === 'high' && (
+                                <Badge variant="destructive" className="text-[10px] px-1 py-0">High</Badge>
+                              )}
+                              {exception.severity === 'medium' && (
+                                <Badge className="text-[10px] px-1 py-0 bg-yellow-600">Med</Badge>
+                              )}
+                              {exception.severity === 'low' && (
+                                <Badge variant="outline" className="text-[10px] px-1 py-0">Low</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="font-medium">{exception.ledgerName}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{exception.group}</TableCell>
+                            <TableCell className="text-right font-mono text-sm">
+                              {exception.opening.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm">
+                              {exception.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm">
+                              {exception.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className={`text-right font-mono text-sm font-semibold ${exception.closing < 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                              {exception.closing.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className="text-xs">{exception.reason}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+                
+                {/* Legend */}
+                {exceptions.length > 0 && (
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground p-3 bg-gray-50 rounded border">
+                    <span className="font-semibold">Legend:</span>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="destructive" className="text-[10px] px-1 py-0">High</Badge>
+                      <span>= Requires immediate review</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Badge className="text-[10px] px-1 py-0 bg-yellow-600">Med</Badge>
+                      <span>= May need verification</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="outline" className="text-[10px] px-1 py-0">Low</Badge>
+                      <span>= Minor attention needed</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </TabsContent>
             
             <TabsContent value="notes" className="mt-0 p-4">

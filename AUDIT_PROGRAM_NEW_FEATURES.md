@@ -143,7 +143,7 @@
 4. **Smart Defaults**: Pre-fill fields with intelligent suggestions
 5. **Consistent UI**: Maintain consistent design patterns across all features
 6. **Contextual Help**: In-app tooltips and help documentation
-7. **Undo/Redo**: Support Ctrl+Z/Ctrl+Y for mistake recovery
+7. **Undo/Redo**: Support Ctrl+Shift+Z/Ctrl+Shift+Y for mistake recovery
 8. **Responsive Feedback**: Show loading states and success/error messages
 9. **Autofocus**: Automatically focus on relevant fields to save time
 10. **Progressive Disclosure**: Show advanced features only when needed

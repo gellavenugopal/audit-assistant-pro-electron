@@ -70,6 +70,21 @@ export function computePLNoteValues(
   data: LedgerRow[],
   stockData?: StockItem[]
 ): { noteValues: NoteValues; noteLedgers: NoteLedgersMap } {
+  // GUARD: Validate all data is properly classified
+  const unclassified = data.filter(row => 
+    !row.H1 || !row.H2 || !row.H3 || row.Status !== 'Mapped'
+  );
+  
+  if (unclassified.length > 0) {
+    console.error(
+      `[INTEGRITY ERROR] computePLNoteValues received ${unclassified.length} unclassified ledgers. ` +
+      `This should never happen! All data must be classified before reaching this function.`,
+      unclassified.map(r => r['Ledger Name'])
+    );
+    // Filter out unclassified to prevent corruption
+    data = data.filter(row => row.H1 && row.H2 && row.H3 && row.Status === 'Mapped');
+  }
+  
   const noteValues: NoteValues = {};
   const noteLedgers: NoteLedgersMap = {
     // Income

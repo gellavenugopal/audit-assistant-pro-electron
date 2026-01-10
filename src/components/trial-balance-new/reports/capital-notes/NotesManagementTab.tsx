@@ -76,10 +76,28 @@ export function NotesManagementTab({ lines, constitution, financialYear, clientN
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-2">
+      <style>{`
+        /* Dense BS Notes Styling */
+        .space-y-2 > div {
+          margin-bottom: 0.25rem !important;
+        }
+        .space-y-2 .card {
+          padding: 0.5rem !important;
+        }
+        .space-y-2 .card-header {
+          padding: 0.5rem !important;
+        }
+        .space-y-2 .card-content {
+          padding: 0.5rem !important;
+        }
+        .space-y-2 table td, .space-y-2 table th {
+          padding: 0.25rem 0.5rem !important;
+        }
+      `}</style>
       {/* Entity Info Header */}
-      <Card>
-        <CardHeader className="pb-4">
+      <Card className="p-2">
+        <CardHeader className="pb-2 pt-2">
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg flex items-center gap-2">

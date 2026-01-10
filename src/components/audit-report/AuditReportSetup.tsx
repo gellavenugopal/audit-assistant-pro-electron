@@ -337,10 +337,6 @@ export function AuditReportSetup({
                     <RadioGroupItem value="standalone" id="standalone" />
                     <Label htmlFor="standalone" className="font-normal">Standalone Financial Statements</Label>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="consolidated" id="consolidated" />
-                    <Label htmlFor="consolidated" className="font-normal">Consolidated Financial Statements</Label>
-                  </div>
                 </RadioGroup>
               </div>
 
@@ -353,10 +349,6 @@ export function AuditReportSetup({
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="AS" id="as" />
                     <Label htmlFor="as" className="font-normal">Accounting Standards (AS)</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Ind AS" id="indas" />
-                    <Label htmlFor="indas" className="font-normal">Indian Accounting Standards (Ind AS)</Label>
                   </div>
                 </RadioGroup>
               </div>

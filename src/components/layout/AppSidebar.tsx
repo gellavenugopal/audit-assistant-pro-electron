@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { reservedShortcutKeys } from '@/hooks/useKeyboardShortcuts';
 
 // Items that are always accessible
 const alwaysActiveItems = [
@@ -36,10 +37,9 @@ const alwaysActiveItems = [
 
 // Items that require an engagement to be selected
 const engagementDependentItems = [
-  { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
-  { name: 'Trial Balance New', href: '/trial-balance-new', icon: FileSpreadsheet },
-  { name: 'Appointment', href: '/appointment', icon: FileSignature },
-  { name: 'Materiality', href: '/materiality', icon: Calculator },
+  { name: 'Financial Review', href: '/financial-review', icon: FileSpreadsheet },
+  { name: 'Appointment & Eng Letter', href: '/appointment', icon: FileSignature },
+  { name: 'Materiality & Risk Assessment', href: '/materiality', icon: Calculator },
   { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
   { name: 'Audit Execution', href: '/audit-execution', icon: ClipboardList },
   { name: 'Evidence Vault', href: '/evidence', icon: FileCheck },
@@ -72,9 +72,19 @@ export function AppSidebar() {
 
   const renderName = (name: string) => {
     if (!name) return name;
+    const firstLetter = name[0];
+    const useDoubleUnderline = reservedShortcutKeys.has(firstLetter.toLowerCase());
+
     return (
       <>
-        <span className="underline underline-offset-2">{name[0]}</span>
+        <span
+          className={cn(
+            'underline underline-offset-2',
+            useDoubleUnderline && 'decoration-double'
+          )}
+        >
+          {firstLetter}
+        </span>
         <span>{name.slice(1)}</span>
       </>
     );

@@ -142,6 +142,21 @@ const H2_TO_FS_AREA: Record<string, string> = {
 export function computeBSNoteValues(
   data: LedgerRow[]
 ): { noteValues: BSNoteValues; noteLedgers: NoteLedgersMap } {
+  // GUARD: Validate all data is properly classified
+  const unclassified = data.filter(row => 
+    !row.H1 || !row.H2 || !row.H3 || row.Status !== 'Mapped'
+  );
+  
+  if (unclassified.length > 0) {
+    console.error(
+      `[INTEGRITY ERROR] computeBSNoteValues received ${unclassified.length} unclassified ledgers. ` +
+      `This should never happen! All data must be classified before reaching this function.`,
+      unclassified.map(r => r['Ledger Name'])
+    );
+    // Filter out unclassified to prevent corruption
+    data = data.filter(row => row.H1 && row.H2 && row.H3 && row.Status === 'Mapped');
+  }
+  
   const noteValues: BSNoteValues = {};
   const noteLedgers: NoteLedgersMap = {
     // Equity & Liabilities
@@ -186,28 +201,79 @@ export function computeBSNoteValues(
 
     const h1 = row['H1'] || '';
     const h2 = row['H2'] || '';
-    const ledgerName = row['Ledger Name'] || '';
+    const h3 = row['H3'] || '';
+    const h4 = row['H4'] || '';
+    const ledgerName = (row['Ledger Name'] || '').toLowerCase();
     const groupName = row['Group Name'] || '';
+    const primaryGroup = (row['Primary Group'] || '').toLowerCase();
     const openingBalance = row['Opening Balance'] || 0;
     const closingBalance = row['Closing Balance'] || 0;
 
     // Only process Balance Sheet items
     if (h1 !== 'Balance Sheet') return;
 
-    // Determine fs_area from H2 classification
-    const fsArea = H2_TO_FS_AREA[h2];
-    if (!fsArea) return;
-
-    // Get note key from fs_area
-    const noteKey = FS_AREA_TO_NOTE_KEY[fsArea];
+    // Enhanced matching for liability notes
+    let noteKey: string | undefined;
+    
+    // Reserves and Surplus - detailed matching
+    if (h4.toLowerCase().includes('reserve') || h4.toLowerCase().includes('surplus') ||
+        ledgerName.includes('capital reserve') || ledgerName.includes('securities premium') ||
+        ledgerName.includes('revaluation reserve') || ledgerName.includes('surplus')) {
+      noteKey = 'reserves';
+    }
+    // Long-term borrowings
+    else if ((h4.toLowerCase().includes('long') && (h4.toLowerCase().includes('borrowing') || h4.toLowerCase().includes('loan'))) ||
+        (ledgerName.includes('term loan') && !ledgerName.includes('short'))) {
+      noteKey = 'borrowings';
+    }
+    // Short-term borrowings
+    else if ((h4.toLowerCase().includes('short') && (h4.toLowerCase().includes('borrowing') || h4.toLowerCase().includes('loan'))) ||
+        ledgerName.includes('bank od') || ledgerName.includes('cash credit')) {
+      noteKey = 'shortTermBorrowings';
+    }
+    // Trade Payables
+    else if (h4.toLowerCase().includes('trade payable') || 
+        ledgerName.includes('sundry creditor') ||
+        primaryGroup.includes('sundry creditors')) {
+      // Check if MSME or Others
+      if (ledgerName.includes('msme') || h4.toLowerCase().includes('msme')) {
+        noteKey = 'payablesMSME';
+      } else {
+        noteKey = 'payables';
+      }
+    }
+    // Other Current Liabilities  
+    else if (h4.toLowerCase().includes('other current liabilit') ||
+        ledgerName.includes('statutory dues') || ledgerName.includes('tds payable') ||
+        ledgerName.includes('gst payable') || ledgerName.includes('pf dues') ||
+        ledgerName.includes('esi dues')) {
+      noteKey = 'otherCurrentLiabilities';
+    }
+    // Provisions
+    else if (h4.toLowerCase().includes('provision') || ledgerName.includes('provision for')) {
+      // Check if current or non-current based on H3
+      if (h3.toLowerCase().includes('current')) {
+        noteKey = 'provisionsCurrent';
+      } else {
+        noteKey = 'provisions';
+      }
+    }
+    // Fall back to H2 mapping if no detailed match found
+    else {
+      const fsArea = H2_TO_FS_AREA[h2];
+      if (fsArea) {
+        noteKey = FS_AREA_TO_NOTE_KEY[fsArea];
+      }
+    }
+    
     if (!noteKey) return;
 
     const ledgerItem: NoteLedgerItem = {
-      ledgerName,
+      ledgerName: row['Ledger Name'] || '',
       groupName,
       openingBalance,
       closingBalance,
-      classification: `${h2}${row['H3'] ? ' > ' + row['H3'] : ''}${row['H4'] ? ' > ' + row['H4'] : ''}`,
+      classification: `${h2}${h3 ? ' > ' + h3 : ''}${h4 ? ' > ' + h4 : ''}`,
     };
 
     // Add to ledger list

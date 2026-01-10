@@ -14,7 +14,7 @@ import Dashboard from "./pages/Dashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
 // import TrialBalance from "./pages/TrialBalance"; // DEPRECATED - Migrated to TrialBalanceNew
-import TrialBalanceNew from "./pages/TrialBalanceNew";
+import FinancialReview from "./pages/FinancialReview";
 import Appointment from "./pages/Appointment";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
@@ -91,17 +91,17 @@ const App = () => (
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <TrialBalanceNew />
+                        <FinancialReview />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
                 />
                 <Route
-                  path="/trial-balance-new"
+                  path="/financial-review"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <TrialBalanceNew />
+                        <FinancialReview />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
