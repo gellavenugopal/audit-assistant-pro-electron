@@ -21,6 +21,7 @@ import { ChangesInInventoriesNote } from '@/components/trial-balance-new/reports
 import { CostOfMaterialsConsumedNote } from '@/components/trial-balance-new/reports/pl-notes/CostOfMaterialsConsumedNote';
 import { NotesManagementTab } from '@/components/trial-balance-new/reports/capital-notes/NotesManagementTab';
 import { LiabilityNotesTab } from '@/components/trial-balance-new/reports/liability-notes/LiabilityNotesTab';
+import { FANotesTab } from '@/components/trial-balance-new/reports/fa-notes/FANotesTab';
 import { 
   RevenueFromOperationsNote,
   OtherIncomeNote,
@@ -351,6 +352,13 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               Liability Notes
             </TabsTrigger>
             <TabsTrigger 
+              value="fa-notes" 
+              className="h-6 px-3 text-xs font-medium rounded-sm data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-gray-600"
+            >
+              <Building2 className="w-3 h-3 mr-1.5" />
+              FA Notes
+            </TabsTrigger>
+            <TabsTrigger 
               value="pl-notes" 
               className="h-6 px-3 text-xs font-medium rounded-sm data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-gray-600"
             >
@@ -524,6 +532,19 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 data={data}
                 reportingScale={reportingScale}
                 startingNoteNumber={bsStartingNote + 1}
+              />
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="fa-notes" className="mt-2">
+          <div className="space-y-1">
+            {/* Fixed Assets Notes */}
+            <div className="bg-white rounded border p-2">
+              <FANotesTab 
+                data={data}
+                reportingScale={reportingScale}
+                startingNoteNumber={bsStartingNote + 2}
               />
             </div>
           </div>
