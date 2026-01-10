@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useResizableColumns } from '@/hooks/useResizableColumns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
@@ -190,6 +191,46 @@ export default function TrialBalanceNew() {
   
   // UI State
   const [activeTab, setActiveTab] = useState('actual-tb'); // Start with Actual TB tab
+  
+  // Column widths for resizable columns - Actual TB
+  const {
+    columnWidths: actualTbColumnWidths,
+    handleMouseDown: actualTbHandleMouseDown,
+    isResizing: actualTbIsResizing,
+    resizingColumn: actualTbResizingColumn
+  } = useResizableColumns({
+    'Ledger Name': 250,
+    'Parent Group': 250,
+    'Primary Group': 250,
+    'Opening Balance': 150,
+    'Debit': 150,
+    'Credit': 150,
+    'Closing Balance': 150,
+    'Is Revenue': 120
+  });
+  
+  // Column widths for resizable columns - Classified TB
+  const {
+    columnWidths: classifiedTbColumnWidths,
+    handleMouseDown: classifiedTbHandleMouseDown,
+    isResizing: classifiedTbIsResizing,
+    resizingColumn: classifiedTbResizingColumn
+  } = useResizableColumns({
+    'Ledger Name': 250,
+    'Parent Group': 250,
+    'Primary Group': 250,
+    'Opening Balance': 150,
+    'Debit': 150,
+    'Credit': 150,
+    'Closing Balance': 150,
+    'H1': 180,
+    'H2': 180,
+    'H3': 180,
+    'H4': 180,
+    'H5': 180,
+    'Status': 120
+  });
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [h1Filter, setH1Filter] = useState<string>('all');
@@ -1357,12 +1398,12 @@ export default function TrialBalanceNew() {
     input.click();
   }, [savedMappings, toast]);
 
-  // Excel Export
-  const handleExcelExport = useCallback(() => {
-    if (currentData.length === 0) {
+  // Excel Export - Actual TB
+  const handleExportActualTB = useCallback(() => {
+    if (filteredActualData.length === 0) {
       toast({
         title: 'No Data',
-        description: 'No data to export',
+        description: 'No Actual TB data to export',
         variant: 'destructive'
       });
       return;
@@ -1370,19 +1411,44 @@ export default function TrialBalanceNew() {
     
     try {
       const workbook = XLSX.utils.book_new();
-      const worksheet = XLSX.utils.json_to_sheet(currentData);
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Trial Balance');
+      const worksheet = XLSX.utils.json_to_sheet(filteredActualData);
       
-      if (currentStockData.length > 0) {
-        const stockWorksheet = XLSX.utils.json_to_sheet(currentStockData);
-        XLSX.utils.book_append_sheet(workbook, stockWorksheet, 'Stock Items');
+      // Set column widths based on current widths
+      worksheet['!cols'] = [
+        { wch: actualTbColumnWidths['Ledger Name'] / 7 },
+        { wch: actualTbColumnWidths['Primary Group'] / 7 },
+        { wch: actualTbColumnWidths['Parent Group'] / 7 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 15 }
+      ];
+      
+      // Apply Calibri font size 10 to all cells
+      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cell_address = { c: C, r: R };
+          const cell_ref = XLSX.utils.encode_cell(cell_address);
+          if (!worksheet[cell_ref]) continue;
+          worksheet[cell_ref].s = {
+            font: { name: 'Calibri', sz: 10 }
+          };
+        }
       }
       
-      XLSX.writeFile(workbook, `Trial_Balance_${new Date().toISOString().split('T')[0]}.xlsx`);
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Actual TB');
+      
+      // Generate filename with client name and timestamp
+      const clientName = currentEngagement?.client_name || 'Unknown';
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const filename = `TrialBalance_${clientName}_Actual_${timestamp}.xlsx`;
+      
+      XLSX.writeFile(workbook, filename);
       
       toast({
         title: 'Export Successful',
-        description: 'Data exported to Excel'
+        description: 'Actual TB exported to Excel'
       });
     } catch (error) {
       toast({
@@ -1391,7 +1457,84 @@ export default function TrialBalanceNew() {
         variant: 'destructive'
       });
     }
-  }, [currentData, currentStockData, toast]);
+  }, [filteredActualData, actualTbColumnWidths, currentEngagement, toast]);
+  
+  // Excel Export - Classified TB
+  const handleExportClassifiedTB = useCallback(() => {
+    if (filteredData.length === 0) {
+      toast({
+        title: 'No Data',
+        description: 'No Classified TB data to export',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
+    try {
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(filteredData);
+      
+      // Set column widths based on current widths
+      const colWidths = [
+        { wch: classifiedTbColumnWidths['Ledger Name'] / 7 },
+        { wch: classifiedTbColumnWidths['Primary Group'] / 7 },
+        { wch: classifiedTbColumnWidths['Parent Group'] / 7 },
+        { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+        { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }
+      ];
+      worksheet['!cols'] = colWidths;
+      
+      // Apply Calibri font size 10 to all cells
+      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cell_address = { c: C, r: R };
+          const cell_ref = XLSX.utils.encode_cell(cell_address);
+          if (!worksheet[cell_ref]) continue;
+          worksheet[cell_ref].s = {
+            font: { name: 'Calibri', sz: 10 }
+          };
+        }
+      }
+      
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Classified TB');
+      
+      if (currentStockData.length > 0) {
+        const stockWorksheet = XLSX.utils.json_to_sheet(currentStockData);
+        // Apply same formatting to stock sheet
+        const stockRange = XLSX.utils.decode_range(stockWorksheet['!ref'] || 'A1');
+        for (let R = stockRange.s.r; R <= stockRange.e.r; ++R) {
+          for (let C = stockRange.s.c; C <= stockRange.e.c; ++C) {
+            const cell_address = { c: C, r: R };
+            const cell_ref = XLSX.utils.encode_cell(cell_address);
+            if (!stockWorksheet[cell_ref]) continue;
+            stockWorksheet[cell_ref].s = {
+              font: { name: 'Calibri', sz: 10 }
+            };
+          }
+        }
+        XLSX.utils.book_append_sheet(workbook, stockWorksheet, 'Stock Items');
+      }
+      
+      // Generate filename with client name and timestamp
+      const clientName = currentEngagement?.client_name || 'Unknown';
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const filename = `TrialBalance_${clientName}_Classified_${timestamp}.xlsx`;
+      
+      XLSX.writeFile(workbook, filename);
+      
+      toast({
+        title: 'Export Successful',
+        description: 'Classified TB exported to Excel'
+      });
+    } catch (error) {
+      toast({
+        title: 'Export Failed',
+        description: error instanceof Error ? error.message : 'Failed to export',
+        variant: 'destructive'
+      });
+    }
+  }, [filteredData, currentStockData, classifiedTbColumnWidths, currentEngagement, toast]);
 
   // Save Session
   const handleSave = useCallback(() => {
@@ -1415,7 +1558,7 @@ export default function TrialBalanceNew() {
     setBalanceFilter('all');
   }, []);
 
-  // Clear Data
+  // Clear Data - clears both Actual TB and Classified TB
   const handleClear = useCallback(async () => {
     if (confirm('Are you sure you want to clear all data? This will clear both Actual TB and Classified TB.')) {
       try {
@@ -1425,10 +1568,23 @@ export default function TrialBalanceNew() {
           await trialBalanceDB.deleteLines(lineIds);
         }
         
-        // Clear state
+        // Clear all state
         setActualData([]);
         setCurrentData([]);
         setCurrentStockData([]);
+        setSelectedRowIndices(new Set());
+        
+        // Reset filters
+        setSearchTerm('');
+        setStatusFilter('all');
+        setH1Filter('all');
+        setH2Filter('all');
+        setH3Filter('all');
+        setGroupFilter('all');
+        setBalanceFilter('all');
+        setActualTbColumnFilters({});
+        setClassifiedTbColumnFilters({});
+        
         toast({
           title: 'Data Cleared',
           description: 'All Actual TB and Classified TB data has been cleared'
@@ -1762,9 +1918,14 @@ export default function TrialBalanceNew() {
                 <FileText className="w-3 h-3 mr-2" />
                 Generate Financial Statements
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleExcelExport}>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleExportActualTB}>
                 <Download className="w-3 h-3 mr-2" />
-                Export to Excel
+                Export Actual TB to Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportClassifiedTB}>
+                <Download className="w-3 h-3 mr-2" />
+                Export Classified TB to Excel
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -2047,7 +2208,7 @@ export default function TrialBalanceNew() {
                       title="Select All / Deselect All"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Ledger Name'] }}>
                     <div className="flex items-center gap-1">
                       Ledger Name
                       <ColumnFilter
@@ -2059,8 +2220,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleActualTbSort('Ledger Name', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => actualTbHandleMouseDown('Ledger Name', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Parent Group'] }}>
                     <div className="flex items-center gap-1">
                       Parent Group
                       <ColumnFilter
@@ -2072,8 +2239,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleActualTbSort('Parent Group', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => actualTbHandleMouseDown('Parent Group', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Primary Group'] }}>
                     <div className="flex items-center gap-1">
                       Primary Group
                       <ColumnFilter
@@ -2085,8 +2258,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleActualTbSort('Primary Group', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => actualTbHandleMouseDown('Primary Group', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Opening Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Opening
                       <ColumnFilter
@@ -2099,8 +2278,14 @@ export default function TrialBalanceNew() {
                         isNumeric
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => actualTbHandleMouseDown('Opening Balance', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Debit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Debit
                       <ColumnFilter
@@ -2113,8 +2298,14 @@ export default function TrialBalanceNew() {
                         isNumeric
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => actualTbHandleMouseDown('Debit', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Credit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Credit
                       <ColumnFilter
@@ -2127,8 +2318,14 @@ export default function TrialBalanceNew() {
                         isNumeric
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => actualTbHandleMouseDown('Credit', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Closing Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Closing
                       <ColumnFilter
@@ -2141,8 +2338,14 @@ export default function TrialBalanceNew() {
                         isNumeric
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => actualTbHandleMouseDown('Closing Balance', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Is Revenue'] }}>
                     <div className="flex items-center gap-1">
                       Is Revenue
                       <ColumnFilter
@@ -2154,6 +2357,12 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleActualTbSort('Is Revenue', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => actualTbHandleMouseDown('Is Revenue', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -2251,7 +2460,7 @@ export default function TrialBalanceNew() {
                       title="Select All / Deselect All"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Ledger Name'] }}>
                     <div className="flex items-center gap-1">
                       Ledger Name
                       <ColumnFilter
@@ -2263,8 +2472,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('Ledger Name', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('Ledger Name', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Parent Group'] }}>
                     <div className="flex items-center gap-1">
                       Parent Group
                       <ColumnFilter
@@ -2276,8 +2491,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('Parent Group', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('Parent Group', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Primary Group'] }}>
                     <div className="flex items-center gap-1">
                       Primary Group
                       <ColumnFilter
@@ -2289,8 +2510,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('Primary Group', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('Primary Group', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Opening Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Opening
                       <ColumnFilter
@@ -2303,8 +2530,14 @@ export default function TrialBalanceNew() {
                         isNumeric
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('Opening Balance', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Debit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Debit
                       <ColumnFilter
@@ -2317,8 +2550,14 @@ export default function TrialBalanceNew() {
                         isNumeric
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('Debit', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Credit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Credit
                       <ColumnFilter
@@ -2331,8 +2570,14 @@ export default function TrialBalanceNew() {
                         isNumeric
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('Credit', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white">
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Closing Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Closing
                       <ColumnFilter
@@ -2345,8 +2590,14 @@ export default function TrialBalanceNew() {
                         isNumeric
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('Closing Balance', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['H1'] }}>
                     <div className="flex items-center gap-1">
                       H1
                       <ColumnFilter
@@ -2358,8 +2609,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('H1', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('H1', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['H2'] }}>
                     <div className="flex items-center gap-1">
                       H2
                       <ColumnFilter
@@ -2371,8 +2628,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('H2', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('H2', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['H3'] }}>
                     <div className="flex items-center gap-1">
                       H3
                       <ColumnFilter
@@ -2384,8 +2647,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('H3', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('H3', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['H4'] }}>
                     <div className="flex items-center gap-1">
                       H4
                       <ColumnFilter
@@ -2397,8 +2666,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('H4', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('H4', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['H5'] }}>
                     <div className="flex items-center gap-1">
                       H5
                       <ColumnFilter
@@ -2410,8 +2685,14 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('H5', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('H5', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Status'] }}>
                     <div className="flex items-center gap-1">
                       Status
                       <ColumnFilter
@@ -2423,6 +2704,12 @@ export default function TrialBalanceNew() {
                         onSort={(dir) => handleClassifiedTbSort('Status', dir)}
                       />
                     </div>
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
+                      onMouseDown={(e) => classifiedTbHandleMouseDown('Status', e)}
+                      style={{ userSelect: 'none' }}
+                      title="Drag to resize column"
+                    />
                   </TableHead>
                 </TableRow>
               </TableHeader>

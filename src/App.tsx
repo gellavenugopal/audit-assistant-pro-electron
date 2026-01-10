@@ -13,7 +13,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import Dashboard from "./pages/Dashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
-import TrialBalance from "./pages/TrialBalance";
+// import TrialBalance from "./pages/TrialBalance"; // DEPRECATED - Migrated to TrialBalanceNew
 import TrialBalanceNew from "./pages/TrialBalanceNew";
 import Appointment from "./pages/Appointment";
 import Materiality from "./pages/Materiality";
@@ -85,12 +85,13 @@ const App = () => (
                     </ProtectedRoute>
                   }
                 />
+                {/* Old Trial Balance route - DEPRECATED, redirecting to new */}
                 <Route
                   path="/trial-balance"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <TrialBalance />
+                        <TrialBalanceNew />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }

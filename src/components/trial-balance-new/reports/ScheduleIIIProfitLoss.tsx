@@ -1,5 +1,15 @@
+/**
+ * Schedule III Profit & Loss Statement Component
+ * MIGRATION NOTE: Refactored to consume ONLY the unified ClassifiedLedger model (LedgerRow)
+ * from trial-balance-new. NO dependencies on old TrialBalanceLine, fs_area, or aile.
+ * All data comes from:
+ * - noteValues (computed from H2/H3 classification)
+ * - noteLedgers (ledger annexures with H1-H5 classification)
+ * - LedgerRow[] (for any additional period comparison if needed)
+ */
+
 import { useMemo, useState } from 'react';
-import { TrialBalanceLine } from '@/hooks/useTrialBalance';
+import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import {
   Table,
   TableBody,
@@ -44,8 +54,8 @@ export interface NoteLedgersMap {
 }
 
 interface Props {
-  currentLines: TrialBalanceLine[];
-  previousLines?: TrialBalanceLine[];
+  currentLines: LedgerRow[];  // Changed from TrialBalanceLine to LedgerRow
+  previousLines?: LedgerRow[]; // Changed from TrialBalanceLine to LedgerRow
   reportingScale?: string;
   constitution?: string;
   startingNoteNumber?: number;
@@ -123,17 +133,30 @@ export function ScheduleIIIProfitLoss({
   const formatLabel = getFormatLabel(constitution);
   const plFormat = getProfitLossFormat(constitution);
 
-  // Helper to get amount from lines by fs_area
-  const getAmountByFsArea = (lines: TrialBalanceLine[], fsArea: string): number => {
+  // Helper to get amount from lines by H2 classification (replaces fs_area)
+  // This is a FALLBACK only - primary source should be noteValues
+  const getAmountByH2 = (lines: LedgerRow[], h2Value: string): number => {
     if (!lines || !Array.isArray(lines)) return 0;
     return lines
-      .filter(l => l && l.fs_area === fsArea)
-      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+      .filter(l => l && l['H2'] === h2Value && l['H1'] === 'Profit and Loss')
+      .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'] || 0)), 0);
   };
 
-  // Calculate computed totals - Use note values when available, fallback to trial balance
-  const currentRevenue = noteValues.revenueFromOperations ?? getAmountByFsArea(currentLines, 'Revenue');
-  const currentOtherIncome = noteValues.otherIncome ?? getAmountByFsArea(currentLines, 'Other Income');
+  // Helper to get amount for tax items (Current Tax, Deferred Tax)
+  const getTaxAmount = (lines: LedgerRow[]): number => {
+    if (!lines || !Array.isArray(lines)) return 0;
+    return lines
+      .filter(l => l && l['H1'] === 'Profit and Loss' && (
+        (l['H2'] || '').toLowerCase().includes('tax') ||
+        (l['H3'] || '').toLowerCase().includes('current tax') ||
+        (l['H3'] || '').toLowerCase().includes('deferred tax')
+      ))
+      .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'] || 0)), 0);
+  };
+
+  // Calculate computed totals - Use note values when available, fallback to H2 classification
+  const currentRevenue = noteValues.revenueFromOperations ?? getAmountByH2(currentLines, 'Revenue from operations');
+  const currentOtherIncome = noteValues.otherIncome ?? getAmountByH2(currentLines, 'Other income');
   const currentTotalIncome = currentRevenue + currentOtherIncome;
   
   // Calculate Total Expenses from note values
@@ -169,19 +192,22 @@ export function ScheduleIIIProfitLoss({
   });
   
   const currentPBT = currentTotalIncome - currentTotalExpenses;
-  const currentTax = getAmountByFsArea(currentLines, 'Current Tax') + getAmountByFsArea(currentLines, 'Deferred Tax Expense');
+  const currentTax = getTaxAmount(currentLines);
   const currentPAT = currentPBT - currentTax;
 
-  const prevRevenue = getAmountByFsArea(previousLines, 'Revenue');
-  const prevOtherIncome = getAmountByFsArea(previousLines, 'Other Income');
+  const prevRevenue = getAmountByH2(previousLines, 'Revenue from operations');
+  const prevOtherIncome = getAmountByH2(previousLines, 'Other income');
   const prevTotalIncome = prevRevenue + prevOtherIncome;
   
+  // For previous period, sum all expense H2 categories
   const prevTotalExpenses = (previousLines || [])
-    .filter(l => l && l.aile === 'Expense')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+    .filter(l => l && l['H1'] === 'Profit and Loss' && 
+      ((l['H2'] || '').toLowerCase().includes('expense') || 
+       (l['H2'] || '').toLowerCase().includes('cost')))
+    .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'] || 0)), 0);
   
   const prevPBT = prevTotalIncome - prevTotalExpenses;
-  const prevTax = getAmountByFsArea(previousLines, 'Current Tax') + getAmountByFsArea(previousLines, 'Deferred Tax Expense');
+  const prevTax = getTaxAmount(previousLines);
   const prevPAT = prevPBT - prevTax;
 
   // Build display items with amounts and note numbers
@@ -190,6 +216,8 @@ export function ScheduleIIIProfitLoss({
     let noteCounter = startingNoteNumber;
 
     // Map fsArea to noteValues keys - includes both Income and Expense items
+    // NOTE: fsArea is still used in the format definition, but we map it to noteValues
+    // which are computed from H2/H3 classification, NOT from old trial balance
     const fsAreaToNoteKey: Record<string, string> = {
       // Income items
       'Revenue': 'revenueFromOperations',
@@ -223,10 +251,21 @@ export function ScheduleIIIProfitLoss({
           currentAmount = 0;
           console.log(`P&L: WARNING - No note value found for ${formatItem.fsArea} (${noteKey}), using 0`);
         } else if (formatItem.fsArea) {
-          // Fall back to trial balance lines only for simple items
-          currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
-          previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
-          console.log(`P&L: Using trial balance for ${formatItem.fsArea}:`, currentAmount);
+          // Fall back to H2 classification only for simple items (not calculated notes)
+          const h2Map: Record<string, string> = {
+            'Revenue': 'Revenue from operations',
+            'Other Income': 'Other income',
+            'Employee Benefits': 'Employee benefits expense',
+            'Finance': 'Finance costs',
+            'Depreciation': 'Depreciation and amortization expense',
+            'Other Expenses': 'Other expenses',
+          };
+          const h2Value = h2Map[formatItem.fsArea];
+          if (h2Value) {
+            currentAmount = getAmountByH2(currentLines, h2Value);
+            previousAmount = getAmountByH2(previousLines, h2Value);
+            console.log(`P&L: Using H2 classification for ${formatItem.fsArea}:`, currentAmount);
+          }
         }
       } else if (formatItem.particulars.includes('Total Income')) {
         currentAmount = currentTotalIncome;

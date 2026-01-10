@@ -1,5 +1,11 @@
+/**
+ * Schedule III Balance Sheet Component
+ * MIGRATION NOTE: Refactored to consume ONLY the unified ClassifiedLedger model (LedgerRow)
+ * from trial-balance-new. NO dependencies on old TrialBalanceLine, fs_area, or aile.
+ */
+
 import { useMemo, useState } from 'react';
-import { TrialBalanceLine } from '@/hooks/useTrialBalance';
+import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import {
   Table,
   TableBody,
@@ -14,7 +20,7 @@ import {
   getFormatLabel,
   FSLineItem,
 } from '@/data/financialStatementFormats';
-import { LedgerAnnexureDialog } from './LedgerAnnexureDialog';
+import { NoteContentDialog } from './NoteContentDialog';
 import { FileText } from 'lucide-react';
 
 // Types for note values and ledger data
@@ -35,8 +41,8 @@ type BSNoteValues = {
 };
 
 interface Props {
-  currentLines: TrialBalanceLine[];
-  previousLines?: TrialBalanceLine[];
+  currentLines: LedgerRow[];  // Changed from TrialBalanceLine to LedgerRow
+  previousLines?: LedgerRow[]; // Changed from TrialBalanceLine to LedgerRow
   reportingScale?: string;
   constitution?: string;
   startingNoteNumber?: number;
@@ -138,12 +144,18 @@ export function ScheduleIIIBalanceSheet({
     'Other Current': 'otherCurrent',
   };
 
-  // Helper to get amount from lines by fs_area
-  const getAmountByFsArea = (lines: TrialBalanceLine[], fsArea: string): number => {
+  // Helper to get amount from lines by H2/H3 classification (replaces fs_area)
+  const getAmountByH2H3 = (lines: LedgerRow[], h2Value: string, h3Value?: string): number => {
     if (!lines || !Array.isArray(lines)) return 0;
     return lines
-      .filter(l => l && l.fs_area === fsArea)
-      .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+      .filter(l => {
+        if (!l) return false;
+        const matchH1 = l['H1'] === 'Balance Sheet';
+        const matchH2 = l['H2'] === h2Value;
+        const matchH3 = h3Value ? l['H3'] === h3Value : true;
+        return matchH1 && matchH2 && matchH3;
+      })
+      .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'] || 0)), 0);
   };
 
   // Build display items with amounts and note numbers
@@ -159,13 +171,28 @@ export function ScheduleIIIBalanceSheet({
       if (formatItem.fsArea) {
         noteKey = fsAreaToNoteKey[formatItem.fsArea];
         
-        // Use noteValues if available, otherwise fall back to trial balance calculation
+        // Use noteValues if available (primary source)
         if (noteKey && noteValues[noteKey] !== undefined) {
           currentAmount = noteValues[noteKey] as number;
-        } else {
-          currentAmount = getAmountByFsArea(currentLines, formatItem.fsArea);
+        } else if (formatItem.fsArea) {
+          // Fall back to H2 classification (no longer using fs_area field)
+          // Map fsArea to H2 values for fallback calculation
+          const h2Map: Record<string, string> = {
+            'Cash': 'Cash and cash equivalents',
+            'Receivables': 'Trade receivables',
+            'Inventory': 'Inventories',
+            'Fixed Assets': 'Property, plant and equipment',
+            'Payables': 'Trade payables',
+            'Borrowings': 'Borrowings',
+            'Equity': 'Equity share capital',
+            // Add more mappings as needed
+          };
+          const h2Value = h2Map[formatItem.fsArea];
+          if (h2Value) {
+            currentAmount = getAmountByH2H3(currentLines, h2Value);
+            previousAmount = getAmountByH2H3(previousLines, h2Value);
+          }
         }
-        previousAmount = getAmountByFsArea(previousLines, formatItem.fsArea);
       }
       
       // Only assign note number if there's a value in either period and it has an fsArea
@@ -187,22 +214,38 @@ export function ScheduleIIIBalanceSheet({
     return items;
   }, [bsFormat, currentLines, previousLines, startingNoteNumber, noteValues]);
 
-  // Calculate totals
+  // Calculate totals using H1 classification instead of aile
   const totalAssets = (currentLines || [])
-    .filter(l => l && l.aile === 'Asset')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+    .filter(l => l && l['H1'] === 'Balance Sheet' && 
+      ((l['H2'] || '').toLowerCase().includes('asset') || 
+       (l['H2'] || '').includes('Property') ||
+       (l['H2'] || '').includes('Inventories') ||
+       (l['H2'] || '').includes('receivable')))
+    .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'] || 0)), 0);
   
   const totalLiabilities = (currentLines || [])
-    .filter(l => l && l.aile === 'Liability')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+    .filter(l => l && l['H1'] === 'Balance Sheet' && 
+      ((l['H2'] || '').toLowerCase().includes('liabilit') || 
+       (l['H2'] || '').includes('Equity') ||
+       (l['H2'] || '').includes('payable') ||
+       (l['H2'] || '').includes('Borrowings')))
+    .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'] || 0)), 0);
 
   const prevTotalAssets = (previousLines || [])
-    .filter(l => l && l.aile === 'Asset')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+    .filter(l => l && l['H1'] === 'Balance Sheet' && 
+      ((l['H2'] || '').toLowerCase().includes('asset') || 
+       (l['H2'] || '').includes('Property') ||
+       (l['H2'] || '').includes('Inventories') ||
+       (l['H2'] || '').includes('receivable')))
+    .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'] || 0)), 0);
   
   const prevTotalLiabilities = (previousLines || [])
-    .filter(l => l && l.aile === 'Liability')
-    .reduce((sum, l) => sum + Math.abs(Number(l.closing_balance || 0)), 0);
+    .filter(l => l && l['H1'] === 'Balance Sheet' && 
+      ((l['H2'] || '').toLowerCase().includes('liabilit') || 
+       (l['H2'] || '').includes('Equity') ||
+       (l['H2'] || '').includes('payable') ||
+       (l['H2'] || '').includes('Borrowings')))
+    .reduce((sum, l) => sum + Math.abs(Number(l['Closing Balance'] || 0)), 0);
 
   const handleNoteClick = (noteKey: string) => {
     if (noteKey && noteLedgers[noteKey] && noteLedgers[noteKey].length > 0) {
@@ -304,11 +347,12 @@ export function ScheduleIIIBalanceSheet({
         </p>
       </div>
 
-      {/* Ledger Annexure Dialog */}
-      <LedgerAnnexureDialog
+      {/* Note Content Dialog */}
+      <NoteContentDialog
         open={annexureOpen}
         onOpenChange={setAnnexureOpen}
-        noteKey={selectedNote}
+        noteKey={selectedNote || ''}
+        noteNumber=""
         ledgers={selectedNote ? noteLedgers[selectedNote] || [] : []}
         reportingScale={reportingScale}
       />

@@ -1,5 +1,8 @@
 /**
  * Utility to compute P&L note values and ledger annexures from classified trial balance data
+ * MIGRATION NOTE: This file consumes ONLY the unified ClassifiedLedger model (LedgerRow)
+ * from trial-balance-new. It does NOT use fs_area, aile, or old TrialBalanceLine.
+ * Classification is based on H1, H2, H3, H4, H5 hierarchy only.
  */
 
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
