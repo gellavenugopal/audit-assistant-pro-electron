@@ -22,6 +22,7 @@ import { CostOfMaterialsConsumedNote } from '@/components/trial-balance-new/repo
 import { NotesManagementTab } from '@/components/trial-balance-new/reports/capital-notes/NotesManagementTab';
 import { LiabilityNotesTab } from '@/components/trial-balance-new/reports/liability-notes/LiabilityNotesTab';
 import { FANotesTab } from '@/components/trial-balance-new/reports/fa-notes/FANotesTab';
+import { AssetNotesTab } from '@/components/trial-balance-new/reports/asset-notes/AssetNotesTab';
 import { 
   RevenueFromOperationsNote,
   OtherIncomeNote,
@@ -359,6 +360,13 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               FA Notes
             </TabsTrigger>
             <TabsTrigger 
+              value="asset-notes" 
+              className="h-6 px-3 text-xs font-medium rounded-sm data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-gray-600"
+            >
+              <Building2 className="w-3 h-3 mr-1.5" />
+              Assets Notes
+            </TabsTrigger>
+            <TabsTrigger 
               value="pl-notes" 
               className="h-6 px-3 text-xs font-medium rounded-sm data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-gray-600"
             >
@@ -545,6 +553,20 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 data={data}
                 reportingScale={reportingScale}
                 startingNoteNumber={bsStartingNote + 2}
+              />
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="asset-notes" className="mt-2">
+          <div className="space-y-1">
+            {/* All Asset Notes */}
+            <div className="bg-white rounded border p-2">
+              <AssetNotesTab 
+                data={data}
+                stockData={stockData}
+                reportingScale={reportingScale}
+                startingNoteNumber={bsStartingNote + 3}
               />
             </div>
           </div>
