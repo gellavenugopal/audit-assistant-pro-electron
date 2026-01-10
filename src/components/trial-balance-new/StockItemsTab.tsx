@@ -75,6 +75,7 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
   
   // Selection state for bulk operations
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [bulkCategory, setBulkCategory] = useState<string>('');
   
@@ -269,18 +270,31 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
     });
   };
   
-  // Selection handlers
-  const toggleSelection = useCallback((originalIndex: number) => {
+  // Selection handlers with Shift+click range support
+  const toggleSelection = useCallback((originalIndex: number, event?: React.MouseEvent) => {
     setSelectedIndices(prev => {
       const next = new Set(prev);
-      if (next.has(originalIndex)) {
-        next.delete(originalIndex);
+      
+      // Shift+click for range selection
+      if (event?.shiftKey && lastSelectedIndex !== null) {
+        const start = Math.min(lastSelectedIndex, originalIndex);
+        const end = Math.max(lastSelectedIndex, originalIndex);
+        for (let i = start; i <= end; i++) {
+          next.add(i);
+        }
       } else {
-        next.add(originalIndex);
+        // Regular click to toggle
+        if (next.has(originalIndex)) {
+          next.delete(originalIndex);
+        } else {
+          next.add(originalIndex);
+        }
       }
+      
       return next;
     });
-  }, []);
+    setLastSelectedIndex(originalIndex);
+  }, [lastSelectedIndex]);
   
   const selectAll = useCallback(() => {
     const allIndices = new Set(filteredData.map(item => {
@@ -394,6 +408,26 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
 
   return (
     <div className="space-y-0" onKeyDown={handleKeyDown} tabIndex={0}>
+      <style>{`
+        .stock-items-table thead th {
+          padding-top: 4px !important;
+          padding-bottom: 4px !important;
+          font-size: 11px !important;
+          font-weight: 600 !important;
+          white-space: nowrap !important;
+        }
+        .stock-items-table tbody td {
+          padding-top: 4px !important;
+          padding-bottom: 4px !important;
+          font-size: 11px !important;
+          white-space: nowrap !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+        }
+        .stock-items-table tbody tr {
+          height: 28px !important;
+        }
+      `}</style>
       {baseStockData.length === 0 ? (
         <div className="border rounded-lg p-8 text-center text-muted-foreground">
           No stock items loaded. Stock items will be imported from Tally if available.
@@ -422,23 +456,11 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
                 </>
               )}
             </div>
-            <div className="flex items-center gap-1">
-              {businessType && (
-                <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={handleAutoClassifyAll}>
-                  <Wand2 className="w-3 h-3 mr-1" />
-                  Auto-Classify
-                </Button>
-              )}
-              <Button size="sm" variant="outline" className="h-6 px-2 text-xs">
-                <Plus className="w-3 h-3 mr-1" />
-                Add Item
-              </Button>
-            </div>
           </div>
-          <Table>
+          <Table className="stock-items-table">
             <TableHeader className="sticky top-0 bg-white">
-              <TableRow>
-                <TableHead className="w-10">
+              <TableRow className="h-7">
+                <TableHead className="w-10 py-1 text-[11px] font-semibold">
                   <Checkbox
                     checked={selectedIndices.size === filteredData.length && filteredData.length > 0}
                     onCheckedChange={(checked) => {
@@ -547,7 +569,7 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
                       isSelected && "bg-blue-50",
                       isFocused && "ring-2 ring-blue-400 ring-inset"
                     )}
-                    onClick={() => toggleSelection(originalIndex)}
+                    onClick={(e) => toggleSelection(originalIndex, e)}
                     onDoubleClick={() => handleDoubleClick(item, originalIndex)}
                   >
                     <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>

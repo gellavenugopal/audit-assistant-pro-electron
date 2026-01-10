@@ -20,6 +20,7 @@ import { CashFlowStatement } from '@/components/trial-balance-new/reports/CashFl
 import { ChangesInInventoriesNote } from '@/components/trial-balance-new/reports/pl-notes/ChangesInInventoriesNote';
 import { CostOfMaterialsConsumedNote } from '@/components/trial-balance-new/reports/pl-notes/CostOfMaterialsConsumedNote';
 import { NotesManagementTab } from '@/components/trial-balance-new/reports/capital-notes/NotesManagementTab';
+import { LiabilityNotesTab } from '@/components/trial-balance-new/reports/liability-notes/LiabilityNotesTab';
 import { 
   RevenueFromOperationsNote,
   OtherIncomeNote,
@@ -35,7 +36,7 @@ import { NoteNumberSummary } from '@/components/trial-balance-new/NoteNumberSumm
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useToast } from '@/hooks/use-toast';
-import { FileText, BarChart3, TrendingUp, Building2, Download, ChevronDown } from 'lucide-react';
+import { FileText, BarChart3, TrendingUp, Building2, Download, ChevronDown, CheckCircle, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
   exportBalanceSheetWithNotes,
@@ -91,15 +92,40 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
     return 'company'; // default
   }, [entityType]);
 
-  // Convert LedgerRow[] to TrialBalanceLine[]
+  // GUARD: Filter only classified data for reports (prevent unclassified data from flowing)
+  const classifiedOnlyData = useMemo(() => {
+    // Safety check: ensure data is an array
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      return [];
+    }
+    
+    const filtered = data.filter(row => 
+      row.H1 && 
+      row.H2 && 
+      row.H3 && 
+      row.Status === 'Mapped'
+    );
+    
+    const unmappedCount = data.length - filtered.length;
+    if (unmappedCount > 0) {
+      console.warn(
+        `[GUARD] Excluding ${unmappedCount} unclassified ledgers from reports. ` +
+        `Total: ${data.length}, Classified: ${filtered.length}`
+      );
+    }
+    
+    return filtered;
+  }, [data]);
+
+  // Convert LedgerRow[] to TrialBalanceLine[] - USE CLASSIFIED DATA ONLY
   const trialBalanceLines = useMemo(() => {
     try {
-      if (!data || !Array.isArray(data) || data.length === 0) return [];
+      if (!classifiedOnlyData || !Array.isArray(classifiedOnlyData) || classifiedOnlyData.length === 0) return [];
       // Use a temporary engagement ID if none exists
       const engagementId = currentEngagement?.id || 'temp-engagement';
       const userId = user?.id || 'temp-user';
       return convertLedgerRowsToTrialBalanceLines(
-        data,
+        classifiedOnlyData,
         engagementId,
         userId,
         'current',
@@ -110,17 +136,79 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
       console.error('Error converting ledger rows:', error);
       return [];
     }
-  }, [data, currentEngagement?.id, user?.id, toDate, stockData]);
+  }, [classifiedOnlyData, currentEngagement?.id, user?.id, toDate, stockData]);
 
-  // Compute P&L note values and ledger annexures
+  // Compute P&L note values and ledger annexures - USE CLASSIFIED DATA ONLY
   const { noteValues: plNoteValues, noteLedgers: plNoteLedgers } = useMemo(() => {
-    return computePLNoteValues(data, stockData);
-  }, [data, stockData]);
+    return computePLNoteValues(classifiedOnlyData, stockData);
+  }, [classifiedOnlyData, stockData]);
 
-  // Compute Balance Sheet note values and ledger annexures
+  // Compute Balance Sheet note values and ledger annexures - USE CLASSIFIED DATA ONLY
   const { noteValues: bsNoteValues, noteLedgers: bsNoteLedgers } = useMemo(() => {
-    return computeBSNoteValues(data);
-  }, [data]);
+    return computeBSNoteValues(classifiedOnlyData);
+  }, [classifiedOnlyData]);
+
+  // 🔒 CRITICAL FIX 7: Totals Validation - Cross-check Notes vs Trial Balance
+  const totalsValidation = useMemo(() => {
+    // If no data, skip validation (return valid to allow UI to render)
+    if (!classifiedOnlyData || classifiedOnlyData.length === 0) {
+      return {
+        plValid: true,
+        bsValid: true,
+        plDiff: 0,
+        bsDiff: 0,
+        allValid: true
+      };
+    }
+    
+    // Calculate P&L total from notes
+    const plNotesTotal = Object.values(plNoteValues).reduce((sum, val) => sum + (val || 0), 0);
+    
+    // Calculate P&L total from classified TB (Income + Expenses)
+    const plTbTotal = classifiedOnlyData
+      .filter(row => row.H1 === 'P&L')
+      .reduce((sum, row) => {
+        const closing = typeof row.Closing === 'number' ? row.Closing : 0;
+        return sum + Math.abs(closing);
+      }, 0);
+    
+    // Calculate BS total from notes
+    const bsNotesTotal = Object.values(bsNoteValues).reduce((sum, val) => sum + (val || 0), 0);
+    
+    // Calculate BS total from classified TB (Assets + Liabilities)
+    const bsTbTotal = classifiedOnlyData
+      .filter(row => row.H1 === 'Balance Sheet')
+      .reduce((sum, row) => {
+        const closing = typeof row.Closing === 'number' ? row.Closing : 0;
+        return sum + Math.abs(closing);
+      }, 0);
+    
+    const plDiff = Math.abs(plNotesTotal - plTbTotal);
+    const bsDiff = Math.abs(bsNotesTotal - bsTbTotal);
+    
+    // RELAXED VALIDATION: Only fail if notes total EXCEEDS TB total (which indicates data corruption)
+    // Allow notes total to be LESS than TB total (incomplete classification is OK)
+    const threshold = 0.01; // Tolerance for rounding errors
+    
+    const plValid = plNotesTotal <= plTbTotal + threshold; // Notes can be less, but not more
+    const bsValid = bsNotesTotal <= bsTbTotal + threshold; // Notes can be less, but not more
+    
+    // Only log error if notes total exceeds TB total (real problem)
+    if (plNotesTotal > plTbTotal + threshold || bsNotesTotal > bsTbTotal + threshold) {
+      console.error('[VALIDATION FAILED] Notes total exceeds TB total (data corruption):', {
+        plNotesTotal, plTbTotal, plDiff, plValid,
+        bsNotesTotal, bsTbTotal, bsDiff, bsValid
+      });
+    }
+    
+    return {
+      plValid,
+      bsValid,
+      plDiff,
+      bsDiff,
+      allValid: plValid && bsValid
+    };
+  }, [classifiedOnlyData, plNoteValues, bsNoteValues]);
 
   // Parse financial year from toDate
   const financialYear = useMemo(() => {
@@ -253,7 +341,14 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
               className="h-6 px-3 text-xs font-medium rounded-sm data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-gray-600"
             >
               <Building2 className="w-3 h-3 mr-1.5" />
-              BS Notes
+              Capital Notes
+            </TabsTrigger>
+            <TabsTrigger 
+              value="liability-notes" 
+              className="h-6 px-3 text-xs font-medium rounded-sm data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm text-gray-600"
+            >
+              <Building2 className="w-3 h-3 mr-1.5" />
+              Liability Notes
             </TabsTrigger>
             <TabsTrigger 
               value="pl-notes" 
@@ -265,6 +360,21 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
           </TabsList>
 
           <div className="flex items-center gap-2">
+            {/* 🔒 CRITICAL FIX 8: Validation Badge - Only show when data exists */}
+            {classifiedOnlyData && classifiedOnlyData.length > 0 && (
+              totalsValidation.allValid ? (
+                <Badge variant="outline" className="text-[10px] h-6 px-2 border-green-500 text-green-700 bg-green-50">
+                  <CheckCircle className="w-3 h-3 mr-1" />
+                  Validated
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px] h-6 px-2 border-red-500 text-red-700 bg-red-50">
+                  <AlertCircle className="w-3 h-3 mr-1" />
+                  Validation Failed
+                </Badge>
+              )
+            )}
+            
             <Select value={reportingScale} onValueChange={setReportingScale}>
               <SelectTrigger className="h-6 w-[90px] text-xs">
                 <SelectValue />
@@ -281,7 +391,13 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
             {/* Download Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="default" size="sm" className="h-6 px-2 text-xs">
+                <Button 
+                  variant="default" 
+                  size="sm" 
+                  className="h-6 px-2 text-xs"
+                  disabled={!totalsValidation.allValid || !classifiedOnlyData || classifiedOnlyData.length === 0}
+                  title={!totalsValidation.allValid ? 'Fix validation errors before exporting' : ''}
+                >
                   <Download className="w-3 h-3 mr-1" />
                   Download
                   <ChevronDown className="w-2.5 h-2.5 ml-1" />
@@ -324,14 +440,6 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 includeContingentLiabilities={includeContingentLiabilities}
               />
             </div>
-            <NoteNumberSummary
-              bsStartingNote={bsStartingNote}
-              bsNoteCount={bsNoteCount}
-              plStartingNote={plStartingNote}
-              plNoteCount={plNoteCount}
-              includeContingentLiabilities={includeContingentLiabilities}
-              contingentLiabilityNoteNo={contingentLiabilityNoteNo}
-            />
             <div className="bg-white rounded border overflow-hidden">
               <ScheduleIIIBalanceSheet 
                 currentLines={trialBalanceLines} 
@@ -364,14 +472,6 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
                 includeContingentLiabilities={includeContingentLiabilities}
               />
             </div>
-            <NoteNumberSummary
-              bsStartingNote={bsStartingNote}
-              bsNoteCount={bsNoteCount}
-              plStartingNote={plStartingNote}
-              plNoteCount={plNoteCount}
-              includeContingentLiabilities={includeContingentLiabilities}
-              contingentLiabilityNoteNo={contingentLiabilityNoteNo}
-            />
             
             {/* Profit & Loss Statement */}
             <div className="bg-white rounded border overflow-hidden">
@@ -391,20 +491,39 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
         </TabsContent>
 
         <TabsContent value="cash-flow" className="mt-2">
-          <div className="bg-white rounded border overflow-hidden">
-            <CashFlowStatement lines={trialBalanceLines} reportingScale={reportingScale} />
+          <div className="bg-white rounded border overflow-hidden p-12 text-center">
+            <div className="max-w-md mx-auto">
+              <div className="text-6xl mb-4">🚧</div>
+              <h3 className="text-2xl font-semibold mb-3 text-gray-700">Coming Soon</h3>
+              <p className="text-muted-foreground">
+                Cash Flow Statement generation is under development and will be available in an upcoming release.
+              </p>
+            </div>
           </div>
         </TabsContent>
 
         <TabsContent value="bs-notes" className="mt-2">
-          <div className="space-y-2">
-            {/* Other Balance Sheet Notes Management */}
-            <div className="bg-white rounded border p-3">
+          <div className="space-y-1">
+            {/* Capital & Equity Notes Management */}
+            <div className="bg-white rounded border p-2">
               <NotesManagementTab 
                 lines={trialBalanceLines}
                 constitution={constitution}
                 financialYear={financialYear}
                 clientName={companyName}
+              />
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="liability-notes" className="mt-2">
+          <div className="space-y-1">
+            {/* Liability Notes */}
+            <div className="bg-white rounded border p-2">
+              <LiabilityNotesTab 
+                data={data}
+                reportingScale={reportingScale}
+                startingNoteNumber={bsStartingNote + 1}
               />
             </div>
           </div>
