@@ -16,6 +16,11 @@ import { useEngagement } from '@/contexts/EngagementContext';
 import { useClient } from '@/hooks/useClient';
 import { usePartners } from '@/hooks/usePartners';
 import { useEngagementLetterTemplates } from '@/hooks/useEngagementLetterTemplates';
+import {
+  STATUTORY_AUDIT_COMPANY_TEMPLATE,
+  TAX_AUDIT_PARTNERSHIP_3CA_TEMPLATE,
+  TAX_AUDIT_PARTNERSHIP_3CB_TEMPLATE,
+} from '@/data/engagementLetterTemplates';
 import type { EngagementLetterMasterData } from '@/types/engagementLetter';
 
 interface LettersPageProps {
@@ -94,6 +99,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
 
   // Commercial Terms Section
   const [professionalFees, setProfessionalFees] = useState('');
+  const [gstRatePercent, setGstRatePercent] = useState('');
   const [gstAmount, setGstAmount] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('');
   const [outOfPocketExpenses, setOutOfPocketExpenses] = useState(false);
@@ -116,6 +122,8 @@ export function LettersPage({ engagementId }: LettersPageProps) {
 
   // Draft save/load helpers
   const draftKey = useMemo(() => `eng_letter_draft_${engagementId}`, [engagementId]);
+  const isCompanyEntity = entityType === 'Company';
+  const taxAuditLetterType = isCompanyEntity ? 'tax-audit-partnership-3ca' : 'tax-audit-partnership-3cb';
 
   const buildDraft = () => ({
     letterType,
@@ -136,6 +144,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     partnerPlace,
     partnerSignatureDate,
     professionalFees,
+    gstRatePercent,
     gstAmount,
     paymentTerms,
     outOfPocketExpenses,
@@ -171,6 +180,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     setPartnerPlace(d.partnerPlace || partnerPlace);
     setPartnerSignatureDate(d.partnerSignatureDate || '');
     setProfessionalFees(d.professionalFees || '');
+    setGstRatePercent(d.gstRatePercent || '');
     setGstAmount(d.gstAmount || '');
     setPaymentTerms(d.paymentTerms || '');
     setOutOfPocketExpenses(!!d.outOfPocketExpenses);
@@ -202,12 +212,32 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     } catch {}
   }, [draftKey]);
 
+  useEffect(() => {
+    if (!letterType.includes('tax-audit')) return;
+    if (letterType !== taxAuditLetterType) {
+      setLetterType(taxAuditLetterType);
+    }
+    const desiredForm = isCompanyEntity ? '3CA' : '3CB';
+    if (taxAuditForm !== desiredForm) {
+      setTaxAuditForm(desiredForm);
+    }
+  }, [letterType, taxAuditLetterType, isCompanyEntity, taxAuditForm]);
+
+  useEffect(() => {
+    if (!gstRatePercent.trim()) return;
+    const feesValue = parseFloat(professionalFees);
+    const gstRateValue = parseFloat(gstRatePercent);
+    if (Number.isNaN(feesValue) || Number.isNaN(gstRateValue)) return;
+    const computed = (feesValue * gstRateValue) / 100;
+    setGstAmount(computed ? computed.toFixed(2) : '');
+  }, [gstRatePercent, professionalFees]);
+
   const getLetterTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
       'statutory-audit-company': 'Statutory Audit - Company (Unlisted)',
       'statutory-audit-company-ifc': 'Statutory Audit - Company (with IFC)',
-      'tax-audit-partnership-3ca': 'Tax Audit - Partnership (3CA - Audited)',
-      'tax-audit-partnership-3cb': 'Tax Audit - Partnership (3CB - Non-Audited)',
+      'tax-audit-partnership-3ca': 'Tax Audit (Company) 3CA',
+      'tax-audit-partnership-3cb': 'Tax Audit (Non-Company) 3CB',
     };
     return labels[type] || type;
   };
@@ -317,15 +347,22 @@ export function LettersPage({ engagementId }: LettersPageProps) {
       const templateType = engagementTypeMap[letterType];
       const dbTemplate = getTemplateByType(templateType);
 
-      if (!dbTemplate) {
-        toast.error('Template not uploaded. Please upload the template in Admin Settings → Letter Templates.', {
+      const fallbackTemplateMap: Record<string, string> = {
+        statutory_audit_company_without_ifc: STATUTORY_AUDIT_COMPANY_TEMPLATE,
+        statutory_audit_company_with_ifc: STATUTORY_AUDIT_COMPANY_TEMPLATE,
+        tax_audit_partnership_3ca: TAX_AUDIT_PARTNERSHIP_3CA_TEMPLATE,
+        tax_audit_partnership_3cb: TAX_AUDIT_PARTNERSHIP_3CB_TEMPLATE,
+      };
+
+      const template = dbTemplate?.file_content || fallbackTemplateMap[templateType];
+
+      if (!template) {
+        toast.error('Template not available. Upload one in Admin Settings > Letter Templates.', {
           duration: 5000,
         });
         setGenerating(false);
         return;
       }
-
-      const template = dbTemplate.file_content;
 
       const { EngagementLetterTemplateEngine } = await import('@/services/engagementLetterEngine');
       const context = EngagementLetterTemplateEngine.buildContext(masterData);
@@ -503,23 +540,25 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                   },
                   {
                     id: 'tax-audit-partnership-3ca',
-                    label: 'Tax Audit - Partnership (3CA - Audited)',
-                    description: 'For partnerships with audited financial statements (Form 3CA)',
+                    label: 'Tax Audit (Company) 3CA',
+                    description: 'For companies with audited financial statements (Form 3CA)',
+                    disabled: !isCompanyEntity,
                   },
                   {
                     id: 'tax-audit-partnership-3cb',
-                    label: 'Tax Audit - Partnership (3CB - Non-Audited)',
-                    description: 'For partnerships with non-audited financial statements (Form 3CB)',
+                    label: 'Tax Audit (Non-Company) 3CB',
+                    description: 'For non-company entities with non-audited financial statements (Form 3CB)',
+                    disabled: isCompanyEntity,
                   },
                 ].map((option) => (
                   <div
                     key={option.id}
-                    onClick={() => setLetterType(option.id)}
-                    className={`cursor-pointer rounded-lg border-2 p-4 transition-colors ${
+                    onClick={() => (!option.disabled ? setLetterType(option.id) : null)}
+                    className={`rounded-lg border-2 p-4 transition-colors ${
                       letterType === option.id
                         ? 'border-blue-500 bg-blue-50'
                         : 'border-gray-200 bg-white hover:border-gray-300'
-                    }`}
+                    } ${option.disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                   >
                     <div className="flex items-start gap-3">
                       <div
@@ -532,6 +571,11 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                       <div className="flex-1">
                         <p className="font-semibold text-sm">{option.label}</p>
                         <p className="text-xs text-muted-foreground mt-1">{option.description}</p>
+                        {option.disabled && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {isCompanyEntity ? 'Available only for non-company entities.' : 'Available only for companies.'}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -570,12 +614,13 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                     value={entityName}
                     onChange={(e) => setEntityName(e.target.value)}
                     placeholder="e.g., ABC Private Limited"
+                    disabled
                   />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Entity Type</Label>
-                  <Select value={entityType} onValueChange={setEntityType}>
+                  <Select value={entityType} onValueChange={setEntityType} disabled>
                     <SelectTrigger>
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
@@ -844,12 +889,25 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                   </div>
 
                   <div className="space-y-2">
+                    <Label>GST %</Label>
+                    <Input
+                      type="number"
+                      value={gstRatePercent}
+                      onChange={(e) => setGstRatePercent(e.target.value)}
+                      placeholder="e.g., 18"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
                     <Label>GST Amount (INR)</Label>
                     <Input
                       type="number"
                       value={gstAmount}
                       onChange={(e) => setGstAmount(e.target.value)}
-                      placeholder="e.g., 9000"
+                      placeholder="Auto-calculated from GST %"
+                      readOnly={!!gstRatePercent}
                     />
                   </div>
 
@@ -970,7 +1028,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                     <div className="space-y-3">
                       <div className="space-y-2">
                         <Label>Tax Audit Form *</Label>
-                        <Select value={taxAuditForm} onValueChange={setTaxAuditForm}>
+                        <Select value={taxAuditForm} onValueChange={setTaxAuditForm} disabled>
                           <SelectTrigger>
                             <SelectValue placeholder="Select form type" />
                           </SelectTrigger>

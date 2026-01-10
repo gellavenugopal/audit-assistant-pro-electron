@@ -28,10 +28,10 @@ export default function Dashboard() {
   const materialitySource = view === 'engagement' ? activeEngagement : stats.latestEngagement;
   
   const formatCurrency = (amount: number | null) => {
-    if (!amount) return 'â€”';
-    if (amount >= 10000000) return `â‚¹${(amount / 10000000).toFixed(1)}Cr`;
-    if (amount >= 100000) return `â‚¹${(amount / 100000).toFixed(1)}L`;
-    return `â‚¹${amount.toLocaleString('en-IN')}`;
+    if (!amount) return '\u2014';
+    if (amount >= 10000000) return `\u20B9${(amount / 10000000).toFixed(1)}Cr`;
+    if (amount >= 100000) return `\u20B9${(amount / 100000).toFixed(1)}L`;
+    return `\u20B9${amount.toLocaleString('en-IN')}`;
   };
 
   return (
