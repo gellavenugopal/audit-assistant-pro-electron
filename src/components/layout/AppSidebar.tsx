@@ -6,19 +6,20 @@ import {
   FileSpreadsheet,
   Calculator,
   AlertTriangle,
-  ClipboardList,
   FileCheck,
   MessageSquare,
   AlertCircle,
   Lock,
   History,
   Settings,
+  ClipboardList,
   ChevronLeft,
   ChevronRight,
   Wrench,
   Briefcase,
   Shield,
   FileText,
+  FileSignature,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -35,22 +36,23 @@ const alwaysActiveItems = [
 
 // Items that require an engagement to be selected
 const engagementDependentItems = [
-  { name: 'Trial Balance', href: '/trial-balance-new', icon: FileSpreadsheet },
+  { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
+  { name: 'Trial Balance New', href: '/trial-balance-new', icon: FileSpreadsheet },
+  { name: 'Appointment', href: '/appointment', icon: FileSignature },
   { name: 'Materiality', href: '/materiality', icon: Calculator },
   { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
-  { name: 'Audit Programs', href: '/programs', icon: ClipboardList },
+  { name: 'Audit Execution', href: '/audit-execution', icon: ClipboardList },
   { name: 'Evidence Vault', href: '/evidence', icon: FileCheck },
   { name: 'Review Notes', href: '/review-notes', icon: MessageSquare },
   { name: 'Misstatements', href: '/misstatements', icon: AlertCircle },
   { name: 'Audit Report', href: '/audit-report', icon: FileText },
-  { name: 'Audit Tools', href: '/audit-tools', icon: Wrench },
+  { name: 'VERA Tools', href: '/audit-tools', icon: Wrench },
   { name: 'Feedback', href: '/feedback', icon: MessageSquare },
 ];
 
 const secondaryNavItems = [
   { name: 'Audit Trail', href: '/audit-trail', icon: History, requiresEngagement: true },
   { name: 'Completion', href: '/completion', icon: Lock, requiresEngagement: true },
-  { name: 'My Tasks', href: '/my-dashboard', icon: ClipboardList, staffOnly: true },
   { name: 'Admin', href: '/admin', icon: Shield, adminOnly: true },
   { name: 'Admin Settings', href: '/admin/settings', icon: Settings, adminOnly: true },
 ];
@@ -72,7 +74,7 @@ export function AppSidebar() {
     if (!name) return name;
     return (
       <>
-        <span className="text-primary font-semibold">{name[0]}</span>
+        <span className="underline underline-offset-2">{name[0]}</span>
         <span>{name.slice(1)}</span>
       </>
     );

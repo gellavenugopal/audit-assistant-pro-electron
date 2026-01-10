@@ -15,13 +15,6 @@ interface DashboardStats {
     low: number;
     open: number;
   };
-  procedures: {
-    total: number;
-    notStarted: number;
-    inProgress: number;
-    completed: number;
-    reviewed: number;
-  };
   evidence: {
     totalFiles: number;
     totalSize: number;
@@ -49,7 +42,6 @@ export function useDashboardStats(engagementId?: string) {
   const [stats, setStats] = useState<DashboardStats>({
     engagements: { total: 0, active: 0, planning: 0, completed: 0 },
     risks: { total: 0, high: 0, medium: 0, low: 0, open: 0 },
-    procedures: { total: 0, notStarted: 0, inProgress: 0, completed: 0, reviewed: 0 },
     evidence: { totalFiles: 0, totalSize: 0 },
     recentActivity: [],
     latestEngagement: null,
@@ -72,7 +64,6 @@ export function useDashboardStats(engagementId?: string) {
       const [
         engagementsRes,
         risksRes,
-        proceduresRes,
         evidenceRes,
         activityRes,
       ] = await Promise.all([
@@ -80,9 +71,6 @@ export function useDashboardStats(engagementId?: string) {
         engagementId
           ? supabase.from('risks').select('id, combined_risk, status').eq('engagement_id', engagementId)
           : supabase.from('risks').select('id, combined_risk, status'),
-        engagementId
-          ? supabase.from('audit_procedures').select('id, status').eq('engagement_id', engagementId)
-          : supabase.from('audit_procedures').select('id, status'),
         engagementId
           ? supabase.from('evidence_files').select('id, file_size').eq('engagement_id', engagementId)
           : supabase.from('evidence_files').select('id, file_size'),
@@ -119,16 +107,6 @@ export function useDashboardStats(engagementId?: string) {
         open: risks.filter(r => r.status === 'open').length,
       };
 
-      // Calculate procedure stats
-      const procedures = proceduresRes.data || [];
-      const procedureStats = {
-        total: procedures.length,
-        notStarted: procedures.filter(p => p.status === 'not_started').length,
-        inProgress: procedures.filter(p => p.status === 'in_progress').length,
-        completed: procedures.filter(p => p.status === 'completed' || p.status === 'done').length,
-        reviewed: procedures.filter(p => p.status === 'reviewed').length,
-      };
-
       // Calculate evidence stats
       const evidence = evidenceRes.data || [];
       const evidenceStats = {
@@ -146,7 +124,6 @@ export function useDashboardStats(engagementId?: string) {
       setStats({
         engagements: engagementStats,
         risks: riskStats,
-        procedures: procedureStats,
         evidence: evidenceStats,
         recentActivity: activityRes.data || [],
         latestEngagement,
@@ -166,7 +143,6 @@ export function useDashboardStats(engagementId?: string) {
       .channel('dashboard-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'engagements' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'risks' }, fetchStats)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_procedures' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, fetchStats)
       .subscribe();
 

@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { HashRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { EngagementProvider } from "@/contexts/EngagementContext";
 import { TallyProvider } from "@/contexts/TallyContext";
@@ -11,33 +11,33 @@ import { ProtectedEngagementRoute } from "@/components/auth/ProtectedEngagementR
 import { ProtectedAdminRoute } from "@/components/auth/ProtectedAdminRoute";
 import { MainLayout } from "@/components/layout/MainLayout";
 import Dashboard from "./pages/Dashboard";
-import StaffDashboard from "./pages/StaffDashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
 // import TrialBalance from "./pages/TrialBalance"; // DEPRECATED - Migrated to TrialBalanceNew
 import TrialBalanceNew from "./pages/TrialBalanceNew";
+import Appointment from "./pages/Appointment";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
-import AuditPrograms from "./pages/AuditPrograms";
+import AuditExecution from "./pages/AuditExecution";
 import EvidenceVault from "./pages/EvidenceVault";
-import ProcedureWorkpaper from "./pages/ProcedureWorkpaper";
 import ReviewNotes from "./pages/ReviewNotes";
 import Misstatements from "./pages/Misstatements";
 import AuditTrail from "./pages/AuditTrail";
 import Completion from "./pages/Completion";
 import Settings from "./pages/Settings";
+import Feedback from "./pages/Feedback";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
 import AuditReport from "./pages/AuditReport";
-import Auth from "./pages/Auth";
+import ComplianceApplicability from "./pages/ComplianceApplicability";
 import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
-import Gstr1Dashboard from '@/pages/Gstr1Dashboard';
+import Gstr1Dashboard from "./pages/Gstr1Dashboard";
+import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
-import Feedback from "./pages/Feedback";
+import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
 
-import ComplianceApplicability from "./pages/ComplianceApplicability";
 
 const queryClient = new QueryClient();
 
@@ -46,7 +46,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <HashRouter>
         <AuthProvider>
           <EngagementProvider>
             <TallyProvider>
@@ -107,6 +107,26 @@ const App = () => (
                   }
                 />
                 <Route
+                  path="/appointment"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Appointment />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/appointment/engagement-letter"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <EngagementLetterGenerator />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
                   path="/materiality"
                   element={
                     <ProtectedEngagementRoute>
@@ -127,21 +147,21 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="/programs"
+                  path="/audit-execution"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <AuditPrograms />
+                        <AuditExecution />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
                 />
                 <Route
-                  path="/procedures/:procedureId/workpaper"
+                  path="/programs-new"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <ProcedureWorkpaper />
+                        <AuditExecution />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -207,21 +227,21 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="/compliance-applicability"
-                  element={
-                    <ProtectedEngagementRoute>
-                      <MainLayout>
-                        <ComplianceApplicability />
-                      </MainLayout>
-                    </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
                   path="/audit-report"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
                         <AuditReport />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/feedback"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Feedback />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -295,11 +315,11 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="/my-dashboard"
+                  path="/compliance-applicability"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <StaffDashboard />
+                        <ComplianceApplicability />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -309,9 +329,14 @@ const App = () => (
             </TallyProvider>
           </EngagementProvider>
         </AuthProvider>
-      </BrowserRouter>
+      </HashRouter>
     </TooltipProvider>
   </QueryClientProvider>
 );
 
 export default App;
+
+
+
+
+

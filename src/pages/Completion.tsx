@@ -203,7 +203,7 @@ export default function Completion() {
             <ul className="space-y-2 text-sm text-foreground">
               <li className="flex items-start gap-2">
                 <CheckCircle className="h-4 w-4 text-success shrink-0 mt-0.5" />
-                <span>Prevent any further edits to procedures, evidence, and notes</span>
+                <span>Prevent any further edits to evidence and notes</span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle className="h-4 w-4 text-success shrink-0 mt-0.5" />

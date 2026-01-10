@@ -19,7 +19,6 @@ export interface ReviewNote {
   resolved_by: string | null;
   created_at: string;
   updated_at: string;
-  procedure?: { procedure_name: string; area: string } | null;
   engagement?: { name: string; client_name: string } | null;
   // Approval workflow fields
   approval_stage: 'draft' | 'prepared' | 'reviewed' | 'approved';
@@ -81,7 +80,6 @@ export function useReviewNotes(engagementId?: string) {
         .from('review_notes')
         .select(`
           *,
-          procedure:audit_procedures(procedure_name, area),
           engagement:engagements(name, client_name)
         `)
         .order('created_at', { ascending: false });
@@ -102,7 +100,6 @@ export function useReviewNotes(engagementId?: string) {
   };
 
   const createNote = async (note: {
-    procedure_id?: string | null;
     engagement_id: string;
     assigned_to?: string | null;
     title: string;
