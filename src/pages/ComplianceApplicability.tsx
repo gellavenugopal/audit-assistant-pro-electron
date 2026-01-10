@@ -7,10 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
 const UNIT_MAP = {
-  "Ones (₹)": 1,
-  "Thousands (₹1,000)": 1_000,
-  "Lakhs (₹1,00,000)": 1_00_000,
-  "Crores (₹1,00,00,000)": 1_00_00_000,
+  "Ones (\u20B9)": 1,
+  "Thousands (\u20B91,000)": 1_000,
+  "Lakhs (\u20B91,00,000)": 1_00_000,
+  "Crores (\u20B91,00,00,000)": 1_00_00_000,
 };
 
 const ENTITY_CLASSIFICATION_MAP = {
@@ -46,7 +46,7 @@ const yesNoOptions = [
 
 const ComplianceApplicability: React.FC = () => {
   // State for all input fields
-  const [denomination, setDenomination] = useState("Ones (₹)");
+  const [denomination, setDenomination] = useState("Ones (\u20B9)");
   const [cyTurnover, setCyTurnover] = useState("");
   const [cyCapital, setCyCapital] = useState("");
   const [pyTurnover, setPyTurnover] = useState("");
@@ -303,8 +303,8 @@ const ComplianceApplicability: React.FC = () => {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-stretch">
+              <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm lg:h-full">
                 <h2 className="text-sm font-semibold text-slate-700">Financial Parameters</h2>
                 <div className="mt-4 space-y-3">
                   <div className="space-y-2">
@@ -370,73 +370,81 @@ const ComplianceApplicability: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm">
-                <h2 className="text-sm font-semibold text-slate-700">Income-tax Parameters</h2>
-                <div className="mt-4 space-y-3">
-                  <div className="space-y-2">
-                    <Label>Assessee Type</Label>
-                    <Select value={assesseeType} onValueChange={setAssesseeType}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Business">Business</SelectItem>
-                        <SelectItem value="Profession">Profession</SelectItem>
-                      </SelectContent>
-                    </Select>
+              <div className="flex h-full flex-col gap-6">
+                <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm flex-1">
+                  <h2 className="text-sm font-semibold text-slate-700">Income-tax Parameters</h2>
+                  <div className="mt-4 space-y-3">
+                    <div className="space-y-2">
+                      <Label>Assessee Type</Label>
+                      <Select value={assesseeType} onValueChange={setAssesseeType}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Business">Business</SelectItem>
+                          <SelectItem value="Profession">Profession</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Cash Receipts &gt; 5%</Label>
+                      <Select value={cashReceipt} onValueChange={setCashReceipt}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Cash Payments &gt; 5%</Label>
+                      <Select value={cashPayment} onValueChange={setCashPayment}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Presumptive Scheme</Label>
+                      <Select value={presumptive} onValueChange={setPresumptive}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Lower than Presumptive</Label>
+                      <Select value={lowerPresumptive} onValueChange={setLowerPresumptive}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Cash Receipts &gt; 5%</Label>
-                    <Select value={cashReceipt} onValueChange={setCashReceipt}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {yesNoOptions.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Cash Payments &gt; 5%</Label>
-                    <Select value={cashPayment} onValueChange={setCashPayment}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {yesNoOptions.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Presumptive Scheme</Label>
-                    <Select value={presumptive} onValueChange={setPresumptive}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {yesNoOptions.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Lower than Presumptive</Label>
-                    <Select value={lowerPresumptive} onValueChange={setLowerPresumptive}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {yesNoOptions.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>RPT Exists</Label>
-                    <Select value={rpt} onValueChange={setRpt}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {yesNoOptions.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm flex-1">
+                  <h2 className="text-sm font-semibold text-slate-700">Company Law Parameters</h2>
+                  <div className="mt-4 space-y-3">
+                    <div className="space-y-2">
+                      <Label>Significant RPT Exists</Label>
+                      <Select value={rpt} onValueChange={setRpt}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
               </div>
