@@ -197,7 +197,7 @@ function buildDirectorRemunerationParagraph(setup: AuditReportSetup, content: Au
   const isPrivate = setup.is_private_company;
   
   if (isPrivate) {
-    return { text: `h.\tThis Company being a private limited company, the provisions of managerial remuneration and approvals under section 197 of the Act are not applicable to the Company.` };
+    return { text: `h.\twith respect to the other matters to be included in the Auditors' Report in accordance with the requirements of section 197(16) of the Act, as amended: the same is not applicable to the company, it being a private company.` };
   }
   
   // Public company reporting
@@ -206,6 +206,8 @@ function buildDirectorRemunerationParagraph(setup: AuditReportSetup, content: Au
   
   if (remunerationStatus === 'yes') {
     return { text: `h.\twith respect to the other matters to be included in the Auditors' Report in accordance with the requirements of section 197(16) of the Act, as amended: In our opinion and to the best of our information and according to the explanations given to us, the remuneration paid by the Company to its directors during the year is in accordance with the provisions of section 197 of the Act.` };
+  } else if (remunerationStatus === 'na') {
+    return { text: `h.\twith respect to the other matters to be included in the Auditors' Report in accordance with the requirements of section 197(16) of the Act, as amended: the same is not applicable to the company, it being a private company.` };
   } else if (remunerationStatus === 'no') {
     // Not complied - use details if provided
     if (details && details.trim()) {
