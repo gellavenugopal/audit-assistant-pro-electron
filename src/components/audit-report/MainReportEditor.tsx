@@ -24,7 +24,6 @@ import {
   type OtherMatterItem,
   useAuditReportContent,
 } from '@/hooks/useAuditReportContent';
-import { QUALIFIED_BASIS_EXAMPLE, ADVERSE_BASIS_EXAMPLE, DISCLAIMER_BASIS_EXAMPLE } from '@/data/qualifiedExamples';
 import { AuditReportGenerator } from '@/services/auditReportGenerator';
 import { STATUS_OPTIONS, type StatusValue } from '@/data/auditReportStandardWordings';
 
@@ -82,7 +81,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
   const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
   const [editorBasis, setEditorBasis] = useState<string>('');
-  const [savedExampleForDraftId, setSavedExampleForDraftId] = useState<string | null>(null);
 
   // Auto-calculate IFC applicability
   useEffect(() => {
@@ -116,69 +114,30 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   }, [content?.id]);
 
   useEffect(() => {
-    // Initialize editorBasis: show user's basis if present, otherwise show illustrative example for qualified/adverse opinion
     if (!draft) return;
-    if (draft.opinion_type === 'qualified') {
-      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : QUALIFIED_BASIS_EXAMPLE);
-    } else if (draft.opinion_type === 'adverse') {
-      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : ADVERSE_BASIS_EXAMPLE);
-    } else if (draft.opinion_type === 'disclaimer') {
-      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : DISCLAIMER_BASIS_EXAMPLE);
-    } else {
-      setEditorBasis(draft.basis_for_opinion || '');
-    }
-  }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion]);
+    const shouldClearBasis =
+      (draft.basis_for_opinion_is_example || draft.opinion_type === 'unqualified') &&
+      (draft.basis_for_opinion?.trim() || draft.basis_for_opinion_is_example);
 
-  useEffect(() => {
-    // Auto-populate and persist illustrative basis into existing drafts when missing (qualified/adverse/disclaimer)
-    if (!draft) return;
-    const shouldPopulate = (type: AuditReportMainContent['opinion_type']) =>
-      draft.opinion_type === type && !(draft.basis_for_opinion?.trim()) && draft.id !== savedExampleForDraftId;
-
-    if (shouldPopulate('qualified')) {
-      const example = QUALIFIED_BASIS_EXAMPLE;
-      const patched: Partial<AuditReportMainContent> = {
-        basis_for_opinion: example,
-        basis_for_opinion_is_example: true,
-      };
-      (async () => {
-        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
-        if (saved) {
-          setDraft(saved as AuditReportMainContent);
-          setSavedExampleForDraftId(draft.id);
-          toast.success('Illustrative qualified basis populated (editable)');
-        }
-      })();
-    } else if (shouldPopulate('adverse')) {
-      const example = ADVERSE_BASIS_EXAMPLE;
-      const patched: Partial<AuditReportMainContent> = {
-        basis_for_opinion: example,
-        basis_for_opinion_is_example: true,
-      };
-      (async () => {
-        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
-        if (saved) {
-          setDraft(saved as AuditReportMainContent);
-          setSavedExampleForDraftId(draft.id);
-          toast.success('Illustrative adverse basis placeholder added (editable)');
-        }
-      })();
-    } else if (shouldPopulate('disclaimer')) {
-      const example = DISCLAIMER_BASIS_EXAMPLE;
-      const patched: Partial<AuditReportMainContent> = {
-        basis_for_opinion: example,
-        basis_for_opinion_is_example: true,
-      };
-      (async () => {
-        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
-        if (saved) {
-          setDraft(saved as AuditReportMainContent);
-          setSavedExampleForDraftId(draft.id);
-          toast.success('Illustrative disclaimer basis placeholder added (editable)');
-        }
-      })();
+    if (shouldClearBasis) {
+      setDraft((prev) =>
+        prev
+          ? ({
+              ...prev,
+              basis_for_opinion: '',
+              basis_for_opinion_is_example: false,
+            } as AuditReportMainContent)
+          : prev
+      );
     }
-  }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion, savedExampleForDraftId, saveContent]);
+
+    if (draft.opinion_type === 'unqualified') {
+      setEditorBasis('');
+      return;
+    }
+
+    setEditorBasis(draft.basis_for_opinion || '');
+  }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion, draft?.basis_for_opinion_is_example]);
 
   const generator = useMemo(() => {
     if (!setup || !draft) return null;
@@ -199,8 +158,39 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     setDraft((prev) => (prev ? ({ ...prev, ...patch } as AuditReportMainContent) : prev));
   };
 
+  const handleOpinionTypeChange = (value: AuditReportMainContent['opinion_type']) => {
+    const isSwitchingToUnqualified = value === 'unqualified' && draft?.opinion_type !== 'unqualified';
+    if (isSwitchingToUnqualified) {
+      setEditorBasis('');
+      updateDraft({
+        opinion_type: value,
+        basis_for_opinion: '',
+        basis_for_opinion_is_example: false,
+      });
+      return;
+    }
+
+    updateDraft({ opinion_type: value });
+  };
+
+  const ensureBasisForModifiedOpinion = () => {
+    if (!draft) return false;
+    if (draft.opinion_type !== 'unqualified' && !draft.basis_for_opinion?.trim()) {
+      toast.error('Basis for opinion is required for qualified/adverse/disclaimer opinions.');
+      setActiveTab('opinion');
+      return false;
+    }
+    return true;
+  };
+
+  const openPreview = () => {
+    if (!ensureBasisForModifiedOpinion()) return;
+    setPreviewMode(true);
+  };
+
   const saveDraft = async () => {
     if (!draft) return;
+    if (!ensureBasisForModifiedOpinion()) return;
     setSaving(true);
     const saved = await saveContent(draft);
     setSaving(false);
@@ -344,7 +334,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
             </CardTitle>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setPreviewMode(true)} className="gap-2">
+            <Button variant="outline" onClick={openPreview} className="gap-2">
               <Eye className="h-4 w-4" />
               Preview
             </Button>
@@ -357,14 +347,13 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
       </CardHeader>
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
+          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-7">
             <TabsTrigger value="configuration">Config</TabsTrigger>
             <TabsTrigger value="opinion">Opinion</TabsTrigger>
             <TabsTrigger value="optional" className="text-[11px] px-1">KAM/EoM/Other Matter</TabsTrigger>
             <TabsTrigger value="sa720" className="text-[11px] px-1">Other Info-SA 720</TabsTrigger>
             <TabsTrigger value="s143" className="text-[11px] px-1">143(3)-Co Act</TabsTrigger>
             <TabsTrigger value="rule11" className="text-[11px] px-1">Rule 11-Co Audit Rule</TabsTrigger>
-            <TabsTrigger value="signature">Signature</TabsTrigger>
             <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
 
@@ -570,7 +559,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                 <Label>Opinion type</Label>
                 <Select
                   value={draft.opinion_type}
-                  onValueChange={(v) => updateDraft({ opinion_type: v as any })}
+                  onValueChange={(v) => handleOpinionTypeChange(v as AuditReportMainContent['opinion_type'])}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select opinion" />
@@ -593,30 +582,22 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Basis for opinion (editable)</Label>
-              <Textarea
-                rows={5}
-                value={editorBasis}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setEditorBasis(v);
-                  // Persist into draft when user edits (so preview will show user text)
-                  updateDraft({ basis_for_opinion: v, basis_for_opinion_is_example: false });
-                }}
-                placeholder="Leave blank to use the standard starter wording in Preview."
-              />
-            </div>
-
             {draft.opinion_type !== 'unqualified' && (
               <div className="space-y-2">
-                <Label>Qualification / basis details (if any)</Label>
+                <Label>Basis for opinion (editable)</Label>
                 <Textarea
-                  rows={4}
-                  value={draft.qualification_details || ''}
-                  onChange={(e) => updateDraft({ qualification_details: e.target.value })}
-                  placeholder="Describe the matter(s) leading to the modification of opinion."
+                  rows={5}
+                  value={editorBasis}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setEditorBasis(v);
+                    // Persist into draft when user edits (so preview will show user text)
+                    updateDraft({ basis_for_opinion: v, basis_for_opinion_is_example: false });
+                  }}
+                  placeholder="Provide the basis for the modified opinion."
+                  required
                 />
+                <p className="text-xs text-muted-foreground">Required for qualified, adverse, and disclaimer opinions.</p>
               </div>
             )}
 
@@ -916,7 +897,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               </div>
 
               <div className="space-y-2">
-                <Label>143(3)(h) Managerial remuneration</Label>
+                <Label>197(16) - Managerial Remuneration</Label>
                 <StatusSelect
                   value={draft.clause_143_3_h_remuneration_status}
                   onValueChange={(v) => updateDraft({ clause_143_3_h_remuneration_status: v })}
@@ -1144,71 +1125,9 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
             </div>
           </TabsContent>
 
-          {/* 7) Signature */}
-          <TabsContent value="signature" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Firm name</Label>
-                <Input
-                  value={draft.firm_name || ''}
-                  onChange={(e) => updateDraft({ firm_name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Firm registration no.</Label>
-                <Input
-                  value={draft.firm_registration_no || ''}
-                  onChange={(e) => updateDraft({ firm_registration_no: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Partner name</Label>
-                <Input
-                  value={draft.partner_name || ''}
-                  onChange={(e) => updateDraft({ partner_name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Membership no.</Label>
-                <Input
-                  value={draft.membership_no || ''}
-                  onChange={(e) => updateDraft({ membership_no: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <Separator />
-
-            {!setup ? (
-              <p className="text-sm text-muted-foreground">Setup not loaded.</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label>Place (report city)</Label>
-                  <Input
-                    value={setup.report_city || ''}
-                    onChange={(e) => saveSetupPatch({ report_city: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Report date</Label>
-                  <Input
-                    type="date"
-                    value={setup.report_date || ''}
-                    onChange={(e) => saveSetupPatch({ report_date: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>UDIN</Label>
-                  <Input value={setup.udin || ''} onChange={(e) => saveSetupPatch({ udin: e.target.value })} />
-                </div>
-              </div>
-            )}
-          </TabsContent>
-
-          {/* 8) Preview */}
+          {/* 7) Preview */}
           <TabsContent value="preview" className="space-y-4">
-            <Button variant="outline" className="w-full" onClick={() => setPreviewMode(true)}>
+            <Button variant="outline" className="w-full" onClick={openPreview}>
               Open full preview
             </Button>
             <div className="rounded-md border">

@@ -39,8 +39,8 @@ const alwaysActiveItems = [
 const engagementDependentItems = [
   { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
   { name: 'Trial Balance New', href: '/trial-balance-new', icon: FileSpreadsheet },
-  { name: 'Appointment', href: '/appointment', icon: FileSignature },
-  { name: 'Materiality', href: '/materiality', icon: Calculator },
+  { name: 'Appointment & Eng Letter', href: '/appointment', icon: FileSignature },
+  { name: 'Materiality & Risk Assessment', href: '/materiality', icon: Calculator },
   { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
   { name: 'Audit Execution', href: '/audit-execution', icon: ClipboardList },
   { name: 'Evidence Vault', href: '/evidence', icon: FileCheck },
