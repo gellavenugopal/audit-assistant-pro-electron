@@ -142,6 +142,21 @@ const H2_TO_FS_AREA: Record<string, string> = {
 export function computeBSNoteValues(
   data: LedgerRow[]
 ): { noteValues: BSNoteValues; noteLedgers: NoteLedgersMap } {
+  // GUARD: Validate all data is properly classified
+  const unclassified = data.filter(row => 
+    !row.H1 || !row.H2 || !row.H3 || row.Status !== 'Mapped'
+  );
+  
+  if (unclassified.length > 0) {
+    console.error(
+      `[INTEGRITY ERROR] computeBSNoteValues received ${unclassified.length} unclassified ledgers. ` +
+      `This should never happen! All data must be classified before reaching this function.`,
+      unclassified.map(r => r['Ledger Name'])
+    );
+    // Filter out unclassified to prevent corruption
+    data = data.filter(row => row.H1 && row.H2 && row.H3 && row.Status === 'Mapped');
+  }
+  
   const noteValues: BSNoteValues = {};
   const noteLedgers: NoteLedgersMap = {
     // Equity & Liabilities

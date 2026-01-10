@@ -37,7 +37,6 @@ const alwaysActiveItems = [
 
 // Items that require an engagement to be selected
 const engagementDependentItems = [
-  { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
   { name: 'Trial Balance New', href: '/trial-balance-new', icon: FileSpreadsheet },
   { name: 'Appointment & Eng Letter', href: '/appointment', icon: FileSignature },
   { name: 'Materiality & Risk Assessment', href: '/materiality', icon: Calculator },
