@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Keyboard } from 'lucide-react';
-import { navigationShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { navigationShortcuts, reservedShortcutKeys } from '@/hooks/useKeyboardShortcuts';
 
 interface ShortcutRowProps {
   keys: string[];
@@ -16,6 +16,16 @@ interface ShortcutRowProps {
 }
 
 const modifierKeys = new Set(['CTRL', 'CMD', 'ALT', 'SHIFT']);
+
+const shouldDoubleUnderlineKey = (key: string, keys: string[]) => {
+  if (modifierKeys.has(key.toUpperCase())) {
+    return false;
+  }
+  if (!reservedShortcutKeys.has(key.toLowerCase())) {
+    return false;
+  }
+  return keys.some((item) => item.toUpperCase() === 'SHIFT');
+};
 
 const ShortcutRow = ({ keys, description }: ShortcutRowProps) => (
   <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
@@ -28,6 +38,8 @@ const ShortcutRow = ({ keys, description }: ShortcutRowProps) => (
               'px-2 py-1 text-xs font-semibold rounded border shadow-sm',
               modifierKeys.has(key.toUpperCase())
                 ? 'bg-muted text-foreground border-border underline underline-offset-2'
+                : shouldDoubleUnderlineKey(key, keys)
+                ? 'bg-muted text-foreground border-border underline decoration-double underline-offset-2'
                 : 'bg-muted text-foreground border-border',
             ].join(' ')}
           >
@@ -68,7 +80,7 @@ export function KeyboardShortcutsDialog() {
             Keyboard Shortcuts
           </DialogTitle>
           <DialogDescription>
-            Use Ctrl/Cmd with the keys below to navigate quickly through the application.
+            Use Ctrl/Cmd with the keys below to navigate quickly through the application. For C, V, X, and Z shortcuts, use Ctrl/Cmd + Shift.
           </DialogDescription>
         </DialogHeader>
 
@@ -82,7 +94,11 @@ export function KeyboardShortcutsDialog() {
               {navigationShortcuts.map((shortcut) => (
                 <ShortcutRow
                   key={shortcut.route}
-                  keys={[modKey, shortcut.key.toUpperCase()]}
+                  keys={[
+                    modKey,
+                    ...(reservedShortcutKeys.has(shortcut.key.toLowerCase()) ? ['Shift'] : []),
+                    shortcut.key.toUpperCase(),
+                  ]}
                   description={shortcut.description}
                 />
               ))}

@@ -12,6 +12,8 @@ export interface ShortcutConfig {
   category: string;
 }
 
+export const reservedShortcutKeys = new Set(['c', 'v', 'x', 'z']);
+
 // Global navigation shortcuts
 export const navigationShortcuts = [
   { key: 'd', route: '/', description: 'Dashboard', category: 'Navigation' },
@@ -49,9 +51,14 @@ export function useGlobalKeyboardShortcuts() {
       return;
     }
 
-    // Ctrl/Cmd + key for navigation
+    // Ctrl/Cmd + key for navigation (Shift required for reserved keys)
     if (event.ctrlKey || event.metaKey) {
-      const shortcut = navigationShortcuts.find(s => s.key.toLowerCase() === event.key.toLowerCase());
+      const normalizedKey = event.key.toLowerCase();
+      if (reservedShortcutKeys.has(normalizedKey) && !event.shiftKey) {
+        return;
+      }
+
+      const shortcut = navigationShortcuts.find(s => s.key.toLowerCase() === normalizedKey);
       
       if (shortcut) {
         // Check if engagement is required

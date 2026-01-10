@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { reservedShortcutKeys } from '@/hooks/useKeyboardShortcuts';
 
 // Items that are always accessible
 const alwaysActiveItems = [
@@ -72,9 +73,19 @@ export function AppSidebar() {
 
   const renderName = (name: string) => {
     if (!name) return name;
+    const firstLetter = name[0];
+    const useDoubleUnderline = reservedShortcutKeys.has(firstLetter.toLowerCase());
+
     return (
       <>
-        <span className="underline underline-offset-2">{name[0]}</span>
+        <span
+          className={cn(
+            'underline underline-offset-2',
+            useDoubleUnderline && 'decoration-double'
+          )}
+        >
+          {firstLetter}
+        </span>
         <span>{name.slice(1)}</span>
       </>
     );
