@@ -105,6 +105,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
       row.H1 && 
       row.H2 && 
       row.H3 && 
+      row.H4 && 
       row.Status === 'Mapped'
     );
     
@@ -168,9 +169,9 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
     
     // Calculate P&L total from classified TB (Income + Expenses)
     const plTbTotal = classifiedOnlyData
-      .filter(row => row.H1 === 'P&L')
+      .filter(row => row.H1 === 'Profit and Loss' || row.H1 === 'P&L' || row.H1 === 'P&L Account')
       .reduce((sum, row) => {
-        const closing = typeof row.Closing === 'number' ? row.Closing : 0;
+        const closing = typeof row['Closing Balance'] === 'number' ? row['Closing Balance'] : 0;
         return sum + Math.abs(closing);
       }, 0);
     
@@ -181,7 +182,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
     const bsTbTotal = classifiedOnlyData
       .filter(row => row.H1 === 'Balance Sheet')
       .reduce((sum, row) => {
-        const closing = typeof row.Closing === 'number' ? row.Closing : 0;
+        const closing = typeof row['Closing Balance'] === 'number' ? row['Closing Balance'] : 0;
         return sum + Math.abs(closing);
       }, 0);
     
@@ -234,7 +235,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
         previousYearData: []
       };
       
-      const workbook = exportBalanceSheetWithNotes(data, exportOptions);
+      const workbook = exportBalanceSheetWithNotes(classifiedOnlyData, exportOptions);
       downloadWorkbook(workbook, `Balance_Sheet_with_Notes_${companyName}_${financialYear}.xlsx`);
       
       toast({
@@ -264,7 +265,7 @@ export function ReportsTab({ data, stockData, companyName, toDate, entityType, s
         previousYearData: []
       };
       
-      const workbook = exportProfitLossWithNotes(data, exportOptions);
+      const workbook = exportProfitLossWithNotes(classifiedOnlyData, exportOptions);
       downloadWorkbook(workbook, `Profit_Loss_with_Notes_${companyName}_${financialYear}.xlsx`);
       
       toast({

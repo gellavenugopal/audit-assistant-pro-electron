@@ -8,7 +8,7 @@ declare global {
     electronAPI: {
       odbcCheckConnection: () => Promise<{ success: boolean; isConnected?: boolean; error?: string }>;
       odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
-      odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[]; companyName?: string }>;
+      odbcFetchTrialBalance: (fromDate?: string, toDate?: string) => Promise<{ success: boolean; error?: string; data?: any[]; companyName?: string }>;
       odbcFetchMonthWise: (fyStartYear: number, targetMonth: string) => Promise<{ success: boolean; error?: string; data?: { plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[]; fyStartYear: number; targetMonth: string } }>;
       odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
       // Opening Balance Matching methods
@@ -174,9 +174,9 @@ export const useTallyODBC = () => {
     }
   }, [toast]);
 
-  const fetchTrialBalance = useCallback(async (): Promise<{ data: any[]; companyName: string }> => {
+  const fetchTrialBalance = useCallback(async (fromDate?: string, toDate?: string): Promise<{ data: any[]; companyName: string }> => {
     try {
-      const result = await window.electronAPI.odbcFetchTrialBalance();
+      const result = await window.electronAPI.odbcFetchTrialBalance(fromDate, toDate);
 
       if (result.success && result.data) {
         return { data: result.data, companyName: result.companyName || '' };

@@ -1,6 +1,7 @@
 // Adapter to convert LedgerRow (Trial Balance New) to TrialBalanceLine format
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import { TrialBalanceLine } from '@/hooks/useTrialBalance';
+import { getActualBalanceSign } from '@/utils/naturalBalance';
 
 // Map H1-H5 hierarchy to fs_area and aile
 function mapHierarchyToFsArea(h1: string, h2: string, h3: string, h4: string): { aile: string | null; fs_area: string | null } {
@@ -91,7 +92,8 @@ export function convertLedgerRowToTrialBalanceLine(
 
   // Determine balance type
   const closingBalance = row['Closing Balance'] || 0;
-  const balanceType = closingBalance >= 0 ? 'Debit' : 'Credit';
+  const balanceSign = getActualBalanceSign(row);
+  const balanceType = balanceSign === 'Dr' ? 'Debit' : 'Credit';
 
   return {
     id: `temp-${row['Composite Key'] || Math.random().toString(36)}`,

@@ -107,7 +107,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
   }
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded border p-4 space-y-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-semibold">Note {noteNumber}: Non-current investments</h3>
       </div>
@@ -129,8 +129,8 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
             <tr className="bg-blue-50 font-semibold">
               <td colSpan={4} className="px-3 py-2 text-sm">Trade Investments - Quoted</td>
             </tr>
-            
-            {investments.quoted.investmentProperty > 0 && (
+
+            {investments.quoted.investmentProperty !== 0 && (
               <>
                 <tr className="border-b">
                   <td className="px-3 py-2 text-sm">Investment property (Valued at cost less accumulated depreciation)</td>
@@ -153,7 +153,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </>
             )}
 
-            {investments.quoted.subsidiaries > 0 && (
+            {investments.quoted.subsidiaries !== 0 && (
               <>
                 <tr className="border-b">
                   <td className="px-3 py-2 text-sm">Investments in subsidiaries</td>
@@ -170,7 +170,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </>
             )}
 
-            {investments.quoted.associates > 0 && (
+            {investments.quoted.associates !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Investments in associates</td>
                 <td className="px-3 py-2 text-center text-sm">-</td>
@@ -179,7 +179,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </tr>
             )}
 
-            {investments.quoted.jointVentures > 0 && (
+            {investments.quoted.jointVentures !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Investments in joint ventures</td>
                 <td className="px-3 py-2 text-center text-sm">-</td>
@@ -188,7 +188,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </tr>
             )}
 
-            {investments.quoted.partnershipFirm > 0 && (
+            {investments.quoted.partnershipFirm !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Investments in partnership firm (Refer footnote 1)</td>
                 <td className="px-3 py-2 text-center text-sm">-</td>
@@ -202,7 +202,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               <td colSpan={3}></td>
             </tr>
 
-            {investments.quoted.preferenceShares > 0 && (
+            {investments.quoted.preferenceShares !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Investments in preference shares</td>
                 <td className="px-3 py-2 text-center text-sm">-</td>
@@ -211,7 +211,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </tr>
             )}
 
-            {investments.quoted.govtSecurities > 0 && (
+            {investments.quoted.govtSecurities !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Investments in government or trust securities</td>
                 <td className="px-3 py-2 text-center text-sm">-</td>
@@ -220,7 +220,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </tr>
             )}
 
-            {investments.quoted.debentures > 0 && (
+            {investments.quoted.debentures !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Investments in debentures or bonds</td>
                 <td className="px-3 py-2 text-center text-sm">-</td>
@@ -229,7 +229,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </tr>
             )}
 
-            {investments.quoted.mutualFunds > 0 && (
+            {investments.quoted.mutualFunds !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Investments in mutual funds</td>
                 <td className="px-3 py-2 text-center text-sm">-</td>
@@ -238,7 +238,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </tr>
             )}
 
-            {investments.quoted.otherLongTerm > 0 && (
+            {investments.quoted.otherLongTerm !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Other long term investments (specify nature)</td>
                 <td className="px-3 py-2 text-center text-sm">-</td>
@@ -247,7 +247,7 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
               </tr>
             )}
 
-            {quotedTotal > 0 && (
+            {quotedTotal !== 0 && (
               <>
                 <tr className="bg-gray-100 font-semibold border-b">
                   <td className="px-3 py-2 text-sm">Total Non-current investments (gross)</td>
@@ -271,14 +271,14 @@ export function NonCurrentInvestmentsNote({ data, noteNumber, reportingScale = '
             )}
 
             {/* Trade Investments - Unquoted */}
-            {unquotedTotal > 0 && (
+            {unquotedTotal !== 0 && (
               <>
                 <tr className="bg-blue-50 font-semibold">
                   <td colSpan={4} className="px-3 py-2 text-sm">Trade Investments - Unquoted</td>
                 </tr>
-                
+
                 {/* Similar structure for unquoted investments */}
-                {investments.unquoted.investmentProperty > 0 && (
+                {investments.unquoted.investmentProperty !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Investment property (Valued at cost less accumulated depreciation)</td>
                     <td className="px-3 py-2 text-center text-sm">-</td>

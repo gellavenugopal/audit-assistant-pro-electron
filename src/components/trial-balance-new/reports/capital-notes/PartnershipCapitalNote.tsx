@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -42,12 +42,37 @@ interface PartnershipCapitalNoteProps {
 }
 
 export function PartnershipCapitalNote({ lines, currentYear, previousYear, entityType }: PartnershipCapitalNoteProps) {
+  const storageKey = useMemo(() => {
+    const engagementId = lines?.[0]?.engagement_id || 'local';
+    return `capital-note-${entityType}-${engagementId}`;
+  }, [lines, entityType]);
+
   const [partners, setPartners] = useState<Partner[]>([
     createEmptyPartner(),
     createEmptyPartner(),
   ]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingPartner, setEditingPartner] = useState<Partner | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed.partners && Array.isArray(parsed.partners) && parsed.partners.length > 0) {
+        setPartners(parsed.partners);
+      }
+    } catch (error) {
+      console.error('Failed to load partnership capital note', error);
+    }
+  }, [storageKey]);
+
+  const handleSave = () => {
+    if (typeof window === 'undefined') return;
+    const payload = { partners };
+    window.localStorage.setItem(storageKey, JSON.stringify(payload));
+  };
 
   function createEmptyPartner(): Partner {
     return {
@@ -155,7 +180,7 @@ export function PartnershipCapitalNote({ lines, currentYear, previousYear, entit
             <Plus className="h-4 w-4 mr-2" />
             Add Partner
           </Button>
-          <Button size="sm">
+          <Button size="sm" onClick={handleSave}>
             <Save className="h-4 w-4 mr-2" />
             Save
           </Button>

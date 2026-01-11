@@ -22,6 +22,7 @@ import {
 } from '@/data/financialStatementFormats';
 import { NoteContentDialog } from './NoteContentDialog';
 import { FileText } from 'lucide-react';
+import { formatCurrency as sharedFormatCurrency, getScaleLabel, ReportingScale } from '@/lib/formatters/currency';
 
 // Types for note values and ledger data
 interface NoteLedgerItem {
@@ -43,7 +44,7 @@ type BSNoteValues = {
 interface Props {
   currentLines: LedgerRow[];  // Changed from TrialBalanceLine to LedgerRow
   previousLines?: LedgerRow[]; // Changed from TrialBalanceLine to LedgerRow
-  reportingScale?: string;
+  reportingScale?: ReportingScale;
   constitution?: string;
   startingNoteNumber?: number;
   noteValues?: BSNoteValues;
@@ -70,46 +71,7 @@ export function ScheduleIIIBalanceSheet({
   const [annexureOpen, setAnnexureOpen] = useState(false);
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
 
-  const formatCurrency = (amount: number) => {
-    if (amount === 0) return '-';
-    const sign = amount < 0 ? '-' : '';
-    const absAmount = Math.abs(amount);
-    
-    switch (reportingScale) {
-      case 'rupees':
-        return `${sign}₹${absAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
-      case 'hundreds':
-        return `${sign}₹${(absAmount / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'thousands':
-        return `${sign}₹${(absAmount / 1000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'lakhs':
-        return `${sign}₹${(absAmount / 100000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'millions':
-        return `${sign}₹${(absAmount / 1000000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'crores':
-        return `${sign}₹${(absAmount / 10000000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'auto':
-      default:
-        if (absAmount >= 10000000) {
-          return `${sign}₹${(absAmount / 10000000).toFixed(2)} Cr`;
-        } else if (absAmount >= 100000) {
-          return `${sign}₹${(absAmount / 100000).toFixed(2)} L`;
-        }
-        return `${sign}₹${absAmount.toLocaleString('en-IN')}`;
-    }
-  };
-
-  const getScaleLabel = () => {
-    switch (reportingScale) {
-      case 'rupees': return '(Amount in ₹)';
-      case 'hundreds': return "(Amount in 100's)";
-      case 'thousands': return "(Amount in 1000's)";
-      case 'lakhs': return '(Amount in Lakhs)';
-      case 'millions': return '(Amount in Millions)';
-      case 'crores': return '(Amount in Crores)';
-      default: return '';
-    }
-  };
+  const formatCurrency = (amount: number) => sharedFormatCurrency(amount, reportingScale, { includeSymbol: true });
 
   const hasPreviousPeriod = previousLines && previousLines.length > 0;
   const formatLabel = getFormatLabel(constitution);
@@ -305,7 +267,7 @@ export function ScheduleIIIBalanceSheet({
         <h2 className="text-base font-semibold">Balance Sheet</h2>
         <p className="text-xs text-muted-foreground">{formatLabel}</p>
         {reportingScale !== 'auto' && (
-          <p className="text-[10px] text-muted-foreground">{getScaleLabel()}</p>
+          <p className="text-[10px] text-muted-foreground">{getScaleLabel(reportingScale)}</p>
         )}
       </div>
 
@@ -354,6 +316,8 @@ export function ScheduleIIIBalanceSheet({
         noteKey={selectedNote || ''}
         noteNumber=""
         ledgers={selectedNote ? noteLedgers[selectedNote] || [] : []}
+        stockData={[]}
+        ledgerData={currentLines}
         reportingScale={reportingScale}
       />
     </div>

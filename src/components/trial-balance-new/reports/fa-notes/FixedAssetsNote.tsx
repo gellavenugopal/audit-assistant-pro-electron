@@ -37,6 +37,39 @@ export function FixedAssetsNote({ data, noteNumber, reportingScale = 'rupees' }:
     return formatIndianNumber(scaled);
   };
 
+  // Helper functions to safely access ledger properties
+  const getLedgerName = (row: LedgerRow) => row['Ledger Name'] || (row as any).ledgerName || '';
+  const getOpeningBalance = (row: LedgerRow) => row['Opening Balance'] ?? (row as any).openingBalance ?? 0;
+  const getClosingBalance = (row: LedgerRow) => row['Closing Balance'] ?? (row as any).closingBalance ?? 0;
+
+  const fixedAssetRows = useMemo(() => {
+    if (!data || data.length === 0) return [] as LedgerRow[];
+    return data.filter(row => {
+      const h2 = (row.H2 || '').toLowerCase();
+      const h3 = (row.H3 || '').toLowerCase();
+      const h4 = (row.H4 || '').toLowerCase();
+      const primary = (row['Primary Group'] || '').toLowerCase();
+      const ledgerName = getLedgerName(row).toLowerCase();
+      
+      // Match by Primary Group "Fixed Assets"
+      if (primary.includes('fixed asset')) return true;
+      
+      // Match by H3/H4 classification
+      if (h3.includes('property') || h3.includes('plant') || h3.includes('equipment') || h3.includes('ppe')) return true;
+      if (h4.includes('tangible') || h4.includes('intangible')) return true;
+      
+      // Match by ledger name patterns (common PPE items)
+      const ppePatterns = [
+        'land', 'building', 'plant', 'machinery', 'furniture', 'fixture',
+        'vehicle', 'computer', 'electrical', 'office equipment',
+        'goodwill', 'software', 'trademark', 'brand'
+      ];
+      if (ppePatterns.some(pattern => ledgerName.includes(pattern))) return true;
+      
+      return false;
+    });
+  }, [data]);
+
   // Asset categories mapping
   const assetCategories = useMemo(() => {
     const tangible: AssetCategory[] = [
@@ -61,64 +94,79 @@ export function FixedAssetsNote({ data, noteNumber, reportingScale = 'rupees' }:
       { name: 'Others', openingGross: 0, additions: 0, deductions: 0, closingGross: 0, openingDep: 0, depForYear: 0, depOnDeductions: 0, closingDep: 0, openingNet: 0, closingNet: 0 },
     ];
 
-    // Filter data for fixed assets
-    data.forEach(row => {
-      const h3 = row.H3?.toLowerCase() || '';
-      const h4 = row.H4?.toLowerCase() || '';
-      const ledgerName = row.ledgerName?.toLowerCase() || '';
-      
-      // Find matching category
-      let category: AssetCategory | null = null;
-      
-      if (h3.includes('property') || h3.includes('plant') || h3.includes('equipment') || h4.includes('tangible')) {
-        // Tangible assets
-        if (ledgerName.includes('freehold land')) {
-          category = tangible.find(c => c.name === 'Freehold Land') || null;
-        } else if (ledgerName.includes('leasehold land')) {
-          category = tangible.find(c => c.name === 'Leasehold Land') || null;
-        } else if (ledgerName.includes('building')) {
-          category = tangible.find(c => c.name === 'Buildings') || null;
-        } else if (ledgerName.includes('leasehold improvement')) {
-          category = tangible.find(c => c.name === 'Leasehold Improvement') || null;
-        } else if (ledgerName.includes('plant') || ledgerName.includes('machinery')) {
-          category = tangible.find(c => c.name === 'Plant and Machinery') || null;
-        } else if (ledgerName.includes('furniture') || ledgerName.includes('fixture')) {
-          category = tangible.find(c => c.name === 'Furniture and Fixtures') || null;
-        } else if (ledgerName.includes('electrical')) {
-          category = tangible.find(c => c.name === 'Electrical Installations') || null;
-        } else if (ledgerName.includes('office equipment')) {
-          category = tangible.find(c => c.name === 'Office Equipment') || null;
-        } else if (ledgerName.includes('computer')) {
-          category = tangible.find(c => c.name === 'Computers') || null;
-        } else if (ledgerName.includes('vehicle')) {
-          category = tangible.find(c => c.name === 'Vehicles') || null;
-        }
-      } else if (h4.includes('intangible')) {
-        // Intangible assets
-        if (ledgerName.includes('goodwill on consolidation')) {
-          category = intangible.find(c => c.name === 'Goodwill on Consolidation') || null;
-        } else if (ledgerName.includes('goodwill')) {
-          category = intangible.find(c => c.name === 'Goodwill') || null;
-        } else if (ledgerName.includes('software')) {
-          category = intangible.find(c => c.name === 'Computer Software') || null;
-        } else if (ledgerName.includes('trademark') || ledgerName.includes('brand')) {
-          category = intangible.find(c => c.name === 'Trademarks and Brands') || null;
-        } else if (ledgerName.includes('technical') || ledgerName.includes('knowhow')) {
-          category = intangible.find(c => c.name === 'Technical Knowhow') || null;
-        } else {
-          category = intangible.find(c => c.name === 'Others') || null;
-        }
+    const resolveCategory = (row: LedgerRow): AssetCategory | null => {
+      const h3 = (row.H3 || '').toLowerCase();
+      const h4 = (row.H4 || '').toLowerCase();
+      const ledgerName = getLedgerName(row).toLowerCase();
+
+      const isIntangible = h3.includes('intangible') || h4.includes('intangible') ||
+        ledgerName.includes('goodwill') || ledgerName.includes('software') || ledgerName.includes('trademark') || ledgerName.includes('brand');
+
+      if (isIntangible) {
+        if (ledgerName.includes('goodwill on consolidation')) return intangible.find(c => c.name === 'Goodwill on Consolidation') || null;
+        if (ledgerName.includes('goodwill')) return intangible.find(c => c.name === 'Goodwill') || null;
+        if (ledgerName.includes('software')) return intangible.find(c => c.name === 'Computer Software') || null;
+        if (ledgerName.includes('trademark') || ledgerName.includes('brand')) return intangible.find(c => c.name === 'Trademarks and Brands') || null;
+        if (ledgerName.includes('technical') || ledgerName.includes('knowhow')) return intangible.find(c => c.name === 'Technical Knowhow') || null;
+        return intangible.find(c => c.name === 'Others') || null;
       }
 
-      // Update category values (placeholder - actual values would come from asset register)
-      if (category) {
-        category.closingNet += row.closingBalance || 0;
-        category.closingGross += row.closingBalance || 0;
+      if (ledgerName.includes('freehold land')) return tangible.find(c => c.name === 'Freehold Land') || null;
+      if (ledgerName.includes('leasehold land')) return tangible.find(c => c.name === 'Leasehold Land') || null;
+      if (ledgerName.includes('building')) return tangible.find(c => c.name === 'Buildings') || null;
+      if (ledgerName.includes('leasehold improvement')) return tangible.find(c => c.name === 'Leasehold Improvement') || null;
+      if (ledgerName.includes('plant') || ledgerName.includes('machinery')) return tangible.find(c => c.name === 'Plant and Machinery') || null;
+      if (ledgerName.includes('furniture') || ledgerName.includes('fixture')) return tangible.find(c => c.name === 'Furniture and Fixtures') || null;
+      if (ledgerName.includes('electrical')) return tangible.find(c => c.name === 'Electrical Installations') || null;
+      if (ledgerName.includes('office equipment')) return tangible.find(c => c.name === 'Office Equipment') || null;
+      if (ledgerName.includes('computer')) return tangible.find(c => c.name === 'Computers') || null;
+      if (ledgerName.includes('vehicle')) return tangible.find(c => c.name === 'Vehicles') || null;
+
+      // Default bucket for tangible assets
+      return tangible.find(c => c.name === 'Plant and Machinery') || null;
+    };
+
+    fixedAssetRows.forEach(row => {
+      const category = resolveCategory(row);
+      if (!category) return;
+
+      const opening = Number(getOpeningBalance(row) || 0);
+      const closing = Number(getClosingBalance(row) || 0);
+
+      // Movement-based logic following Tally sign convention (Negative = Dr, Positive = Cr)
+      // Assets are Dr balance (negative in Tally)
+      // If Closing < Opening: Asset increased (more negative Dr) → Addition
+      // If Closing > Opening: Asset decreased (less negative Dr) → Deduction
+      const movement = closing - opening;
+      
+      const addition = movement < 0 ? Math.abs(movement) : 0;
+      const deduction = movement > 0 ? Math.abs(movement) : 0;
+
+      // Debug logging
+      const ledgerName = getLedgerName(row);
+      if (ledgerName.toLowerCase().includes('plant') || ledgerName.toLowerCase().includes('furniture')) {
+        console.log(`FA Debug - ${ledgerName}:`, {
+          opening,
+          closing,
+          movement,
+          addition,
+          deduction,
+        });
       }
+
+      // Gross Block uses absolute values
+      category.openingGross += Math.abs(opening);
+      category.additions += addition;
+      category.deductions += deduction;
+      category.closingGross += Math.abs(closing);
+
+      // We don't have separate depreciation movement per asset here; treat net as gross for display
+      category.openingNet += Math.abs(opening);
+      category.closingNet += Math.abs(closing);
     });
 
     return { tangible, intangible };
-  }, [data]);
+  }, [fixedAssetRows]);
 
   // Calculate totals
   const tangibleTotal = useMemo(() => {
@@ -172,8 +220,16 @@ export function FixedAssetsNote({ data, noteNumber, reportingScale = 'rupees' }:
     closingNet: tangibleTotal.closingNet + intangibleTotal.closingNet,
   }), [tangibleTotal, intangibleTotal]);
 
+  // Debug logging
+  console.log('FA Note Debug:', {
+    fixedAssetRowsCount: fixedAssetRows.length,
+    tangibleTotal,
+    intangibleTotal,
+    grandTotal,
+  });
+
   // Don't render if no fixed asset data
-  if (grandTotal.closingNet === 0) {
+  if (fixedAssetRows.length === 0 || (grandTotal.closingGross === 0 && grandTotal.openingGross === 0)) {
     return null;
   }
 
@@ -230,16 +286,16 @@ export function FixedAssetsNote({ data, noteNumber, reportingScale = 'rupees' }:
               <th colSpan={2} className="px-3 py-2 text-center text-xs font-semibold border-b">Net Book Value</th>
             </tr>
             <tr>
-              <th className="px-3 py-2 text-center text-xs font-semibold">#NAME?</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold">Opening</th>
               <th className="px-3 py-2 text-center text-xs font-semibold">Additions</th>
               <th className="px-3 py-2 text-center text-xs font-semibold">Deductions</th>
-              <th className="px-3 py-2 text-center text-xs font-semibold border-r">#NAME?</th>
-              <th className="px-3 py-2 text-center text-xs font-semibold">#NAME?</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold border-r">Closing</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold">Opening</th>
               <th className="px-3 py-2 text-center text-xs font-semibold">For the year</th>
               <th className="px-3 py-2 text-center text-xs font-semibold">On Deductions</th>
-              <th className="px-3 py-2 text-center text-xs font-semibold border-r">#NAME?</th>
-              <th className="px-3 py-2 text-center text-xs font-semibold">#NAME?</th>
-              <th className="px-3 py-2 text-center text-xs font-semibold">#NAME?</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold border-r">Closing</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold">Opening Net</th>
+              <th className="px-3 py-2 text-center text-xs font-semibold">Closing Net</th>
             </tr>
           </thead>
           <tbody>
@@ -258,7 +314,7 @@ export function FixedAssetsNote({ data, noteNumber, reportingScale = 'rupees' }:
             {renderTotalRow('Total', intangibleTotal)}
 
             {/* Grand Total */}
-            {renderTotalRow('### #NAME?', grandTotal)}
+            {renderTotalRow('Grand Total', grandTotal)}
           </tbody>
         </table>
       </div>
@@ -277,7 +333,7 @@ export function FixedAssetsNote({ data, noteNumber, reportingScale = 'rupees' }:
                 <th className="text-left py-2">Title deeds held in the name of</th>
                 <th className="text-left py-2">Held by director or promoter or their relative or their employee</th>
                 <th className="text-left py-2">Property held since which date</th>
-                <th className="text-right py-2">#NAME?</th>
+                <th className="text-right py-2">Revalued amount</th>
               </tr>
             </thead>
             <tbody>
@@ -295,8 +351,8 @@ export function FixedAssetsNote({ data, noteNumber, reportingScale = 'rupees' }:
             <thead>
               <tr className="border-b">
                 <th rowSpan={2} className="text-left py-2 border-r">Particulars</th>
-                <th colSpan={4} className="text-center py-2 border-b">#NAME?</th>
-                <th colSpan={4} className="text-center py-2">#NAME?</th>
+                <th colSpan={4} className="text-center py-2 border-b">Projects in progress</th>
+                <th colSpan={4} className="text-center py-2">Projects temporarily suspended</th>
               </tr>
               <tr className="border-b">
                 <th className="text-center py-2">Less than 1 year</th>
@@ -332,8 +388,8 @@ export function FixedAssetsNote({ data, noteNumber, reportingScale = 'rupees' }:
             <thead>
               <tr className="border-b">
                 <th rowSpan={2} className="text-left py-2 border-r">Particulars</th>
-                <th colSpan={4} className="text-center py-2 border-b">#NAME?</th>
-                <th colSpan={4} className="text-center py-2">#NAME?</th>
+                <th colSpan={4} className="text-center py-2 border-b">Projects in progress</th>
+                <th colSpan={4} className="text-center py-2">Projects temporarily suspended</th>
               </tr>
               <tr className="border-b">
                 <th className="text-center py-2">Less than 1 year</th>
