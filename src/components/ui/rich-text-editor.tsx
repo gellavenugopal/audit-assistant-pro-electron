@@ -293,6 +293,7 @@ export function RichTextEditor({
           ref={editorRef}
           contentEditable={!disabled}
           suppressContentEditableWarning
+          tabIndex={disabled ? -1 : 0}
           className="min-h-[96px] px-3 py-2 text-sm outline-none whitespace-pre-wrap break-words"
           onInput={emitChange}
           onBlur={() => {
