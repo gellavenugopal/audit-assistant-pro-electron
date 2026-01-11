@@ -1,5 +1,17 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import ExcelJS from 'exceljs';
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  BorderStyle,
+  ShadingType,
+} from 'docx';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -75,7 +87,7 @@ import {
 } from '@/hooks/useAuditExecution';
 import { WorkingSectionBoxComponent } from '@/components/audit/WorkingSectionBox';
 import { useEvidenceFiles } from '@/hooks/useEvidenceFiles';
-import { BoxStatus, DEFAULT_BOX_HEADERS, DEFAULT_SECTION_NAMES, LEGACY_BOX_HEADER_MAP, LEGACY_SECTION_NAME_MAP } from '@/types/auditExecution';
+import { AuditExecutionBox, BoxStatus, DEFAULT_BOX_HEADERS, DEFAULT_SECTION_NAMES, LEGACY_BOX_HEADER_MAP, LEGACY_SECTION_NAME_MAP } from '@/types/auditExecution';
 import { cn } from '@/lib/utils';
 
 const normalizeHeader = (value: string) =>
@@ -118,6 +130,7 @@ export default function AuditExecution() {
   const [evidenceDialogOpen, setEvidenceDialogOpen] = useState(false);
   const [evidenceAttachmentLevel, setEvidenceAttachmentLevel] = useState<'program' | 'section' | 'box' | null>(null);
   const [evidenceAttachmentId, setEvidenceAttachmentId] = useState<string | null>(null);
+  const [evidenceAttachmentSectionId, setEvidenceAttachmentSectionId] = useState<string | null>(null);
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>([]);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [newBoxHeader, setNewBoxHeader] = useState('');
@@ -141,6 +154,7 @@ export default function AuditExecution() {
   const [evidenceUploadType, setEvidenceUploadType] = useState('document');
   const [evidenceUploadRef, setEvidenceUploadRef] = useState('');
   const [evidenceUploading, setEvidenceUploading] = useState(false);
+  const [pendingEvidenceFiles, setPendingEvidenceFiles] = useState<File[]>([]);
   const [addSectionDialogOpen, setAddSectionDialogOpen] = useState(false);
   const [newSectionName, setNewSectionName] = useState('');
   const assignmentStorageKey = currentEngagement?.id
@@ -160,11 +174,12 @@ export default function AuditExecution() {
     deleteSection,
     refetch: refetchSections,
   } = useAuditExecutionSections(selectedProgramId);
-  const { notes: reviewNotes, createNote, updateNote } = useReviewNotes(currentEngagement?.id || undefined);
+  const { notes: reviewNotes, createNote, updateNote, deleteNote } = useReviewNotes(currentEngagement?.id || undefined);
   const {
     files: evidenceFiles,
     loading: evidenceLoading,
     uploadFile,
+    deleteFile,
     refetch: refetchEvidence,
   } = useEvidenceFiles(currentEngagement?.id);
   const { attachments, loading: attachmentsLoading, createAttachment, deleteAttachment } = useAuditExecutionAttachments(selectedProgramId);
@@ -593,12 +608,16 @@ export default function AuditExecution() {
       setEditProgramDialogOpen(true);
     }
   };
-  const openEvidenceDialog = (level: 'program' | 'section' | 'box', id: string) => {
+  const openEvidenceDialog = (level: 'program' | 'section' | 'box', id: string, sectionId?: string) => {
     setEvidenceAttachmentLevel(level);
     setEvidenceAttachmentId(id);
+    setEvidenceAttachmentSectionId(
+      level === 'box' ? sectionId ?? null : level === 'section' ? id : null
+    );
     setSelectedEvidenceIds([]);
     setEvidenceUploadType('document');
     setEvidenceUploadRef(selectedProgram?.workpaper_reference || '');
+    setPendingEvidenceFiles([]);
     setEvidenceDialogOpen(true);
   };
   const handleAttachEvidence = async () => {
@@ -606,42 +625,99 @@ export default function AuditExecution() {
       toast.error('Please sign in and select a program first.');
       return;
     }
-    if (!evidenceAttachmentId || selectedEvidenceIds.length === 0) return;
+    if (!evidenceAttachmentId || !evidenceAttachmentLevel) return;
+    if (selectedEvidenceIds.length === 0 && pendingEvidenceFiles.length === 0) return;
+
+    if (evidenceAttachmentLevel === 'box' && !evidenceAttachmentSectionId) {
+      toast.error('Unable to attach evidence: missing box context.');
+      return;
+    }
 
     const attachmentTarget =
       evidenceAttachmentLevel === 'section'
         ? { section_id: evidenceAttachmentId, box_id: null }
         : evidenceAttachmentLevel === 'box'
-          ? { section_id: null, box_id: evidenceAttachmentId }
+          ? { section_id: evidenceAttachmentSectionId, box_id: evidenceAttachmentId }
           : { section_id: null, box_id: null };
 
-    const created = await Promise.all(
-      selectedEvidenceIds.map((evidenceId) => {
-        const evidence = evidenceFiles.find((file) => file.id === evidenceId);
-        if (!evidence) return null;
-        return createAttachment({
-          audit_program_id: selectedProgramId,
-          file_name: evidence.name,
-          file_type: evidence.file_type,
-          file_size: evidence.file_size,
-          file_path: evidence.file_path,
-          uploaded_by: user.id,
-          is_evidence: true,
-          ...attachmentTarget,
+    setEvidenceUploading(true);
+    try {
+      const uploadedEvidence: typeof evidenceFiles = [];
+      for (const file of pendingEvidenceFiles) {
+        const uploaded = await uploadFile(file, {
+          name: file.name,
+          file_type: evidenceUploadType,
+          workpaper_ref: evidenceUploadRef || undefined,
         });
-      })
-    );
+        if (uploaded?.id) {
+          uploadedEvidence.push(uploaded);
+        }
+      }
 
-    const attachedCount = created.filter(Boolean).length;
-    if (attachedCount > 0) {
-      toast.success(`Attached ${attachedCount} evidence file(s) to ${evidenceAttachmentLevel}.`);
+      if (uploadedEvidence.length > 0) {
+        await refetchEvidence();
+      }
+
+      const allEvidenceIds = Array.from(
+        new Set([...selectedEvidenceIds, ...uploadedEvidence.map((item) => item.id)])
+      );
+      const evidenceLookup = new Map(
+        [...evidenceFiles, ...uploadedEvidence].map((file) => [file.id, file])
+      );
+      const created = await Promise.all(
+        allEvidenceIds.map((evidenceId) => {
+          const evidence = evidenceLookup.get(evidenceId);
+          if (!evidence) return null;
+          return createAttachment({
+            audit_program_id: selectedProgramId,
+            file_name: evidence.name,
+            file_type: evidence.file_type,
+            file_size: evidence.file_size,
+            file_path: evidence.file_path,
+            uploaded_by: user.id,
+            is_evidence: true,
+            ...attachmentTarget,
+          });
+        })
+      );
+
+      const attachedCount = created.filter(Boolean).length;
+      if (attachedCount > 0) {
+        toast.success(`Attached ${attachedCount} evidence file(s) to ${evidenceAttachmentLevel}.`);
+      }
+      setEvidenceDialogOpen(false);
+      setSelectedEvidenceIds([]);
+      setPendingEvidenceFiles([]);
+    } finally {
+      setEvidenceUploading(false);
     }
-    setEvidenceDialogOpen(false);
-    setSelectedEvidenceIds([]);
   };
 
-  const handleDeleteEvidence = async (attachmentId: string) => {
-    await deleteAttachment(attachmentId);
+  const handleDeleteEvidence = async (attachment: { id: string; file_path: string }) => {
+    if (!confirm('Delete this attachment? The file will be removed from the vault if it is not used elsewhere.')) {
+      return;
+    }
+
+    await deleteAttachment(attachment.id);
+
+    try {
+      const { data: remainingAttachments, error } = await supabase
+        .from('audit_program_attachments')
+        .select('id')
+        .eq('file_path', attachment.file_path)
+        .limit(1);
+
+      if (error) throw error;
+
+      if (!remainingAttachments || remainingAttachments.length === 0) {
+        const evidence = evidenceFiles.find((file) => file.file_path === attachment.file_path);
+        if (evidence) {
+          await deleteFile(evidence);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking evidence usage:', error);
+    }
   };
 
   const handleOpenAttachment = async (attachment: { file_path: string; file_name: string }) => {
@@ -659,31 +735,71 @@ export default function AuditExecution() {
     }
   };
 
-  const handleUploadEvidence = async (files: FileList | null) => {
+  const handleQueueEvidence = (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    if (!user) {
-      toast.error('Please sign in to upload evidence.');
+    setPendingEvidenceFiles((prev) => [...prev, ...Array.from(files)]);
+  };
+
+  const handleQuickAttachBoxEvidence = async (
+    boxId: string,
+    sectionId: string,
+    files: FileList | null
+  ) => {
+    if (!user || !selectedProgramId) {
+      toast.error('Please sign in and select a program first.');
+      return;
+    }
+    if (!files || files.length === 0) return;
+    if (!sectionId) {
+      toast.error('Unable to attach evidence: missing box context.');
       return;
     }
 
+    const uploadFiles = Array.from(files);
     setEvidenceUploading(true);
     try {
-      const uploadedIds: string[] = [];
-      for (const file of Array.from(files)) {
+      const uploadedEvidence = [];
+      for (const file of uploadFiles) {
         const uploaded = await uploadFile(file, {
           name: file.name,
-          file_type: evidenceUploadType,
-          workpaper_ref: evidenceUploadRef || undefined,
+          file_type: 'document',
+          workpaper_ref: selectedProgram?.workpaper_reference || undefined,
         });
         if (uploaded?.id) {
-          uploadedIds.push(uploaded.id);
+          uploadedEvidence.push(uploaded);
         }
       }
 
-      if (uploadedIds.length > 0) {
-        await refetchEvidence();
-        setSelectedEvidenceIds((prev) => Array.from(new Set([...prev, ...uploadedIds])));
+      if (uploadedEvidence.length === 0) {
+        toast.error('No files were uploaded. Please try again.');
+        return;
       }
+
+      const created = await Promise.all(
+        uploadedEvidence.map((evidence) =>
+          createAttachment({
+            audit_program_id: selectedProgramId,
+            section_id: sectionId,
+            box_id: boxId,
+            file_name: evidence.name,
+            file_type: evidence.file_type,
+            file_size: evidence.file_size,
+            file_path: evidence.file_path,
+            uploaded_by: user.id,
+            is_evidence: true,
+          })
+        )
+      );
+
+      const attachedCount = created.filter(Boolean).length;
+      if (attachedCount > 0) {
+        toast.success(`Attached ${attachedCount} file(s) to the box.`);
+      } else {
+        toast.error('Failed to attach uploaded files. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error uploading evidence from box:', error);
+      toast.error('Failed to upload evidence. Please try again.');
     } finally {
       setEvidenceUploading(false);
     }
@@ -732,19 +848,26 @@ export default function AuditExecution() {
 
         const boxIds = (boxes || []).map((box) => box.id);
 
+        const attachmentDeletes = [];
         if (boxIds.length > 0) {
-          const { error: boxAttachmentError } = await supabase
+          attachmentDeletes.push(
+            supabase
+              .from('audit_program_attachments')
+              .delete()
+              .in('box_id', boxIds)
+          );
+        }
+        attachmentDeletes.push(
+          supabase
             .from('audit_program_attachments')
             .delete()
-            .in('box_id', boxIds);
-          if (boxAttachmentError) throw boxAttachmentError;
-        }
+            .in('section_id', sectionIds)
+        );
 
-        const { error: sectionAttachmentError } = await supabase
-          .from('audit_program_attachments')
-          .delete()
-          .in('section_id', sectionIds);
-        if (sectionAttachmentError) throw sectionAttachmentError;
+        const attachmentResults = await Promise.all(attachmentDeletes);
+        attachmentResults.forEach(({ error }) => {
+          if (error) throw error;
+        });
 
         const { error: boxDeleteError } = await supabase
           .from('audit_program_boxes')
@@ -774,6 +897,171 @@ export default function AuditExecution() {
     'in-progress': 'In Progress',
     review: 'Under Review',
     complete: 'Complete',
+  };
+
+  const handleExportBox = async (
+    box: AuditExecutionBox,
+    sectionName: string,
+    format: 'excel' | 'word'
+  ) => {
+    if (!selectedProgramId || !selectedProgram) {
+      toast.error('Select an audit execution to export.');
+      return;
+    }
+
+    const clientName = selectedClient?.name || 'Client';
+    const financialYear = selectedYear?.display_name || financialYearDisplay;
+    const engagementType = currentEngagement?.engagement_type || 'Audit';
+    const programName = selectedProgram.name;
+    const workpaperRef = selectedProgram.workpaper_reference || '';
+    const boxHeader = normalizeHeader(box.header);
+    const contentText = stripHtml(String(box.content || '')).trim();
+    const contentValue = contentText || 'No content provided.';
+    const statusLabel = statusFilterLabels[box.status] || box.status;
+    const fileSafeName = `${programName}_${sectionName}_${boxHeader}`
+      .replace(/[\\/:*?"<>|]/g, '')
+      .replace(/\s+/g, '_');
+
+    if (format === 'excel') {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Box Export');
+      const totalColumns = 4;
+      const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1F4E79' } } as const;
+
+      worksheet.columns = [
+        { width: 28 },
+        { width: 28 },
+        { width: 28 },
+        { width: 28 },
+      ];
+
+      const addMergedRow = (rowIndex: number, text: string, font?: ExcelJS.Font) => {
+        worksheet.mergeCells(rowIndex, 1, rowIndex, totalColumns);
+        const cell = worksheet.getCell(rowIndex, 1);
+        cell.value = text;
+        cell.font = font;
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      };
+
+      addMergedRow(1, clientName, { bold: true, color: { argb: 'C00000' }, size: 12 });
+      addMergedRow(2, `${engagementType} for FY ${financialYear}`, { bold: true, size: 11 });
+      addMergedRow(3, `Execution: ${programName}`, { size: 10 });
+      addMergedRow(4, `Line Item: ${sectionName}`, { size: 10 });
+      if (workpaperRef) {
+        addMergedRow(5, `Workpaper Ref: ${workpaperRef}`, { size: 10 });
+      }
+      addMergedRow(6, `Box Status: ${statusLabel}`, { size: 10 });
+
+      const startRow = workpaperRef ? 8 : 7;
+      worksheet.mergeCells(startRow, 1, startRow, totalColumns);
+      const headerCell = worksheet.getCell(startRow, 1);
+      headerCell.value = boxHeader;
+      headerCell.font = { bold: true, color: { argb: 'FFFFFF' }, size: 11 };
+      headerCell.fill = headerFill;
+      headerCell.alignment = { vertical: 'middle', horizontal: 'left' };
+      headerCell.border = {
+        top: { style: 'thin', color: { argb: '4B5563' } },
+        left: { style: 'thin', color: { argb: '4B5563' } },
+        bottom: { style: 'thin', color: { argb: '4B5563' } },
+        right: { style: 'thin', color: { argb: '4B5563' } },
+      };
+
+      const contentRow = startRow + 1;
+      worksheet.mergeCells(contentRow, 1, contentRow + 4, totalColumns);
+      const contentCell = worksheet.getCell(contentRow, 1);
+      contentCell.value = contentValue;
+      contentCell.alignment = { vertical: 'top', wrapText: true };
+      contentCell.border = {
+        top: { style: 'thin', color: { argb: '4B5563' } },
+        left: { style: 'thin', color: { argb: '4B5563' } },
+        bottom: { style: 'thin', color: { argb: '4B5563' } },
+        right: { style: 'thin', color: { argb: '4B5563' } },
+      };
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${fileSafeName}_box_export.xlsx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      return;
+    }
+
+    const tableBorders = {
+      top: { style: BorderStyle.SINGLE, size: 1, color: '4B5563' },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: '4B5563' },
+      left: { style: BorderStyle.SINGLE, size: 1, color: '4B5563' },
+      right: { style: BorderStyle.SINGLE, size: 1, color: '4B5563' },
+    };
+
+    const doc = new Document({
+      sections: [
+        {
+          children: [
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: clientName,
+                  bold: true,
+                  color: 'C00000',
+                  size: 24,
+                }),
+              ],
+            }),
+            new Paragraph(`${engagementType} for FY ${financialYear}`),
+            new Paragraph(`Execution: ${programName}`),
+            new Paragraph(`Line Item: ${sectionName}`),
+            ...(workpaperRef ? [new Paragraph(`Workpaper Ref: ${workpaperRef}`)] : []),
+            new Paragraph(`Box Status: ${statusLabel}`),
+            new Paragraph(''),
+            new Table({
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              rows: [
+                new TableRow({
+                  children: [
+                    new TableCell({
+                      borders: tableBorders,
+                      shading: { type: ShadingType.SOLID, color: '1F4E79' },
+                      children: [
+                        new Paragraph({
+                          children: [
+                            new TextRun({
+                              text: boxHeader,
+                              color: 'FFFFFF',
+                              bold: true,
+                            }),
+                          ],
+                        }),
+                      ],
+                    }),
+                  ],
+                }),
+                new TableRow({
+                  children: [
+                    new TableCell({
+                      borders: tableBorders,
+                      children: [new Paragraph(contentValue)],
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${fileSafeName}_box_export.docx`;
+    link.click();
+    window.URL.revokeObjectURL(url);
   };
 
   const handleExport = async () => {
@@ -1236,6 +1524,11 @@ export default function AuditExecution() {
     toast.success('Review note status updated!');
   };
 
+  const handleDeleteComment = async (noteId: string) => {
+    if (!confirm('Delete this review note?')) return;
+    await deleteNote(noteId);
+  };
+
   // Box status tracking for overall completion
   const [boxStatusMap, setBoxStatusMap] = useState<Record<string, SectionBoxMetrics>>({});
 
@@ -1563,8 +1856,7 @@ export default function AuditExecution() {
         <div className="flex flex-col gap-4 flex-1 min-h-0">
           {selectedProgramId && selectedProgram ? (
             <div className="rounded-lg border bg-card relative z-10 flex flex-col flex-1 min-h-0 overflow-hidden">
-              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-                <div className="sticky top-0 z-40 border-b bg-card shadow-sm isolate">
+              <div className="sticky top-0 z-50 border-b bg-card shadow-sm isolate">
                   <div className="flex flex-wrap items-start justify-between gap-3 p-4">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -1698,10 +1990,10 @@ export default function AuditExecution() {
                                   <Eye className="h-3 w-3" />
                                 </button>
                                 <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteEvidence(attachment.id);
-                                  }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteEvidence(attachment);
+                                }}
                                   className="ml-1 hover:text-destructive"
                                 >
                                   <Trash2 className="h-3 w-3" />
@@ -1797,6 +2089,7 @@ export default function AuditExecution() {
                   </div>
                 </div>
 
+              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
                 <div className="p-4">
                   <ProgramSections
                     programId={selectedProgramId}
@@ -1811,10 +2104,12 @@ export default function AuditExecution() {
                       setAddBoxDialogOpen(true);
                     }}
                     onAttachEvidence={openEvidenceDialog}
+                    onUploadBoxEvidence={handleQuickAttachBoxEvidence}
                     attachments={attachments}
                     onDeleteEvidence={handleDeleteEvidence}
                     onOpenEvidence={handleOpenAttachment}
                     onBoxStatusUpdate={updateBoxStatusForSection}
+                    onExportBox={handleExportBox}
                     updateSectionName={updateSectionName}
                     toggleSectionApplicability={toggleSectionApplicability}
                     onSwapSectionOrder={swapSectionOrder}
@@ -2116,19 +2411,29 @@ export default function AuditExecution() {
       </Dialog>
 
       {/* Evidence Attachment Dialog */}
-      <Dialog open={evidenceDialogOpen} onOpenChange={setEvidenceDialogOpen}>
+      <Dialog
+        open={evidenceDialogOpen}
+        onOpenChange={(open) => {
+          setEvidenceDialogOpen(open);
+          if (!open) {
+            setSelectedEvidenceIds([]);
+            setPendingEvidenceFiles([]);
+            setEvidenceAttachmentSectionId(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Attach Evidence from Vault</DialogTitle>
-            <DialogDescription>
-              Select evidence files to attach to this {evidenceAttachmentLevel} or upload new files
+          <DialogDescription>
+              Select evidence files to attach to this {evidenceAttachmentLevel} or queue new files to upload on attach
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {/* Upload New Evidence */}
             <div className="border rounded-lg p-4 bg-muted/30">
               <div className="flex items-center justify-between mb-2">
-                <Label className="font-medium">Upload New Evidence</Label>
+                <Label className="font-medium">Add New Evidence Files</Label>
               </div>
               <div className="flex flex-col gap-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -2137,7 +2442,7 @@ export default function AuditExecution() {
                     accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
                     multiple
                     onChange={(e) => {
-                      handleUploadEvidence(e.target.files);
+                      handleQueueEvidence(e.target.files);
                       e.currentTarget.value = '';
                     }}
                     className="flex-1"
@@ -2178,10 +2483,37 @@ export default function AuditExecution() {
                     />
                   </div>
                 </div>
+                {pendingEvidenceFiles.length > 0 && (
+                  <div className="rounded-md border bg-background/70 p-2 text-xs">
+                    <div className="mb-1 text-muted-foreground">
+                      {pendingEvidenceFiles.length} file(s) queued for upload on attach
+                    </div>
+                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                      {pendingEvidenceFiles.map((file, index) => (
+                        <div key={`${file.name}-${index}`} className="flex items-center justify-between gap-2">
+                          <span className="truncate">{file.name}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => {
+                              setPendingEvidenceFiles((prev) =>
+                                prev.filter((_, idx) => idx !== index)
+                              );
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {evidenceUploading && (
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Uploading evidence to vault...
+                    Uploading and attaching evidence...
                   </div>
                 )}
               </div>
@@ -2246,18 +2578,18 @@ export default function AuditExecution() {
           <DialogFooter>
             <div className="flex items-center justify-between w-full">
               <p className="text-sm text-muted-foreground">
-                {selectedEvidenceIds.length} file(s) selected
+                {selectedEvidenceIds.length + pendingEvidenceFiles.length} file(s) ready to attach
               </p>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setEvidenceDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button 
+                <Button
                   onClick={handleAttachEvidence}
-                  disabled={selectedEvidenceIds.length === 0 || evidenceUploading}
+                  disabled={(selectedEvidenceIds.length === 0 && pendingEvidenceFiles.length === 0) || evidenceUploading}
                 >
                   <Paperclip className="h-4 w-4 mr-2" />
-                  Attach {selectedEvidenceIds.length > 0 && `(${selectedEvidenceIds.length})`}
+                  Attach {(selectedEvidenceIds.length + pendingEvidenceFiles.length) > 0 && `(${selectedEvidenceIds.length + pendingEvidenceFiles.length})`}
                 </Button>
               </div>
             </div>
@@ -2299,13 +2631,23 @@ export default function AuditExecution() {
                               </div>
                             )}
                           </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleToggleResolveComment(note.id)}
-                          >
-                            {note.status === 'cleared' ? 'Reopen' : 'Clear'}
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleToggleResolveComment(note.id)}
+                            >
+                              {note.status === 'cleared' ? 'Reopen' : 'Clear'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteComment(note.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -2348,11 +2690,13 @@ interface ProgramSectionsProps {
   statusFilter: string;
   boxStatusMap: Record<string, SectionBoxMetrics>;
   onAddBox: (sectionId: string, createBoxFn: (header: string) => Promise<void>) => void;
-  onAttachEvidence: (level: 'program' | 'section' | 'box', id: string) => void;
+  onAttachEvidence: (level: 'program' | 'section' | 'box', id: string, sectionId?: string) => void;
+  onUploadBoxEvidence?: (boxId: string, sectionId: string, files: FileList | null) => void;
   attachments: any[];
-  onDeleteEvidence: (attachmentId: string) => void;
+  onDeleteEvidence: (attachment: { id: string; file_path: string }) => void;
   onOpenEvidence: (attachment: { file_path: string; file_name: string }) => void;
   onBoxStatusUpdate: (sectionId: string, metrics: SectionBoxMetrics) => void;
+  onExportBox?: (box: AuditExecutionBox, sectionName: string, format: 'excel' | 'word') => void;
   updateSectionName: (sectionId: string, newName: string) => void;
   toggleSectionApplicability: (sectionId: string) => void;
   onSwapSectionOrder: (firstSectionId: string, secondSectionId: string) => void;
@@ -2370,10 +2714,12 @@ function ProgramSections({
   boxStatusMap,
   onAddBox,
   onAttachEvidence,
+  onUploadBoxEvidence,
   attachments,
   onDeleteEvidence,
   onOpenEvidence,
   onBoxStatusUpdate,
+  onExportBox,
   updateSectionName,
   toggleSectionApplicability,
   onSwapSectionOrder,
@@ -2385,10 +2731,12 @@ function ProgramSections({
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editedSectionName, setEditedSectionName] = useState('');
   const [selectedSectionIds, setSelectedSectionIds] = useState<string[]>([]);
+  const [pendingDeletionIds, setPendingDeletionIds] = useState<string[]>([]);
 
   useEffect(() => {
     setSelectedSectionIds([]);
     setExpandedSections([]);
+    setPendingDeletionIds([]);
   }, [programId]);
 
   // Listen for expand/collapse all events
@@ -2442,9 +2790,16 @@ function ProgramSections({
   };
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
+  const pendingDeletionSet = useMemo(
+    () => new Set(pendingDeletionIds),
+    [pendingDeletionIds]
+  );
 
   // Filter sections based on search query and box status
   const filteredSections = sections.filter((section) => {
+    if (pendingDeletionSet.has(section.id)) {
+      return false;
+    }
     const displayName = DEFAULT_SECTION_NAMES.includes(
       normalizeSectionName(section.name)
     )
@@ -2516,14 +2871,18 @@ function ProgramSections({
     const idsToDelete = [...selectedSectionIds];
     setSelectedSectionIds([]);
     setExpandedSections((prev) => prev.filter((id) => !idsToDelete.includes(id)));
+    setPendingDeletionIds((prev) => Array.from(new Set([...prev, ...idsToDelete])));
 
-    if (onBulkDeleteSections) {
-      await onBulkDeleteSections(idsToDelete);
-      return;
-    }
-
-    for (const sectionId of idsToDelete) {
-      await onDeleteSection(sectionId);
+    try {
+      if (onBulkDeleteSections) {
+        await onBulkDeleteSections(idsToDelete);
+      } else {
+        for (const sectionId of idsToDelete) {
+          await onDeleteSection(sectionId);
+        }
+      }
+    } finally {
+      setPendingDeletionIds((prev) => prev.filter((id) => !idsToDelete.includes(id)));
     }
   };
 
@@ -2804,12 +3163,15 @@ function ProgramSections({
               )}
               <SectionContent 
                 sectionId={section.id} 
+                sectionName={displayName}
                 onAddBox={onAddBox} 
                 onAttachEvidence={onAttachEvidence}
+                onUploadBoxEvidence={onUploadBoxEvidence}
                 attachments={attachments}
                 onDeleteEvidence={onDeleteEvidence}
                 onOpenEvidence={onOpenEvidence}
                 onBoxStatusUpdate={onBoxStatusUpdate}
+                onExportBox={onExportBox}
                 searchQuery={searchQuery}
                 statusFilter={statusFilter}
                 sectionMatchesSearch={sectionMatchesSearch}
@@ -2827,19 +3189,22 @@ function ProgramSections({
 
 interface SectionContentProps {
   sectionId: string;
+  sectionName: string;
   onAddBox: (sectionId: string, createBoxFn: (header: string) => Promise<void>) => void;
-  onAttachEvidence: (level: 'program' | 'section' | 'box', id: string) => void;
+  onAttachEvidence: (level: 'program' | 'section' | 'box', id: string, sectionId?: string) => void;
+  onUploadBoxEvidence?: (boxId: string, sectionId: string, files: FileList | null) => void;
   attachments: any[];
-  onDeleteEvidence: (attachmentId: string) => void;
+  onDeleteEvidence: (attachment: { id: string; file_path: string }) => void;
   onOpenEvidence: (attachment: { file_path: string; file_name: string }) => void;
   onBoxStatusUpdate: (sectionId: string, metrics: SectionBoxMetrics) => void;
+  onExportBox?: (box: AuditExecutionBox, sectionName: string, format: 'excel' | 'word') => void;
   searchQuery: string;
   statusFilter: string;
   sectionMatchesSearch: boolean;
   reviewNotes: any[];
 }
 
-function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, onDeleteEvidence, onOpenEvidence, onBoxStatusUpdate, searchQuery, statusFilter, sectionMatchesSearch, reviewNotes }: SectionContentProps) {
+function SectionContent({ sectionId, sectionName, onAddBox, onAttachEvidence, onUploadBoxEvidence, attachments, onDeleteEvidence, onOpenEvidence, onBoxStatusUpdate, onExportBox, searchQuery, statusFilter, sectionMatchesSearch, reviewNotes }: SectionContentProps) {
   const { boxes, loading, updateBox, deleteBox, createBox, updateBoxStatus, toggleBoxLock, reorderBoxes, moveBoxUp, moveBoxDown, refetch } = useWorkingSectionBoxes(sectionId);
   const [addingBox, setAddingBox] = useState(false);
   const [newHeader, setNewHeader] = useState('');
@@ -2883,6 +3248,7 @@ function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, on
 
   // Update parent component whenever box statuses change
   useEffect(() => {
+    if (loading) return;
     const statusCounts = { ...EMPTY_STATUS_COUNTS };
     boxes.forEach((box) => {
       const rawStatus = box.status || 'not-commenced';
@@ -2897,7 +3263,7 @@ function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, on
       statusCounts,
       filteredCount: filteredBoxes.length,
     });
-  }, [boxes, sectionId, onBoxStatusUpdate, filteredBoxes.length]);
+  }, [boxes, loading, sectionId, onBoxStatusUpdate, filteredBoxes.length]);
 
   useEffect(() => {
     const handler = () => refetch();
@@ -2962,7 +3328,7 @@ function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, on
                   <Eye className="h-3 w-3" />
                 </button>
                 <button
-                  onClick={() => onDeleteEvidence(attachment.id)}
+                  onClick={() => onDeleteEvidence(attachment)}
                   className="ml-1 hover:text-destructive"
                 >
                   <Trash2 className="h-3 w-3" />
@@ -3018,11 +3384,17 @@ function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, on
               box={getMemoizedBox(box.id)}
               onUpdate={updateBox}
               onDelete={deleteBox}
-              onAttach={() => onAttachEvidence('box', box.id)}
+              onAttach={() => onAttachEvidence('box', box.id, sectionId)}
+              onUploadFiles={(files) => onUploadBoxEvidence?.(box.id, sectionId, files)}
               onStatusChange={updateBoxStatus}
               onToggleLock={toggleBoxLock}
               onCommentClick={handleCommentClick}
               attachmentCount={getBoxAttachmentCount(box.id)}
+              onExport={
+                onExportBox
+                  ? (format) => onExportBox(box, sectionName, format)
+                  : undefined
+              }
               onMoveUp={moveBoxUp}
               onMoveDown={moveBoxDown}
               isFirst={index === 0}
@@ -3045,7 +3417,7 @@ function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, on
                       <Eye className="h-3 w-3" />
                     </button>
                     <button
-                      onClick={() => onDeleteEvidence(attachment.id)}
+                      onClick={() => onDeleteEvidence(attachment)}
                       className="ml-1 hover:text-destructive"
                     >
                         <Trash2 className="h-3 w-3" />
