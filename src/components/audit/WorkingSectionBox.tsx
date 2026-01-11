@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { Badge } from '@/components/ui/badge';
 import {
   ArrowDown,
@@ -14,6 +14,7 @@ import {
   Trash2,
   Unlock,
   Edit2,
+  X,
 } from 'lucide-react';
 import {
   Select,
@@ -22,8 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { AuditExecutionBox, BoxStatus } from '@/types/auditExecution';
-import { StatusBadge, getStatusVariant } from '@/components/ui/status-badge';
+import { AuditExecutionBox, BoxStatus, LEGACY_BOX_HEADER_MAP } from '@/types/auditExecution';
 import { cn } from '@/lib/utils';
 
 interface WorkingSectionBoxProps {
@@ -41,12 +41,55 @@ interface WorkingSectionBoxProps {
   isLast?: boolean;
 }
 
-const STATUS_OPTIONS: { value: BoxStatus; label: string }[] = [
-  { value: 'not-commenced', label: 'Not Commenced' },
-  { value: 'in-progress', label: 'In Progress' },
-  { value: 'review', label: 'Review' },
-  { value: 'complete', label: 'Complete' },
-];
+const STATUS_META: Record<
+  BoxStatus,
+  { label: string; triggerClass: string; dotClass: string; itemClass: string }
+> = {
+  'not-commenced': {
+    label: 'Not Commenced',
+    triggerClass: 'border-slate-200 bg-slate-50 text-slate-700',
+    dotClass: 'bg-slate-400',
+    itemClass:
+      'text-slate-700 focus:bg-slate-100 focus:text-slate-800 data-[state=checked]:bg-slate-100 data-[state=checked]:text-slate-800',
+  },
+  'in-progress': {
+    label: 'In Progress',
+    triggerClass: 'border-amber-200 bg-amber-50 text-amber-800',
+    dotClass: 'bg-amber-500',
+    itemClass:
+      'text-amber-700 focus:bg-amber-50 focus:text-amber-800 data-[state=checked]:bg-amber-50 data-[state=checked]:text-amber-800',
+  },
+  review: {
+    label: 'Under Review',
+    triggerClass: 'border-blue-200 bg-blue-50 text-blue-800',
+    dotClass: 'bg-blue-500',
+    itemClass:
+      'text-blue-700 focus:bg-blue-50 focus:text-blue-800 data-[state=checked]:bg-blue-50 data-[state=checked]:text-blue-800',
+  },
+  complete: {
+    label: 'Complete',
+    triggerClass: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    dotClass: 'bg-emerald-500',
+    itemClass:
+      'text-emerald-700 focus:bg-emerald-50 focus:text-emerald-800 data-[state=checked]:bg-emerald-50 data-[state=checked]:text-emerald-800',
+  },
+};
+
+const STATUS_OPTIONS: { value: BoxStatus; label: string }[] = (
+  Object.keys(STATUS_META) as BoxStatus[]
+).map((value) => ({ value, label: STATUS_META[value].label }));
+
+const isValidStatus = (value: unknown): value is BoxStatus =>
+  (Object.keys(STATUS_META) as BoxStatus[]).includes(value as BoxStatus);
+
+const normalizeHeader = (value: string) =>
+  LEGACY_BOX_HEADER_MAP[value.trim()] ?? value.trim();
+const normalizeContent = (value: AuditExecutionBox['content'], status: BoxStatus) => {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  if (text.trim() === '0' && status === 'not-commenced') return '';
+  return text;
+};
 
 export function WorkingSectionBoxComponent({
   box,
@@ -62,21 +105,35 @@ export function WorkingSectionBoxComponent({
   isFirst,
   isLast,
 }: WorkingSectionBoxProps) {
-  const [header, setHeader] = useState(box?.header || '');
-  const [content, setContent] = useState(box?.content || '');
+  const [header, setHeader] = useState(normalizeHeader(box?.header || ''));
+  const [content, setContent] = useState(
+    normalizeContent(box?.content, box?.status ?? 'not-commenced')
+  );
   const [editingHeader, setEditingHeader] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [headerDirty, setHeaderDirty] = useState(false);
+  const [contentDirty, setContentDirty] = useState(false);
 
   useEffect(() => {
-    setHeader(box?.header || '');
-    setContent(box?.content || '');
-    setDirty(false);
+    setHeader(normalizeHeader(box?.header || ''));
+    setContent(normalizeContent(box?.content, box?.status ?? 'not-commenced'));
+    setHeaderDirty(false);
+    setContentDirty(false);
     setEditingHeader(false);
-  }, [box?.id, box?.header, box?.content]);
+  }, [box?.id, box?.header, box?.content, box?.status]);
+
+  useEffect(() => {
+    if (!box || box.locked) return;
+    if (!isValidStatus(box.status)) {
+      onStatusChange(box.id, 'not-commenced');
+    }
+  }, [box?.id, box?.locked, box?.status, onStatusChange]);
 
   if (!box) {
     return null;
   }
+
+  const normalizedStatus = isValidStatus(box.status) ? box.status : 'not-commenced';
+  const statusMeta = STATUS_META[normalizedStatus];
 
   const handleSave = () => {
     if (box.locked) return;
@@ -85,30 +142,83 @@ export function WorkingSectionBoxComponent({
       header: trimmedHeader || box.header,
       content,
     });
-    setDirty(false);
+    setHeaderDirty(false);
+    setContentDirty(false);
+    setEditingHeader(false);
+  };
+
+  const handleHeaderSave = () => {
+    if (box.locked) return;
+    const trimmedHeader = header.trim();
+    if (!trimmedHeader) {
+      setHeader(normalizeHeader(box.header));
+      setHeaderDirty(false);
+      setEditingHeader(false);
+      return;
+    }
+    onUpdate(box.id, { header: trimmedHeader });
+    setHeaderDirty(false);
+    setEditingHeader(false);
+  };
+
+  const handleHeaderCancel = () => {
+    setHeader(normalizeHeader(box.header));
+    setHeaderDirty(false);
     setEditingHeader(false);
   };
 
   return (
     <Card className={cn('border', box.locked && 'opacity-70')}>
-      <CardHeader className="pb-3">
+      <CardHeader className="px-4 py-3 pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 space-y-2">
             {editingHeader ? (
-              <Input
-                value={header}
-                onChange={(e) => {
-                  setHeader(e.target.value);
-                  setDirty(true);
-                }}
-                onBlur={() => setEditingHeader(false)}
-                disabled={box.locked}
-                className="h-8 text-sm"
-                autoFocus
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  value={header}
+                  onChange={(e) => {
+                    setHeader(e.target.value);
+                    setHeaderDirty(true);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleHeaderSave();
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      handleHeaderCancel();
+                    }
+                  }}
+                  disabled={box.locked}
+                  className="h-8 text-sm"
+                  autoFocus
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleHeaderSave}
+                  disabled={!headerDirty}
+                  title="Save header"
+                >
+                  <Save className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleHeaderCancel}
+                  title="Cancel"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
             ) : (
               <div className="flex items-center gap-2">
-                <h4 className="text-sm font-semibold text-foreground">{box.header}</h4>
+                <h4 className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                  {normalizeHeader(box.header)}
+                </h4>
                 {!box.locked && (
                   <Button
                     variant="ghost"
@@ -128,16 +238,13 @@ export function WorkingSectionBoxComponent({
               </div>
             )}
             <div className="flex items-center gap-2">
-              <StatusBadge variant={getStatusVariant(box.status)} dot={false}>
-                {STATUS_OPTIONS.find((s) => s.value === box.status)?.label || box.status}
-              </StatusBadge>
               {attachmentCount > 0 && (
                 <Badge variant="secondary" className="text-xs">
                   <Paperclip className="h-3 w-3 mr-1" />
                   {attachmentCount}
                 </Badge>
               )}
-              {box.comment_count && box.comment_count > 0 && (
+              {(box.comment_count ?? 0) > 0 && (
                 <Badge variant="outline" className="text-xs">
                   <MessageSquare className="h-3 w-3 mr-1" />
                   {box.comment_count}
@@ -148,16 +255,25 @@ export function WorkingSectionBoxComponent({
 
           <div className="flex items-center gap-2">
             <Select
-              value={box.status}
+              value={normalizedStatus}
               onValueChange={(value) => onStatusChange(box.id, value as BoxStatus)}
               disabled={box.locked}
             >
-              <SelectTrigger className="h-8 w-[150px] text-xs">
-                <SelectValue placeholder="Status" />
+              <SelectTrigger
+                className={cn('h-8 w-[160px] text-xs', statusMeta.triggerClass)}
+              >
+                <span className="flex items-center gap-2">
+                  <span className={cn('h-2 w-2 rounded-full', statusMeta.dotClass)} />
+                  <SelectValue placeholder="Status" />
+                </span>
               </SelectTrigger>
               <SelectContent>
                 {STATUS_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    className={STATUS_META[option.value].itemClass}
+                  >
                     {option.label}
                   </SelectItem>
                 ))}
@@ -176,15 +292,14 @@ export function WorkingSectionBoxComponent({
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-3 pt-0">
-        <Textarea
+      <CardContent className="space-y-2 px-4 pb-4 pt-0">
+        <RichTextEditor
           value={content || ''}
-          onChange={(e) => {
-            setContent(e.target.value);
-            setDirty(true);
+          onChange={(value) => {
+            setContent(value);
+            setContentDirty(true);
           }}
-          placeholder="Document procedures, results, and conclusions..."
-          className="min-h-[120px] text-sm"
+          placeholder="Enter text"
           disabled={box.locked}
         />
 
@@ -226,7 +341,12 @@ export function WorkingSectionBoxComponent({
               Comment
             </Button>
             {!box.locked && (
-              <Button variant="outline" size="sm" onClick={handleSave} disabled={!dirty}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSave}
+                disabled={!headerDirty && !contentDirty}
+              >
                 <Save className="h-4 w-4 mr-2" />
                 Save
               </Button>

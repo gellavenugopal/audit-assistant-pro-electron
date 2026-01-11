@@ -19,6 +19,7 @@ import Appointment from "./pages/Appointment";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
 import AuditExecution from "./pages/AuditExecution";
+import ProcedureWorkpaper from "./pages/ProcedureWorkpaper";
 import EvidenceVault from "./pages/EvidenceVault";
 import ReviewNotes from "./pages/ReviewNotes";
 import Misstatements from "./pages/Misstatements";
@@ -162,6 +163,16 @@ const App = () => (
                     <ProtectedEngagementRoute>
                       <MainLayout>
                         <AuditExecution />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/procedures/:procedureId/workpaper"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <ProcedureWorkpaper />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
