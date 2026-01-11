@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import ExcelJS from 'exceljs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -44,11 +45,14 @@ import {
   Search,
   Filter,
   GripVertical,
+  ArrowUp,
+  ArrowDown,
   Check,
   X,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useClients } from '@/hooks/useClients';
@@ -63,7 +67,15 @@ import {
 } from '@/hooks/useAuditExecution';
 import { WorkingSectionBoxComponent } from '@/components/audit/WorkingSectionBox';
 import { useEvidenceFiles } from '@/hooks/useEvidenceFiles';
+import { DEFAULT_BOX_HEADERS, DEFAULT_SECTION_NAMES, LEGACY_BOX_HEADER_MAP, LEGACY_SECTION_NAME_MAP } from '@/types/auditExecution';
 import { cn } from '@/lib/utils';
+
+const normalizeHeader = (value: string) =>
+  LEGACY_BOX_HEADER_MAP[value.trim()] ?? value.trim();
+const normalizeSectionName = (value: string) =>
+  LEGACY_SECTION_NAME_MAP[value.trim()] ?? value.trim();
+const stripHtml = (value: string) =>
+  value.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
 
 export default function AuditExecution() {
   const { user } = useAuth();
@@ -100,11 +112,23 @@ export default function AuditExecution() {
   const [newCommentText, setNewCommentText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [addSectionDialogOpen, setAddSectionDialogOpen] = useState(false);
+  const [newSectionName, setNewSectionName] = useState('');
   const assignmentStorageKey = currentEngagement?.id
     ? `audit_execution_assignments_${currentEngagement.id}`
     : null;
+  const syncInProgressRef = useRef(false);
 
-  const { sections, loading: sectionsLoading, updateSectionName, toggleSectionApplicability } = useAuditExecutionSections(selectedProgramId);
+  const {
+    sections,
+    loading: sectionsLoading,
+    updateSectionName,
+    toggleSectionApplicability,
+    swapSectionOrder,
+    createSection,
+    deleteSection,
+    refetch: refetchSections,
+  } = useAuditExecutionSections(selectedProgramId);
   const { notes: reviewNotes, createNote, updateNote } = useReviewNotes(currentEngagement?.id || undefined);
   const { files: evidenceFiles, loading: evidenceLoading } = useEvidenceFiles(currentEngagement?.id);
   const { attachments, loading: attachmentsLoading, createAttachment, deleteAttachment } = useAuditExecutionAttachments(selectedProgramId);
@@ -135,6 +159,255 @@ export default function AuditExecution() {
       setSelectedProgramId(programs[0].id);
     }
   }, [programs, selectedProgramId]);
+
+  useEffect(() => {
+    if (!selectedProgramId || sectionsLoading) return;
+    if (syncInProgressRef.current) return;
+
+    const templateNames = DEFAULT_SECTION_NAMES.map((name) => name.trim());
+    const templateLookup = new Map(
+      templateNames.map((name) => [name.toLowerCase(), name])
+    );
+    const groupedTemplates = new Map<string, (typeof sections)[number][]>();
+    const extraSections: (typeof sections)[number][] = [];
+
+    const syncKey = `audit_execution_template_synced_${selectedProgramId}`;
+    const syncVersion = 'v3';
+    const isCleaned = localStorage.getItem(syncKey) === syncVersion;
+
+    sections.forEach((section) => {
+      const normalizedName = normalizeSectionName(section.name).trim();
+      const templateName = templateLookup.get(normalizedName.toLowerCase());
+      if (templateName) {
+        const group = groupedTemplates.get(templateName) || [];
+        group.push(section);
+        groupedTemplates.set(templateName, group);
+      } else {
+        extraSections.push(section);
+      }
+    });
+
+    const duplicateGroups = Array.from(groupedTemplates.entries()).filter(
+      ([, list]) => list.length > 1
+    );
+    const missingTemplates = templateNames.filter(
+      (name) => !groupedTemplates.has(name)
+    );
+
+    const shouldRun =
+      duplicateGroups.length > 0 ||
+      missingTemplates.length > 0 ||
+      (!isCleaned && extraSections.length > 0);
+
+    if (!shouldRun) {
+      if (!isCleaned) {
+        localStorage.setItem(syncKey, syncVersion);
+      }
+      return;
+    }
+
+    const syncTemplateSections = async () => {
+      syncInProgressRef.current = true;
+      try {
+        if (!user) {
+          toast.error('Please sign in to sync audit execution sections.');
+          return;
+        }
+
+        const primaryByTemplate = new Map<string, (typeof sections)[number]>();
+        const sectionsToDelete: string[] = [];
+
+        const deleteSectionDirect = async (sectionId: string) => {
+          const { data: boxes, error: boxFetchError } = await supabase
+            .from('audit_program_boxes')
+            .select('id')
+            .eq('section_id', sectionId);
+
+          if (boxFetchError) throw boxFetchError;
+
+          const boxIds = (boxes || []).map((box) => box.id);
+
+          if (boxIds.length > 0) {
+            const { error: boxAttachmentError } = await supabase
+              .from('audit_program_attachments')
+              .delete()
+              .in('box_id', boxIds);
+            if (boxAttachmentError) throw boxAttachmentError;
+          }
+
+          const { error: sectionAttachmentError } = await supabase
+            .from('audit_program_attachments')
+            .delete()
+            .eq('section_id', sectionId);
+          if (sectionAttachmentError) throw sectionAttachmentError;
+
+          const { error: boxDeleteError } = await supabase
+            .from('audit_program_boxes')
+            .delete()
+            .eq('section_id', sectionId);
+          if (boxDeleteError) throw boxDeleteError;
+
+          const { error: sectionDeleteError } = await supabase
+            .from('audit_program_sections')
+            .delete()
+            .eq('id', sectionId);
+          if (sectionDeleteError) throw sectionDeleteError;
+        };
+
+        if (duplicateGroups.length > 0) {
+          const duplicateIds = duplicateGroups.flatMap(([, list]) =>
+            list.map((section) => section.id)
+          );
+          const { data: boxes, error } = await supabase
+            .from('audit_program_boxes')
+            .select('*')
+            .in('section_id', duplicateIds);
+
+          if (error) throw error;
+
+          const boxesBySection = new Map<string, any[]>();
+          (boxes || []).forEach((box) => {
+            const list = boxesBySection.get(box.section_id) || [];
+            list.push(box);
+            boxesBySection.set(box.section_id, list);
+          });
+
+          for (const [templateName, list] of duplicateGroups) {
+            const scored = list.map((section) => {
+              const sectionBoxes = boxesBySection.get(section.id) || [];
+              const score = sectionBoxes.filter(
+                (box) => String(box.content || '').trim() !== ''
+              ).length;
+              return { section, score };
+            });
+
+            scored.sort((a, b) => {
+              if (b.score !== a.score) return b.score - a.score;
+              return a.section.order - b.section.order;
+            });
+
+            const primary = scored[0].section;
+            primaryByTemplate.set(templateName, primary);
+
+            const primaryBoxes = boxesBySection.get(primary.id) || [];
+            const primaryByHeader = new Map<string, any>();
+            primaryBoxes.forEach((box) => {
+              primaryByHeader.set(normalizeHeader(box.header), box);
+            });
+
+            const duplicates = scored.slice(1).map((item) => item.section);
+            for (const duplicate of duplicates) {
+              const duplicateBoxes = boxesBySection.get(duplicate.id) || [];
+              for (const box of duplicateBoxes) {
+                const normalizedHeader = normalizeHeader(box.header);
+                const targetBox = primaryByHeader.get(normalizedHeader);
+                const targetContent = String(targetBox?.content || '').trim();
+                const sourceContent = String(box.content || '').trim();
+                if (targetBox && !targetContent && sourceContent) {
+                  const { error: updateError } = await supabase
+                    .from('audit_program_boxes')
+                    .update({ content: box.content })
+                    .eq('id', targetBox.id);
+                  if (updateError) throw updateError;
+                }
+              }
+              sectionsToDelete.push(duplicate.id);
+            }
+          }
+        }
+
+        groupedTemplates.forEach((list, templateName) => {
+          if (!primaryByTemplate.has(templateName)) {
+            primaryByTemplate.set(templateName, list[0]);
+          }
+        });
+
+        if (!isCleaned) {
+          for (const section of extraSections) {
+            await deleteSectionDirect(section.id);
+          }
+        }
+
+        for (const sectionId of sectionsToDelete) {
+          await deleteSectionDirect(sectionId);
+        }
+
+        let nextOrder =
+          sections.length > 0
+            ? Math.max(...sections.map((section) => section.order)) + 1
+            : 0;
+
+        for (const templateName of missingTemplates) {
+          const order = isCleaned
+            ? nextOrder++
+            : DEFAULT_SECTION_NAMES.indexOf(templateName);
+
+          const { data: newSection, error: sectionError } = await supabase
+            .from('audit_program_sections')
+            .insert({
+              audit_program_id: selectedProgramId,
+              name: templateName,
+              order,
+              is_expanded: false,
+              is_applicable: true,
+              locked: false,
+              status: 'not-commenced',
+            })
+            .select('id')
+            .single();
+
+          if (sectionError) throw sectionError;
+
+          const boxesToInsert = DEFAULT_BOX_HEADERS.map((header, orderIndex) => ({
+            section_id: newSection.id,
+            header,
+            content: '',
+            order: orderIndex,
+            status: 'not-commenced',
+            locked: false,
+            created_by: user.id,
+          }));
+
+          const { error: boxesError } = await supabase
+            .from('audit_program_boxes')
+            .insert(boxesToInsert);
+          if (boxesError) throw boxesError;
+        }
+
+        for (let index = 0; index < DEFAULT_SECTION_NAMES.length; index += 1) {
+          const templateName = DEFAULT_SECTION_NAMES[index];
+          const existingSection = primaryByTemplate.get(templateName);
+          if (!existingSection) continue;
+
+          const updates: { name?: string; order?: number } = {};
+          if (existingSection.name !== templateName) {
+            updates.name = templateName;
+          }
+          if (!isCleaned && existingSection.order !== index) {
+            updates.order = index;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            const { error: updateError } = await supabase
+              .from('audit_program_sections')
+              .update(updates)
+              .eq('id', existingSection.id);
+            if (updateError) throw updateError;
+          }
+        }
+
+        await refetchSections();
+        localStorage.setItem(syncKey, syncVersion);
+      } catch (error) {
+        console.error('Error syncing audit execution sections:', error);
+        toast.error('Failed to sync section list to ICAI template.');
+      } finally {
+        syncInProgressRef.current = false;
+      }
+    };
+
+    syncTemplateSections();
+  }, [selectedProgramId, sections, sectionsLoading, user, refetchSections]);
 
   const handleCreateProgram = async () => {
     if (!newProgramName) {
@@ -246,6 +519,117 @@ export default function AuditExecution() {
     await deleteAttachment(attachmentId);
   };
 
+  const handleAddSection = async () => {
+    const name = newSectionName.trim();
+    if (!name) {
+      toast.error('Please enter a line item name.');
+      return;
+    }
+
+    const normalizedName = normalizeSectionName(name).trim().toLowerCase();
+    const hasDuplicate = sections.some((section) => {
+      const existing = normalizeSectionName(section.name).trim().toLowerCase();
+      return existing === normalizedName;
+    });
+
+    if (hasDuplicate) {
+      toast.error('A line item with this name already exists.');
+      return;
+    }
+
+    const createdId = await createSection(name);
+    if (createdId) {
+      setAddSectionDialogOpen(false);
+      setNewSectionName('');
+    }
+  };
+
+  const handleDeleteSection = async (sectionId: string) => {
+    await deleteSection(sectionId);
+  };
+
+  const handleExport = async () => {
+    if (!selectedProgramId) {
+      toast.error('Select an audit execution to export.');
+      return;
+    }
+    if (orderedSections.length === 0) {
+      toast.error('No sections available to export.');
+      return;
+    }
+
+    try {
+      const sectionIds = orderedSections.map((section) => section.id);
+      const { data: boxes, error } = await supabase
+        .from('audit_program_boxes')
+        .select('*')
+        .in('section_id', sectionIds)
+        .order('order', { ascending: true });
+
+      if (error) throw error;
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Audit Execution');
+      worksheet.addRow(['Section', ...DEFAULT_BOX_HEADERS]);
+
+      const headerRow = worksheet.getRow(1);
+      headerRow.font = { bold: true, color: { argb: 'FF1D4ED8' } };
+      headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+
+      const boxLookup = new Map<string, Record<string, string>>();
+      (boxes || []).forEach((box) => {
+        const normalizedHeader = normalizeHeader(box.header);
+        if (!DEFAULT_BOX_HEADERS.includes(normalizedHeader)) return;
+
+        const sectionEntry = boxLookup.get(box.section_id) || {};
+        sectionEntry[normalizedHeader] = stripHtml(String(box.content || ''));
+        boxLookup.set(box.section_id, sectionEntry);
+      });
+
+      orderedSections.forEach((section) => {
+        const sectionBoxes = boxLookup.get(section.id) || {};
+        const exportSectionName = DEFAULT_SECTION_NAMES.includes(
+          normalizeSectionName(section.name)
+        )
+          ? normalizeSectionName(section.name)
+          : section.name;
+        worksheet.addRow([
+          exportSectionName,
+          ...DEFAULT_BOX_HEADERS.map((header) => sectionBoxes[header] || ''),
+        ]);
+      });
+
+      worksheet.columns.forEach((column) => {
+        let maxLength = 10;
+        column.eachCell?.({ includeEmpty: false }, (cell) => {
+          const cellValue = cell.value ? String(cell.value) : '';
+          maxLength = Math.max(maxLength, cellValue.length);
+          cell.alignment = { wrapText: true, vertical: 'top' };
+        });
+        column.width = Math.min(maxLength + 2, 60);
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const safeName = (selectedProgram?.name || 'Audit_Execution')
+        .replace(/[^a-z0-9]+/gi, '_')
+        .replace(/^_+|_+$/g, '');
+      link.href = url;
+      link.download = `${safeName || 'Audit_Execution'}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+
+      toast.success('Audit execution exported.');
+    } catch (error) {
+      console.error('Error exporting audit execution:', error);
+      toast.error('Failed to export audit execution.');
+    }
+  };
+
   // Comment handling
   const handleOpenCommentDialog = (boxId: string) => {
     setSelectedCommentBoxId(boxId);
@@ -329,6 +713,33 @@ export default function AuditExecution() {
   const programAttachments = attachments.filter(
     (attachment) => !attachment.section_id && !attachment.box_id
   );
+  const orderedSections = useMemo(() => {
+    const sorted = [...sections].sort((a, b) => a.order - b.order);
+    const templateLookup = new Map(
+      DEFAULT_SECTION_NAMES.map((name) => [name.toLowerCase(), name])
+    );
+    const seenTemplate = new Set<string>();
+    const seenExtra = new Set<string>();
+    const result: typeof sections = [];
+
+    sorted.forEach((section) => {
+      const normalizedName = normalizeSectionName(section.name).trim();
+      const templateName = templateLookup.get(normalizedName.toLowerCase());
+      if (templateName) {
+        if (seenTemplate.has(templateName)) return;
+        seenTemplate.add(templateName);
+        result.push(section);
+        return;
+      }
+
+      const extraKey = normalizedName.toLowerCase();
+      if (seenExtra.has(extraKey)) return;
+      seenExtra.add(extraKey);
+      result.push(section);
+    });
+
+    return result;
+  }, [sections]);
 
   if (!currentEngagement) {
     return (
@@ -541,7 +952,7 @@ export default function AuditExecution() {
                     </Badge>
                   )}
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={handleExport}>
                   <Download className="h-4 w-4 mr-2" />
                   Export
                 </Button>
@@ -579,7 +990,7 @@ export default function AuditExecution() {
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="not-commenced">Not Commenced</SelectItem>
                     <SelectItem value="in-progress">In Progress</SelectItem>
-                    <SelectItem value="review">Review</SelectItem>
+                    <SelectItem value="review">Under Review</SelectItem>
                     <SelectItem value="complete">Complete</SelectItem>
                   </SelectContent>
                 </Select>
@@ -590,7 +1001,7 @@ export default function AuditExecution() {
                     variant="outline" 
                     size="sm"
                     onClick={() => {
-                      const allSectionIds = sections?.map(s => s.id) || [];
+                      const allSectionIds = orderedSections.map((section) => section.id);
                       window.dispatchEvent(new CustomEvent('expand-all-sections', { detail: { sectionIds: allSectionIds } }));
                     }}
                   >
@@ -604,6 +1015,13 @@ export default function AuditExecution() {
                     }}
                   >
                     Collapse All
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAddSectionDialogOpen(true)}
+                  >
+                    Add Line Item
                   </Button>
                 </div>
               </div>
@@ -630,7 +1048,7 @@ export default function AuditExecution() {
             
             <ProgramSections
               programId={selectedProgramId}
-              sections={sections}
+              sections={orderedSections}
               loading={sectionsLoading}
               searchQuery={searchQuery}
               statusFilter={statusFilter}
@@ -646,6 +1064,8 @@ export default function AuditExecution() {
               onBoxStatusUpdate={updateBoxStatusForSection}
               updateSectionName={updateSectionName}
               toggleSectionApplicability={toggleSectionApplicability}
+              onSwapSectionOrder={swapSectionOrder}
+              onDeleteSection={(sectionId) => handleDeleteSection(sectionId)}
               reviewNotes={reviewNotes}
             />
           </CardContent>
@@ -861,6 +1281,32 @@ export default function AuditExecution() {
             <Button onClick={handleUpdateProgram}>
               Save Changes
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Line Item Dialog */}
+      <Dialog open={addSectionDialogOpen} onOpenChange={setAddSectionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Line Item</DialogTitle>
+            <DialogDescription>
+              Add an additional line item after the standard 24 sections.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label>Line Item Name</Label>
+            <Input
+              value={newSectionName}
+              onChange={(e) => setNewSectionName(e.target.value)}
+              placeholder="e.g., Grants or Other Items"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddSectionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddSection}>Add Line Item</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1102,6 +1548,8 @@ interface ProgramSectionsProps {
   onBoxStatusUpdate: (sectionId: string, total: number, complete: number) => void;
   updateSectionName: (sectionId: string, newName: string) => void;
   toggleSectionApplicability: (sectionId: string) => void;
+  onSwapSectionOrder: (firstSectionId: string, secondSectionId: string) => void;
+  onDeleteSection: (sectionId: string) => void;
   reviewNotes: any[];
 }
 
@@ -1119,6 +1567,8 @@ function ProgramSections({
   onBoxStatusUpdate,
   updateSectionName,
   toggleSectionApplicability,
+  onSwapSectionOrder,
+  onDeleteSection,
   reviewNotes,
 }: ProgramSectionsProps) {
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
@@ -1145,14 +1595,29 @@ function ProgramSections({
 
   const handleStartEdit = (section: any) => {
     setEditingSectionId(section.id);
-    setEditedSectionName(section.name);
+    setEditedSectionName(normalizeSectionName(section.name));
   };
 
   const handleSaveEdit = (sectionId: string) => {
-    if (editedSectionName.trim()) {
-      updateSectionName(sectionId, editedSectionName.trim());
-      setEditingSectionId(null);
+    const nextName = editedSectionName.trim();
+    if (!nextName) {
+      toast.error('Please enter a line item name.');
+      return;
     }
+
+    const normalizedNext = normalizeSectionName(nextName).trim().toLowerCase();
+    const hasDuplicate = sections.some((section) => {
+      if (section.id === sectionId) return false;
+      return normalizeSectionName(section.name).trim().toLowerCase() === normalizedNext;
+    });
+
+    if (hasDuplicate) {
+      toast.error('A line item with this name already exists.');
+      return;
+    }
+
+    updateSectionName(sectionId, nextName);
+    setEditingSectionId(null);
   };
 
   const handleCancelEdit = () => {
@@ -1168,7 +1633,12 @@ function ProgramSections({
     }
     
     // Search filter - match section name
-    if (searchQuery && !section.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+    const sectionNameForSearch = DEFAULT_SECTION_NAMES.includes(
+      normalizeSectionName(section.name)
+    )
+      ? normalizeSectionName(section.name)
+      : section.name;
+    if (searchQuery && !sectionNameForSearch.toLowerCase().includes(searchQuery.toLowerCase())) {
       return false;
     }
     
@@ -1189,7 +1659,14 @@ function ProgramSections({
         ) : (
           filteredSections.map((section, index) => {
           // Check if section name matches search (if so, show all boxes)
-          const sectionMatchesSearch = !searchQuery || section.name.toLowerCase().includes(searchQuery.toLowerCase());
+          const isTemplateSection = DEFAULT_SECTION_NAMES.includes(
+            normalizeSectionName(section.name)
+          );
+          const displayName = isTemplateSection ? normalizeSectionName(section.name) : section.name;
+          const sectionMatchesSearch =
+            !searchQuery || displayName.toLowerCase().includes(searchQuery.toLowerCase());
+          const isFirst = index === 0;
+          const isLast = index === filteredSections.length - 1;
           const sectionAttachments = attachments.filter(
             (attachment) => attachment.section_id === section.id && !attachment.box_id
           );
@@ -1215,6 +1692,45 @@ function ProgramSections({
                 <div className="flex flex-col gap-1 w-full pr-4">
                   <div className="flex items-center justify-between w-full">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
+                      {/* Reorder Controls */}
+                      <div className="flex flex-col items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const above = filteredSections[index - 1];
+                            if (above) {
+                              onSwapSectionOrder(section.id, above.id);
+                            }
+                          }}
+                          disabled={isFirst}
+                          title="Move up"
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const below = filteredSections[index + 1];
+                            if (below) {
+                              onSwapSectionOrder(section.id, below.id);
+                            }
+                          }}
+                          disabled={isLast}
+                          title="Move down"
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                       {/* Numbering */}
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold flex-shrink-0">
                         {index + 1}
@@ -1266,7 +1782,7 @@ function ProgramSections({
                           "flex-1 text-left truncate",
                           !section.is_applicable && "opacity-50 line-through"
                         )}>
-                          {section.name}
+                          {displayName}
                           {!section.is_applicable && (
                             <span className="ml-2 text-xs text-muted-foreground italic">(Not accessible - marked N/A)</span>
                           )}
@@ -1317,6 +1833,22 @@ function ProgramSections({
                           <Edit2 className="h-3.5 w-3.5" />
                         </Button>
                       )}
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (confirm('Delete this line item? This will remove all its boxes and evidence.')) {
+                            onDeleteSection(section.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                       
                       {section.locked && (
                         <Badge variant="outline" className="text-xs text-gray-600">
@@ -1420,8 +1952,8 @@ function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, on
     // Search filter - if section name matched, show ALL boxes (skip box-level search)
     if (searchQuery && !sectionMatchesSearch) {
       const query = searchQuery.toLowerCase();
-      const matchesHeader = box.header.toLowerCase().includes(query);
-      const matchesContent = box.content.toLowerCase().includes(query);
+      const matchesHeader = normalizeHeader(box.header).toLowerCase().includes(query);
+      const matchesContent = stripHtml(String(box.content || '')).toLowerCase().includes(query);
       if (!matchesHeader && !matchesContent) {
         return false;
       }
@@ -1458,7 +1990,7 @@ function SectionContent({ sectionId, onAddBox, onAttachEvidence, attachments, on
   );
 
   return (
-    <div className="space-y-2 pt-2">
+    <div className="space-y-1.5 pt-1">
       {/* Section Evidence */}
       {sectionAttachments.length > 0 && (
         <div className="mb-4 p-3 border rounded-lg bg-muted/30">
