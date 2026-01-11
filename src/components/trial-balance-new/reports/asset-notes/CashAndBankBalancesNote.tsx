@@ -90,7 +90,7 @@ export function CashAndBankBalancesNote({ data, noteNumber, reportingScale = 'ru
   }
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded border p-4 space-y-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-semibold">Note {noteNumber}: Cash and Bank Balances</h3>
       </div>
@@ -106,68 +106,68 @@ export function CashAndBankBalancesNote({ data, noteNumber, reportingScale = 'ru
           </thead>
           <tbody>
             {/* Cash and cash equivalents */}
-            {cashTotal > 0 && (
+            {cashTotal !== 0 && (
               <>
                 <tr className="bg-blue-50 font-semibold">
                   <td colSpan={3} className="px-3 py-2 text-sm">Cash and cash equivalents</td>
                 </tr>
-                
-                {cashAndBank.cash.currentAccounts > 0 && (
+
+                {cashAndBank.cash.currentAccounts !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">On current accounts</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.cash.currentAccounts)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.cash.savingAccounts > 0 && (
+
+                {cashAndBank.cash.savingAccounts !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">On saving accounts</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.cash.savingAccounts)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.cash.cashCredit > 0 && (
+
+                {cashAndBank.cash.cashCredit !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Cash credit account (Debit balance)</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.cash.cashCredit)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.cash.fixedDeposits > 0 && (
+
+                {cashAndBank.cash.fixedDeposits !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Fixed Deposits</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.cash.fixedDeposits)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.cash.depositsLessThan3Months > 0 && (
+
+                {cashAndBank.cash.depositsLessThan3Months !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Deposits with original maturity of less than three months</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.cash.depositsLessThan3Months)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.cash.cheques > 0 && (
+
+                {cashAndBank.cash.cheques !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Cheques, drafts on hand</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.cash.cheques)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.cash.cashOnHand > 0 && (
+
+                {cashAndBank.cash.cashOnHand !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Cash on hand</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.cash.cashOnHand)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
+
                 <tr className="bg-gray-100 font-bold border-b">
                   <td className="px-3 py-2 text-sm">Total (I)</td>
                   <td className="px-3 py-2 text-right text-sm font-bold">{formatValue(cashTotal)}</td>
@@ -177,52 +177,52 @@ export function CashAndBankBalancesNote({ data, noteNumber, reportingScale = 'ru
             )}
 
             {/* Other bank balances */}
-            {otherBankTotal > 0 && (
+            {otherBankTotal !== 0 && (
               <>
                 <tr className="bg-blue-50 font-semibold">
                   <td colSpan={3} className="px-3 py-2 text-sm">Other bank balances</td>
                 </tr>
-                
-                {cashAndBank.otherBank.bankDeposits > 0 && (
+
+                {cashAndBank.otherBank.bankDeposits !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Bank Deposits</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.otherBank.bankDeposits)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.otherBank.earmarkedDeposits > 0 && (
+
+                {cashAndBank.otherBank.earmarkedDeposits !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Earmarked Bank Deposits</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.otherBank.earmarkedDeposits)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.otherBank.depositsMoreThan3Months > 0 && (
+
+                {cashAndBank.otherBank.depositsMoreThan3Months !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm">Deposits with original maturity for more than 3 months but less than 12 months from reporting date</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.otherBank.depositsMoreThan3Months)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.otherBank.marginMoney > 0 && (
+
+                {cashAndBank.otherBank.marginMoney !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm pl-6">Margin money or deposits under lien</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.otherBank.marginMoney)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
-                {cashAndBank.otherBank.others > 0 && (
+
+                {cashAndBank.otherBank.others !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2 text-sm pl-6">Others (specify nature)</td>
                     <td className="px-3 py-2 text-right text-sm">{formatValue(cashAndBank.otherBank.others)}</td>
                     <td className="px-3 py-2 text-right text-sm">-</td>
                   </tr>
                 )}
-                
+
                 <tr className="bg-gray-100 font-bold border-b">
                   <td className="px-3 py-2 text-sm">Total other bank balances (II)</td>
                   <td className="px-3 py-2 text-right text-sm font-bold">{formatValue(otherBankTotal)}</td>
