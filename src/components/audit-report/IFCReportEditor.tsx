@@ -8,6 +8,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Save, Eye, Loader2, Plus, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useIFCReportContent, MaterialWeakness, SignificantDeficiency } from '@/hooks/useIFCReportContent';
@@ -26,6 +27,7 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
   const { setup } = useAuditReportSetup(engagementId);
   const { firmSettings } = useFirmSettings();
   const { getPartnerById } = usePartners();
+  const opinionInstruction = 'The IFC module does not automatically modify or generate the IFC opinion based on material misstatements or deficiencies reported here. Users are required to independently evaluate the impact and manually modify the IFC opinion and related disclosures, wherever necessary.';
   
   // Get signing partner details
   const signingPartner = setup?.signing_partner_id ? getPartnerById(setup.signing_partner_id) : null;
@@ -304,25 +306,10 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
                         Unmodified Opinion
                       </Label>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <RadioGroupItem value="qualified" id="qualified" />
-                      <Label htmlFor="qualified" className="font-normal cursor-pointer">
-                        Qualified Opinion
-                      </Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <RadioGroupItem value="adverse" id="adverse" />
-                      <Label htmlFor="adverse" className="font-normal cursor-pointer">
-                        Adverse Opinion
-                      </Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <RadioGroupItem value="disclaimer" id="disclaimer" />
-                      <Label htmlFor="disclaimer" className="font-normal cursor-pointer">
-                        Disclaimer of Opinion
-                      </Label>
-                    </div>
                   </RadioGroup>
+                  <div className="text-xs text-muted-foreground mt-2">
+                    In case of Qualified Opinion on IFC, Adverse Opinion on IFC, or Disclaimer of Opinion on IFC, refer the Guidance Note on IFC issued by ICAI.
+                  </div>
                 </div>
 
                 <Separator />
@@ -421,6 +408,12 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
           <TabsContent value="weaknesses" className="space-y-4">
             <ScrollArea className="h-[600px] pr-4">
               <div className="space-y-6">
+                <Alert className="border-warning bg-warning/10 rounded-none">
+                  <AlertTriangle className="h-4 w-4 text-warning" />
+                  <AlertDescription className="uppercase text-xs tracking-wider font-semibold text-warning-foreground leading-relaxed">
+                    {opinionInstruction}
+                  </AlertDescription>
+                </Alert>
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold">Material Weaknesses</h3>
@@ -534,6 +527,12 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
           <TabsContent value="deficiencies" className="space-y-4">
             <ScrollArea className="h-[600px] pr-4">
               <div className="space-y-6">
+                <Alert className="border-warning bg-warning/10 rounded-none">
+                  <AlertTriangle className="h-4 w-4 text-warning" />
+                  <AlertDescription className="uppercase text-xs tracking-wider font-semibold text-warning-foreground leading-relaxed">
+                    {opinionInstruction}
+                  </AlertDescription>
+                </Alert>
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold">Significant Deficiencies</h3>

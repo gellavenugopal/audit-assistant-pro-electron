@@ -541,7 +541,7 @@ export function exportAuditReport(options: ExportOptions) {
     [],
     [`To the Members of ${options.clientName}`],
     [],
-    ['Report on the Audit of the Financial Statements'],
+    ['Report on the Audit of the Standalone Financial Statements'],
     [],
     ['Opinion'],
     ['We have audited the accompanying financial statements of ' + options.clientName + ','],

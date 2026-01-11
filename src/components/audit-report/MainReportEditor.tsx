@@ -78,6 +78,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
   // Get signing partner details from partners table
   const signingPartner = setup?.signing_partner_id ? getPartnerById(setup.signing_partner_id) : null;
+  const isPublicCompanyType = setup?.company_type === 'public_company';
 
   const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
   const [editorBasis, setEditorBasis] = useState<string>('');
@@ -107,6 +108,31 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     setup?.is_subsidiary,
     setup?.is_holding_company,
     ifcManualOverride,
+  ]);
+
+  useEffect(() => {
+    if (!setup || !isPublicCompanyType) return;
+
+    const patch: Record<string, any> = {};
+
+    if (!setup.is_public_company) patch.is_public_company = true;
+    if (!setup.cash_flow_required) patch.cash_flow_required = true;
+    if (!setup.ifc_applicable) patch.ifc_applicable = true;
+    if (setup.is_private_exceeding_threshold) patch.is_private_exceeding_threshold = false;
+    if (setup.is_private_non_exceeding_threshold) patch.is_private_non_exceeding_threshold = false;
+
+    if (Object.keys(patch).length === 0) return;
+
+    setIfcManualOverride(false);
+    saveSetupPatch(patch);
+  }, [
+    setup?.company_type,
+    setup?.is_public_company,
+    setup?.cash_flow_required,
+    setup?.ifc_applicable,
+    setup?.is_private_exceeding_threshold,
+    setup?.is_private_non_exceeding_threshold,
+    isPublicCompanyType,
   ]);
 
   useEffect(() => {
@@ -372,22 +398,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      checked={Boolean(setup.is_small_company)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_small_company: !!v })}
-                    />
-                    <Label className="font-normal">Small Company</Label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_opc)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_opc: !!v })}
-                    />
-                    <Label className="font-normal">One Person Company (OPC)</Label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
                       checked={Boolean(setup.is_public_company)}
                       onCheckedChange={(v) => updateIfcCriteria({ is_public_company: !!v })}
                     />
@@ -397,17 +407,23 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.is_private_exceeding_threshold)}
+                      disabled={isPublicCompanyType}
                       onCheckedChange={(v) => updateIfcCriteria({ is_private_exceeding_threshold: !!v })}
                     />
-                    <Label className="font-normal">Private limited company with Previous year turnover is  Rs 50 Crores or more</Label>
+                    <Label className={`font-normal ${isPublicCompanyType ? 'text-muted-foreground' : ''}`}>
+                      Private limited company with Previous year turnover is  Rs 50 Crores or more
+                    </Label>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.is_private_non_exceeding_threshold)}
+                      disabled={isPublicCompanyType}
                       onCheckedChange={(v) => updateIfcCriteria({ is_private_non_exceeding_threshold: !!v })}
                     />
-                    <Label className="font-normal">Private limited company with Current year during at any point of time exceeding Rs 25Crores</Label>
+                    <Label className={`font-normal ${isPublicCompanyType ? 'text-muted-foreground' : ''}`}>
+                      Private limited company with Current year during at any point of time exceeding Rs 25Crores
+                    </Label>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -449,13 +465,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_listed_company)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_listed_company: !!v })}
-                    />
-                    <Label className="font-normal">Listed company (KAMs typically required)</Label>
-                  </div>
+                  {/* Listed company (KAMs typically required) checkbox hidden as per requirements */}
 
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -532,7 +542,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>CARO annexure letter</Label>
+                    <Label>CARO Report Annexure Number</Label>
                     <Input
                       value={setup.caro_annexure_letter || ''}
                       onChange={(e) => saveSetupPatch({ caro_annexure_letter: e.target.value })}
@@ -540,7 +550,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>IFC annexure letter</Label>
+                    <Label>IFC Report Annexure Number</Label>
                     <Input
                       value={setup.ifc_annexure_letter || ''}
                       onChange={(e) => saveSetupPatch({ ifc_annexure_letter: e.target.value })}
@@ -805,31 +815,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           {/* 5) Section 143(3) */}
           <TabsContent value="s143" className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>143(3)(a) Information and explanations obtained</Label>
-                <Select
-                  value={draft.clause_143_3_a_information_status || 'standard'}
-                  onValueChange={(v) => updateDraft({ clause_143_3_a_information_status: v as StatusValue })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="standard">Standard (auto-adapts to opinion type)</SelectItem>
-                    <SelectItem value="qualified">Qualified / Other remarks (user-defined)</SelectItem>
-                  </SelectContent>
-                </Select>
-                {draft.clause_143_3_a_information_status === 'qualified' && (
-                  <Textarea
-                    rows={2}
-                    value={draft.clause_143_3_a_information_details || ''}
-                    onChange={(e) => updateDraft({ clause_143_3_a_information_details: e.target.value })}
-                    placeholder="Provide custom paragraph for qualified/modified response"
-                    className={!draft.clause_143_3_a_information_details?.trim() ? 'bg-yellow-50' : ''}
-                  />
-                )}
-              </div>
-
               <div className="space-y-2">
                 <Label>143(3)(b) Proper books of account</Label>
                 <StatusSelect
