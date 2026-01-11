@@ -105,7 +105,7 @@ export const LEGACY_SECTION_NAME_MAP: Record<string, string> = {
 
 export const DEFAULT_BOX_HEADERS: string[] = [
   'Purpose',
-  'Source',
+  'Source of Working',
   'Procedure',
   'Test of Details',
   'Conclusion',
@@ -114,6 +114,7 @@ export const DEFAULT_BOX_HEADERS: string[] = [
 export const LEGACY_BOX_HEADER_MAP: Record<string, string> = {
   'Accounting Policies and Relevant Disclosures': 'Purpose',
   'Substantive Analytical Procedures': 'Procedure',
-  'Working Paper Reference': 'Source',
+  'Working Paper Reference': 'Source of Working',
+  'Source': 'Source of Working',
   'Auditor Conclusion': 'Conclusion',
 };

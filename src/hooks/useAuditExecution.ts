@@ -563,7 +563,8 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
   const toggleBoxLock = async (boxId: string) => {
     const box = boxes.find((b) => b.id === boxId);
     if (!box) return;
-    await updateBox(boxId, { locked: !box.locked });
+    const isLocked = box.locked === true || String(box.locked) === 'true';
+    await updateBox(boxId, { locked: !isLocked });
   };
 
   const deleteBox = async (boxId: string) => {

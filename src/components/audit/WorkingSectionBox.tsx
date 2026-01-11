@@ -112,6 +112,7 @@ export function WorkingSectionBoxComponent({
   const [editingHeader, setEditingHeader] = useState(false);
   const [headerDirty, setHeaderDirty] = useState(false);
   const [contentDirty, setContentDirty] = useState(false);
+  const isLocked = box?.locked === true || String(box?.locked) === 'true';
 
   useEffect(() => {
     setHeader(normalizeHeader(box?.header || ''));
@@ -122,11 +123,11 @@ export function WorkingSectionBoxComponent({
   }, [box?.id, box?.header, box?.content, box?.status]);
 
   useEffect(() => {
-    if (!box || box.locked) return;
+    if (!box || isLocked) return;
     if (!isValidStatus(box.status)) {
       onStatusChange(box.id, 'not-commenced');
     }
-  }, [box?.id, box?.locked, box?.status, onStatusChange]);
+  }, [box?.id, isLocked, box?.status, onStatusChange]);
 
   if (!box) {
     return null;
@@ -136,7 +137,7 @@ export function WorkingSectionBoxComponent({
   const statusMeta = STATUS_META[normalizedStatus];
 
   const handleSave = () => {
-    if (box.locked) return;
+    if (isLocked) return;
     const trimmedHeader = header.trim();
     onUpdate(box.id, {
       header: trimmedHeader || box.header,
@@ -148,7 +149,7 @@ export function WorkingSectionBoxComponent({
   };
 
   const handleHeaderSave = () => {
-    if (box.locked) return;
+    if (isLocked) return;
     const trimmedHeader = header.trim();
     if (!trimmedHeader) {
       setHeader(normalizeHeader(box.header));
@@ -168,7 +169,7 @@ export function WorkingSectionBoxComponent({
   };
 
   return (
-    <Card className={cn('border', box.locked && 'opacity-70')}>
+    <Card className={cn('border', isLocked && 'opacity-70')}>
       <CardHeader className="px-4 py-3 pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 space-y-2">
@@ -190,7 +191,7 @@ export function WorkingSectionBoxComponent({
                       handleHeaderCancel();
                     }
                   }}
-                  disabled={box.locked}
+                  disabled={isLocked}
                   className="h-8 text-sm"
                   autoFocus
                 />
@@ -219,7 +220,7 @@ export function WorkingSectionBoxComponent({
                 <h4 className="text-sm font-semibold text-blue-600 dark:text-blue-400">
                   {normalizeHeader(box.header)}
                 </h4>
-                {!box.locked && (
+                {!isLocked && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -229,7 +230,7 @@ export function WorkingSectionBoxComponent({
                     <Edit2 className="h-3.5 w-3.5" />
                   </Button>
                 )}
-                {box.locked && (
+                {isLocked && (
                   <Badge variant="outline" className="text-xs">
                     <Lock className="h-3 w-3 mr-1" />
                     Locked
@@ -257,7 +258,7 @@ export function WorkingSectionBoxComponent({
             <Select
               value={normalizedStatus}
               onValueChange={(value) => onStatusChange(box.id, value as BoxStatus)}
-              disabled={box.locked}
+              disabled={isLocked}
             >
               <SelectTrigger
                 className={cn('h-8 w-[160px] text-xs', statusMeta.triggerClass)}
@@ -286,7 +287,7 @@ export function WorkingSectionBoxComponent({
               className="h-8 w-8"
               onClick={() => onToggleLock(box.id)}
             >
-              {box.locked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+              {isLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
             </Button>
           </div>
         </div>
@@ -300,7 +301,7 @@ export function WorkingSectionBoxComponent({
             setContentDirty(true);
           }}
           placeholder="Enter text"
-          disabled={box.locked}
+          disabled={isLocked}
         />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -311,7 +312,7 @@ export function WorkingSectionBoxComponent({
                 size="icon"
                 className="h-8 w-8"
                 onClick={() => onMoveUp(box.id)}
-                disabled={isFirst || box.locked}
+                disabled={isFirst || isLocked}
                 title="Move up"
               >
                 <ArrowUp className="h-4 w-4" />
@@ -323,7 +324,7 @@ export function WorkingSectionBoxComponent({
                 size="icon"
                 className="h-8 w-8"
                 onClick={() => onMoveDown(box.id)}
-                disabled={isLast || box.locked}
+                disabled={isLast || isLocked}
                 title="Move down"
               >
                 <ArrowDown className="h-4 w-4" />
@@ -340,7 +341,7 @@ export function WorkingSectionBoxComponent({
               <MessageSquare className="h-4 w-4 mr-2" />
               Comment
             </Button>
-            {!box.locked && (
+            {!isLocked && (
               <Button
                 variant="outline"
                 size="sm"
@@ -351,7 +352,7 @@ export function WorkingSectionBoxComponent({
                 Save
               </Button>
             )}
-            {!box.locked && (
+            {!isLocked && (
               <Button
                 variant="ghost"
                 size="sm"
