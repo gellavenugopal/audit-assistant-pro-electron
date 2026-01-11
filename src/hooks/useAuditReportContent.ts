@@ -60,9 +60,6 @@ export interface AuditReportMainContent {
   board_report_misstatement_details: string | null;
 
   // Section 143(3)
-  clause_143_3_a_information_status: StatusValue | null;
-  clause_143_3_a_information_details: string | null;
-
   clause_143_3_a_status: StatusValue | null;
   clause_143_3_a_details: string | null;
 
@@ -126,7 +123,6 @@ const DEFAULT_INSERT: Partial<AuditReportMainContent> = {
   board_report_status: 'received_no_misstatement',
   basis_for_opinion_is_example: false,
 
-  clause_143_3_a_information_status: 'standard' as any,
   clause_143_3_a_status: 'yes',
   clause_143_3_b_audit_trail_status: 'yes',
   clause_143_3_h_remuneration_status: 'yes',

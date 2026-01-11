@@ -54,7 +54,7 @@ export class AuditReportGenerator {
     const blocks: ReportBlock[] = [
       { kind: 'title', text: 'Independent Auditor’s Report' },
       { kind: 'subtitle', text: addressee },
-      { kind: 'heading', text: 'Report on the Audit of the Financial Statements' },
+      { kind: 'heading', text: 'Report on the Audit of the Standalone Financial Statements' },
       {
         kind: 'subheading',
         text: buildOpinionHeading(content.opinion_type),
@@ -161,7 +161,7 @@ export class AuditReportGenerator {
     blocks.push({ kind: 'paragraph', text: buildManagementResponsibilitiesParagraph(includeCashFlow) });
 
     blocks.push({ kind: 'subheading', text: "Auditor's Responsibilities for the Audit of the Standalone Financial Statements" });
-    blocks.push({ kind: 'paragraph', text: buildAuditorResponsibilitiesParagraph(Boolean(setup.ifc_applicable)) });
+    blocks.push({ kind: 'paragraph', text: buildAuditorResponsibilitiesParagraph(Boolean(setup.ifc_applicable), includeKams) });
 
     // Other Matter
     const hasBranchAuditorsMatter = setup.has_branch_auditors;

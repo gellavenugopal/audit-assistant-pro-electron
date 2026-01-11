@@ -6,7 +6,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
@@ -65,8 +64,8 @@ export function EngagementLetterGeneratorUI({ engagementId }: EngagementLetterGe
     professional_fees: 50000,
     professional_fees_currency: 'INR',
     taxes_extra: true,
-    payment_terms: 'Upon billing',
-    out_of_pocket_exp: true,
+    payment_terms: '',
+    out_of_pocket_exp: false,
   });
 
   // Management responsibilities
@@ -81,7 +80,7 @@ export function EngagementLetterGeneratorUI({ engagementId }: EngagementLetterGe
   const [statutoryAuditConfig, setStatutoryAuditConfig] = useState({
     ifc_applicable: true,
     caro_applicable: true,
-    ind_as_applicable: true,
+    ind_as_applicable: false,
   });
 
   const [taxAuditConfig, setTaxAuditConfig] = useState({
@@ -109,7 +108,6 @@ export function EngagementLetterGeneratorUI({ engagementId }: EngagementLetterGe
     if (!period.balance_sheet_date) errors.push('Balance sheet date is required');
     if (!auditor.firm_name.trim()) errors.push('Firm name is required');
     if (!auditor.partner_name.trim()) errors.push('Partner name is required');
-    if (!commercial.payment_terms.trim()) errors.push('Payment terms are required');
 
     if (letterType.includes('tax_audit') && !period.assessment_year.trim()) {
       errors.push('Assessment year is required for tax audit letters');
@@ -470,27 +468,6 @@ export function EngagementLetterGeneratorUI({ engagementId }: EngagementLetterGe
                     </div>
                   </div>
 
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>Payment Terms *</Label>
-                    <Input
-                      value={commercial.payment_terms}
-                      onChange={(e) => setCommercial({ ...commercial, payment_terms: e.target.value })}
-                      placeholder="e.g., 50% on engagement, 50% on completion"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        checked={commercial.out_of_pocket_exp}
-                        onCheckedChange={(v) => setCommercial({ ...commercial, out_of_pocket_exp: !!v })}
-                        id="oope"
-                      />
-                      <Label htmlFor="oope" className="font-normal cursor-pointer">
-                        Charge out-of-pocket expenses separately
-                      </Label>
-                    </div>
-                  </div>
                 </div>
               </div>
 
@@ -553,19 +530,6 @@ export function EngagementLetterGeneratorUI({ engagementId }: EngagementLetterGe
                           CARO 2020 applicable
                         </Label>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          checked={statutoryAuditConfig.ind_as_applicable}
-                          onCheckedChange={(v) =>
-                            setStatutoryAuditConfig({ ...statutoryAuditConfig, ind_as_applicable: !!v })
-                          }
-                          id="indas"
-                        />
-                        <Label htmlFor="indas" className="font-normal cursor-pointer">
-                          Ind AS applicable (else AS/Schedule III)
-                        </Label>
-                      </div>
                     </div>
                   </div>
                 </>
@@ -578,25 +542,6 @@ export function EngagementLetterGeneratorUI({ engagementId }: EngagementLetterGe
                   <div>
                     <h3 className="font-semibold mb-4">Tax Audit Configuration</h3>
                     <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label>Accounting Standard</Label>
-                        <Select
-                          value={taxAuditConfig.accounting_standard}
-                          onValueChange={(v) =>
-                            setTaxAuditConfig({ ...taxAuditConfig, accounting_standard: v as any })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Ind AS">Ind AS</SelectItem>
-                            <SelectItem value="AS">AS</SelectItem>
-                            <SelectItem value="Schedule III">Schedule III</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
                       {letterType === 'tax_audit_partnership_3ca' && (
                         <div className="flex items-center gap-2">
                           <Checkbox

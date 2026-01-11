@@ -9,6 +9,8 @@ import { Loader2, Upload, FileText, Trash2, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEngagementLetterTemplates } from '@/hooks/useEngagementLetterTemplates';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { arrayBufferToBase64 } from '@/utils/base64';
+import { buildEngagementLetterTemplatePayload } from '@/services/engagementLetterTemplatePayload';
 
 export function EngagementLetterTemplateManager() {
   const { templates, loading, uploadTemplate, deleteTemplate, refetch } = useEngagementLetterTemplates();
@@ -19,8 +21,8 @@ export function EngagementLetterTemplateManager() {
   const templateTypes = [
     { value: 'statutory_audit_company_without_ifc', label: 'Statutory Audit - Company (Unlisted)' },
     { value: 'statutory_audit_company_with_ifc', label: 'Statutory Audit - Company (with IFC)' },
-    { value: 'tax_audit_partnership_3ca', label: 'Tax Audit - Partnership (3CA - Audited)' },
-    { value: 'tax_audit_partnership_3cb', label: 'Tax Audit - Partnership (3CB - Non-Audited)' },
+    { value: 'tax_audit_partnership_3ca', label: 'Tax Audit - (3CA - Audited)' },
+    { value: 'tax_audit_partnership_3cb', label: 'Tax Audit - (3CB - Non-Audited)' },
   ];
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,20 +47,22 @@ export function EngagementLetterTemplateManager() {
       // Read file as ArrayBuffer
       const arrayBuffer = await selectedFile.arrayBuffer();
 
-      // Extract text from Word document
+      // Extract text from Word document for preview and placeholders
       const result = await mammoth.extractRawText({ arrayBuffer });
       const textContent = result.value;
 
+      const base64 = await arrayBufferToBase64(arrayBuffer);
+      const payload = buildEngagementLetterTemplatePayload(base64, textContent);
+
       if (!textContent.trim()) {
-        toast.error('No text content found in the document');
-        return;
+        toast.warning('No text extracted. Preview may be blank, but the template will still upload.');
       }
 
       // Upload to database
       const success = await uploadTemplate(
         selectedType as any,
         templateTypes.find(t => t.value === selectedType)?.label || selectedType,
-        textContent,
+        payload,
         selectedFile.name
       );
 
@@ -86,16 +90,16 @@ export function EngagementLetterTemplateManager() {
       <CardHeader>
         <CardTitle>Engagement Letter Templates</CardTitle>
         <CardDescription>
-          Upload Word document templates for engagement letters. Use merge tags like {'{'}{'{'} entity_name {'}'}{'}'},
-          {'{'}{'{'} partner_name {'}'}{'}'},  etc. in your templates.
+          Upload Word document templates for engagement letters. Use merge tags like {'{'}{'{'} entity_name {'}'}{'}'} or
+          bracket tags like [Entity Name]. Keep placeholders as plain text (no split formatting) for best results.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <Alert>
           <AlertDescription>
             <strong>Merge Tags Available:</strong> entity_name, entity_type, registration_no, pan, gstin, address,
-            email, phone, financial_year, firm_name, partner_name, place, letter_date, professional_fees,
-            payment_terms, and more.
+            email, phone, financial_year, assessment_year, firm_name, partner_name, place, letter_date,
+            appointment_letter_date, agm_date, professional_fees, and more.
           </AlertDescription>
         </Alert>
 
@@ -203,3 +207,4 @@ export function EngagementLetterTemplateManager() {
     </Card>
   );
 }
+
