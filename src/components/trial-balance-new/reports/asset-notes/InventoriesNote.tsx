@@ -56,7 +56,7 @@ export function InventoriesNote({ stockData, noteNumber, reportingScale = 'rupee
   }
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded border p-4 space-y-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-semibold">Note {noteNumber}: Inventories</h3>
       </div>
@@ -71,35 +71,35 @@ export function InventoriesNote({ stockData, noteNumber, reportingScale = 'rupee
             </tr>
           </thead>
           <tbody>
-            {inventories.rawMaterials > 0 && (
+            {inventories.rawMaterials !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Raw Materials</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(inventories.rawMaterials)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {inventories.workInProgress > 0 && (
+            {inventories.workInProgress !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Work-in-progress</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(inventories.workInProgress)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {inventories.finishedGoods > 0 && (
+            {inventories.finishedGoods !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Finished goods</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(inventories.finishedGoods)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {inventories.stockInTrade > 0 && (
+            {inventories.stockInTrade !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Stock-in-trade</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(inventories.stockInTrade)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {inventories.storesAndSpares > 0 && (
+            {inventories.storesAndSpares !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Stores and Spares</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(inventories.storesAndSpares)}</td>

@@ -172,9 +172,10 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
   useEffect(() => {
     if (!businessType || !stockData || stockData.length === 0) return;
     
-    // Guard: Skip if we already ran for this businessType and count
+    // Guard: Skip if we already ran for this businessType and the exact item keys
+    const fingerprint = stockData.map(item => item?.['Composite Key']).join('|');
     const lastRun = lastAutoClassifiedRef.current;
-    if (lastRun && lastRun.businessType === businessType && lastRun.count === stockData.length) {
+    if (lastRun && lastRun.businessType === businessType && lastRun.count === stockData.length && lastRun.fingerprint === fingerprint) {
       return;
     }
     
@@ -196,8 +197,8 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
       return item;
     });
     
-    // Update the ref to prevent re-running
-    lastAutoClassifiedRef.current = { businessType, count: stockData.length };
+    // Update the ref to prevent re-running for identical state
+    lastAutoClassifiedRef.current = { businessType, count: stockData.length, fingerprint };
     
     if (updated) {
       onUpdateStockData(newData);
@@ -206,7 +207,7 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
         description: `Stock items classified based on ${businessType} business rules`,
       });
     }
-  }, [businessType, stockData.length]);
+  }, [businessType, stockData, onUpdateStockData, toast]);
 
   const formatNumber = (num: number): string => {
     return new Intl.NumberFormat('en-IN', {

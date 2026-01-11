@@ -31,8 +31,17 @@ export function OtherNonCurrentAssetsNote({ data, noteNumber, reportingScale = '
     data.forEach(row => {
       const h3 = row.H3?.toLowerCase() || '';
       const h4 = row.H4?.toLowerCase() || '';
-      const ledgerName = row.ledgerName?.toLowerCase() || '';
-      const value = row.closingBalance || 0;
+      const ledgerName = (row['Ledger Name'] || row.ledgerName || '').toLowerCase();
+      const primary = (row['Primary Group'] || '').toLowerCase();
+      const value = row['Closing Balance'] || row.closingBalance || 0;
+
+      // Exclude PPE items (Fixed Assets group or common PPE ledger names)
+      const isPPE = primary.includes('fixed asset') ||
+        ['land', 'building', 'plant', 'machinery', 'furniture', 'fixture',
+          'vehicle', 'computer', 'electrical', 'office equipment',
+          'goodwill', 'software', 'trademark', 'brand'].some(pattern => ledgerName.includes(pattern));
+
+      if (isPPE) return; // Skip PPE items
 
       if (h3.includes('other non-current asset') || h4.includes('other non-current asset')) {
         if (ledgerName.includes('security deposit')) {
@@ -55,7 +64,7 @@ export function OtherNonCurrentAssetsNote({ data, noteNumber, reportingScale = '
   }
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded border p-4 space-y-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-semibold">Note {noteNumber}: Other non-current assets</h3>
       </div>
@@ -70,21 +79,21 @@ export function OtherNonCurrentAssetsNote({ data, noteNumber, reportingScale = '
             </tr>
           </thead>
           <tbody>
-            {otherAssets.securityDeposits > 0 && (
+            {otherAssets.securityDeposits !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Security Deposits</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(otherAssets.securityDeposits)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {otherAssets.prepaidExpenses > 0 && (
+            {otherAssets.prepaidExpenses !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Prepaid expenses</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(otherAssets.prepaidExpenses)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {otherAssets.others > 0 && (
+            {otherAssets.others !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Others (Specify nature)</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(otherAssets.others)}</td>

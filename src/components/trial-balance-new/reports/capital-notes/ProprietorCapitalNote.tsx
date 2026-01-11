@@ -71,6 +71,11 @@ interface ProprietorCapitalNoteProps {
 type CapitalValues = Record<string, { current: number; previous: number }>;
 
 export function ProprietorCapitalNote({ lines, currentYear, previousYear }: ProprietorCapitalNoteProps) {
+  const storageKey = useMemo(() => {
+    const engagementId = lines?.[0]?.engagement_id || 'local';
+    return `capital-note-proprietor-${engagementId}`;
+  }, [lines]);
+
   const [values, setValues] = useState<CapitalValues>({});
   const [autoMapped, setAutoMapped] = useState(false);
 
@@ -123,6 +128,24 @@ export function ProprietorCapitalNote({ lines, currentYear, previousYear }: Prop
     setValues(initialValues);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed.values) setValues(parsed.values);
+      if (typeof parsed.autoMapped === 'boolean') setAutoMapped(parsed.autoMapped);
+    } catch (error) {
+      console.error('Failed to load proprietor capital note', error);
+    }
+  }, [storageKey]);
+
+  const handleSave = () => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(storageKey, JSON.stringify({ values, autoMapped }));
+  };
+
   const handleValueChange = (key: string, field: 'current' | 'previous', value: string) => {
     const numValue = parseFloat(value) || 0;
     setValues(prev => ({
@@ -172,7 +195,7 @@ export function ProprietorCapitalNote({ lines, currentYear, previousYear }: Prop
             <RefreshCw className="h-4 w-4 mr-2" />
             Auto-Map from TB
           </Button>
-          <Button size="sm">
+          <Button size="sm" onClick={handleSave}>
             <Save className="h-4 w-4 mr-2" />
             Save
           </Button>

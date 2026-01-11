@@ -68,9 +68,9 @@ export function ShortTermLoansAndAdvancesNote({ data, noteNumber, reportingScale
       const ledgerName = row.ledgerName?.toLowerCase() || '';
       const value = row.closingBalance || 0;
 
-      if (h3.includes('short term loan') || h3.includes('other current asset') || 
-          h4.includes('loan') || h4.includes('advance')) {
-        
+      if (h3.includes('short term loan') || h3.includes('other current asset') ||
+        h4.includes('loan') || h4.includes('advance')) {
+
         const isSecured = ledgerName.includes('secured');
         const isDoubtful = ledgerName.includes('doubtful') || ledgerName.includes('bad');
         const isProvision = ledgerName.includes('provision');
@@ -138,7 +138,7 @@ export function ShortTermLoansAndAdvancesNote({ data, noteNumber, reportingScale
   }
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded border p-4 space-y-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-semibold">Note {noteNumber}: Short term loans and advances</h3>
       </div>
@@ -154,26 +154,26 @@ export function ShortTermLoansAndAdvancesNote({ data, noteNumber, reportingScale
           </thead>
           <tbody>
             {/* Secured */}
-            {securedTotal > 0 && (
+            {securedTotal !== 0 && (
               <>
                 <tr className="bg-blue-50 font-semibold">
                   <td colSpan={3} className="px-3 py-2">Secured, considered good</td>
                 </tr>
-                {loansAndAdvances.secured.loansToEmployees > 0 && (
+                {loansAndAdvances.secured.loansToEmployees !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2">Loans to employees</td>
                     <td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.secured.loansToEmployees)}</td>
                     <td className="px-3 py-2 text-right">-</td>
                   </tr>
                 )}
-                {loansAndAdvances.secured.loansToRelatedParties > 0 && (
+                {loansAndAdvances.secured.loansToRelatedParties !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2">Loans to related parties</td>
                     <td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.secured.loansToRelatedParties)}</td>
                     <td className="px-3 py-2 text-right">-</td>
                   </tr>
                 )}
-                {loansAndAdvances.secured.loansToOthers > 0 && (
+                {loansAndAdvances.secured.loansToOthers !== 0 && (
                   <tr className="border-b">
                     <td className="px-3 py-2">Loans to others</td>
                     <td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.secured.loansToOthers)}</td>
@@ -184,48 +184,48 @@ export function ShortTermLoansAndAdvancesNote({ data, noteNumber, reportingScale
             )}
 
             {/* Unsecured */}
-            {unsecuredTotal > 0 && (
+            {unsecuredTotal !== 0 && (
               <>
                 <tr className="bg-blue-50 font-semibold">
                   <td colSpan={3} className="px-3 py-2">Unsecured, considered good</td>
                 </tr>
-                {loansAndAdvances.unsecured.tradeDeposits > 0 && (
+                {loansAndAdvances.unsecured.tradeDeposits !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">Trade Deposits</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.unsecured.tradeDeposits)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
-                {loansAndAdvances.unsecured.advanceTax > 0 && (
+                {loansAndAdvances.unsecured.advanceTax !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">Advance Tax and TDS [Net]</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.unsecured.advanceTax)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
-                {loansAndAdvances.unsecured.matCredit > 0 && (
+                {loansAndAdvances.unsecured.matCredit !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">MAT Credit Entitlement</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.unsecured.matCredit)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
-                {loansAndAdvances.unsecured.gstReceivable > 0 && (
+                {loansAndAdvances.unsecured.gstReceivable !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">GST Receivable</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.unsecured.gstReceivable)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
-                {loansAndAdvances.unsecured.balancesWithGovt > 0 && (
+                {loansAndAdvances.unsecured.balancesWithGovt !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">Balances with government authorities</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.unsecured.balancesWithGovt)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
-                {loansAndAdvances.unsecured.prepaidExpenses > 0 && (
+                {loansAndAdvances.unsecured.prepaidExpenses !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">Prepaid Expenses</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.unsecured.prepaidExpenses)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
-                {loansAndAdvances.unsecured.advancesToSuppliers > 0 && (
+                {loansAndAdvances.unsecured.advancesToSuppliers !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">Advances to suppliers</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.unsecured.advancesToSuppliers)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
-                {loansAndAdvances.unsecured.loansToEmployees > 0 && (
+                {loansAndAdvances.unsecured.loansToEmployees !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">Loans to employees</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.unsecured.loansToEmployees)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
               </>
             )}
 
             {/* Doubtful */}
-            {doubtfulTotal > 0 && (
+            {doubtfulTotal !== 0 && (
               <>
                 <tr className="bg-yellow-50 font-semibold">
                   <td colSpan={3} className="px-3 py-2">Doubtful</td>
                 </tr>
-                {loansAndAdvances.doubtful.advancesToOthers > 0 && (
+                {loansAndAdvances.doubtful.advancesToOthers !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">Advances to others</td><td className="px-3 py-2 text-right">{formatValue(loansAndAdvances.doubtful.advancesToOthers)}</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
-                {loansAndAdvances.doubtful.provision > 0 && (
+                {loansAndAdvances.doubtful.provision !== 0 && (
                   <tr className="border-b"><td className="px-3 py-2">Less: Provision for doubtful loans and advances</td><td className="px-3 py-2 text-right">({formatValue(loansAndAdvances.doubtful.provision)})</td><td className="px-3 py-2 text-right">-</td></tr>
                 )}
               </>

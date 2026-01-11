@@ -136,6 +136,37 @@ const H2_TO_FS_AREA: Record<string, string> = {
   'Advance to Suppliers': 'Other Current',
 };
 
+function resolveFallbackNoteKey(row: LedgerRow): string | undefined {
+  const h2Lower = (row.H2 || '').toLowerCase();
+  const h3Lower = (row.H3 || '').toLowerCase();
+  const primaryGroup = (row['Primary Group'] || '').toLowerCase();
+  const ledgerName = (row['Ledger Name'] || '').toLowerCase();
+
+  if (!h2Lower) return undefined;
+
+  // Check if it's a Fixed Asset/PPE item by Primary Group or ledger name
+  const isPPE = primaryGroup.includes('fixed asset') || 
+    ['land', 'building', 'plant', 'machinery', 'furniture', 'fixture',
+     'vehicle', 'computer', 'electrical', 'office equipment',
+     'goodwill', 'software', 'trademark', 'brand'].some(pattern => ledgerName.includes(pattern));
+  
+  if (isPPE) return 'fixedAssets';
+
+  if (h2Lower.includes('equity')) return 'equity';
+  if (h2Lower.includes('reserve')) return 'reserves';
+
+  if (h2Lower.includes('asset')) {
+    if (h3Lower.includes('current')) return 'otherCurrent';
+    return 'otherNonCurrent';
+  }
+
+  if (h2Lower.includes('liabil')) {
+    return h3Lower.includes('current') ? 'otherCurrentLiabilities' : 'otherLongTerm';
+  }
+
+  return undefined;
+}
+
 /**
  * Compute Balance Sheet note values from classified ledger data
  */
@@ -144,7 +175,7 @@ export function computeBSNoteValues(
 ): { noteValues: BSNoteValues; noteLedgers: NoteLedgersMap } {
   // GUARD: Validate all data is properly classified
   const unclassified = data.filter(row => 
-    !row.H1 || !row.H2 || !row.H3 || row.Status !== 'Mapped'
+    !row.H1 || !row.H2 || !row.H3 || !row.H4 || row.Status !== 'Mapped'
   );
   
   if (unclassified.length > 0) {
@@ -154,7 +185,7 @@ export function computeBSNoteValues(
       unclassified.map(r => r['Ledger Name'])
     );
     // Filter out unclassified to prevent corruption
-    data = data.filter(row => row.H1 && row.H2 && row.H3 && row.Status === 'Mapped');
+    data = data.filter(row => row.H1 && row.H2 && row.H3 && row.H4 && row.Status === 'Mapped');
   }
   
   const noteValues: BSNoteValues = {};
@@ -266,7 +297,11 @@ export function computeBSNoteValues(
       }
     }
     
-    if (!noteKey) return;
+    if (!noteKey) {
+      noteKey = resolveFallbackNoteKey(row);
+    }
+
+    if (!noteKey || !noteLedgers[noteKey]) return;
 
     const ledgerItem: NoteLedgerItem = {
       ledgerName: row['Ledger Name'] || '',
