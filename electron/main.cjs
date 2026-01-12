@@ -1,6 +1,16 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 
+function safeLog(...args) {
+  try {
+    console.log(...args);
+  } catch (error) {
+    if (!error || error.code !== 'EPIPE') {
+      // Ignore logging failures to keep the main process stable.
+    }
+  }
+}
+
 // ODBC is optional - only load if available
 let odbc = null;
 try {
@@ -88,7 +98,7 @@ function registerIpcHandlers() {
             return { success: true, driver, sampleData: result[0] };
           }
         } catch (err) {
-          console.log(`Failed with driver ${driver}:`, err.message);
+          safeLog(`Failed with driver ${driver}:`, err.message);
           continue;
         }
       }
@@ -122,8 +132,8 @@ function registerIpcHandlers() {
     };
     
     const toDateFormatted = formatDateForTally(toDate);
-    console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
-    console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
+    safeLog(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
+    safeLog('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
     
     // First, get company name
     let companyName = '';
@@ -149,8 +159,8 @@ function registerIpcHandlers() {
       };
 
       const toDateFormatted = formatDateForTally(toDate);
-      console.log(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
-      console.log('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
+      safeLog(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
+      safeLog('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
 
       // First, get company name
       let companyName = '';
@@ -159,7 +169,7 @@ function registerIpcHandlers() {
         const companyResult = await odbcConnection.query(companyQuery);
         if (companyResult && companyResult.length > 0) {
           companyName = companyResult[0]['$Name'] || '';
-          console.log(`Trial Balance: Company Name - ${companyName}`);
+          safeLog(`Trial Balance: Company Name - ${companyName}`);
         }
       } catch (err) {
         console.warn('Could not fetch company name:', err.message);
@@ -197,7 +207,7 @@ function registerIpcHandlers() {
         isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
       }));
 
-      console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
+      safeLog(`Trial Balance: Processed ${processedData.length} ledgers`);
 
       return { success: true, data: processedData, companyName };
     } catch (error) {
@@ -236,7 +246,7 @@ function registerIpcHandlers() {
       isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
     }));
     
-    console.log(`Trial Balance: Processed ${processedData.length} ledgers`);
+    safeLog(`Trial Balance: Processed ${processedData.length} ledgers`);
     
     return { success: true, data: processedData, companyName: companyName };
   } catch (error) {
@@ -250,7 +260,7 @@ function registerIpcHandlers() {
         return { success: false, error: 'Not connected to Tally ODBC' };
       }
 
-      console.log('fyStartYear:', fyStartYear, 'targetMonth:', targetMonth);
+      safeLog('fyStartYear:', fyStartYear, 'targetMonth:', targetMonth);
 
       const monthOrder = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
       const targetIndex = monthOrder.indexOf(targetMonth);
@@ -277,10 +287,10 @@ function registerIpcHandlers() {
       const query = `SELECT $Name, $_PrimaryGroup, $IsRevenue, $OpeningBalance, ${monthSqlParts.join(', ')} FROM Ledger`;
 
       const result = await odbcConnection.query(query);
-      console.log('Month wise query result length:', result.length);
+      safeLog('Month wise query result length:', result.length);
       if (result.length > 0) {
-        console.log('First row keys:', Object.keys(result[0]));
-        console.log('First row:', result[0]);
+        safeLog('First row keys:', Object.keys(result[0]));
+        safeLog('First row:', result[0]);
       }
 
       if (!result || result.length === 0) {
@@ -314,8 +324,8 @@ function registerIpcHandlers() {
 
         // Log available keys for debugging (only for first row)
         if (lines.length === 0 && rowKeys.length > 0) {
-          console.log('Available row keys:', rowKeys);
-          console.log('Month SQL parts:', monthSqlParts);
+          safeLog('Available row keys:', rowKeys);
+          safeLog('Month SQL parts:', monthSqlParts);
         }
 
         selectedMonths.forEach((month, i) => {
@@ -384,10 +394,10 @@ function registerIpcHandlers() {
         }
       }
 
-      console.log('Processed lines count:', lines.length);
+      safeLog('Processed lines count:', lines.length);
       const plLines = lines.filter(line => line.isRevenue); // isRevenue now contains isPL classification
       const bsLines = lines.filter(line => !line.isRevenue);
-      console.log('PL lines:', plLines.length, 'BS lines:', bsLines.length);
+      safeLog('PL lines:', plLines.length, 'BS lines:', bsLines.length);
 
       return { success: true, data: { plLines, bsLines, months: selectedMonths, fyStartYear, targetMonth } };
     } catch (error) {
@@ -396,7 +406,7 @@ function registerIpcHandlers() {
   });
 
   // Opening Balance Matching - Fetch Old Tally Ledger Data (Closing Balances)
-  console.log('Registering IPC handler: odbc-fetch-old-tally-ledgers');
+  safeLog('Registering IPC handler: odbc-fetch-old-tally-ledgers');
   ipcMain.handle('odbc-fetch-old-tally-ledgers', async () => {
     try {
       if (!odbcConnection) {
@@ -448,7 +458,7 @@ function registerIpcHandlers() {
   });
 
   // Opening Balance Matching - Fetch New Tally Ledger Data (Opening Balances)
-  console.log('Registering IPC handler: odbc-fetch-new-tally-ledgers');
+  safeLog('Registering IPC handler: odbc-fetch-new-tally-ledgers');
   ipcMain.handle('odbc-fetch-new-tally-ledgers', async () => {
     try {
       if (!odbcConnection) {
@@ -498,7 +508,7 @@ function registerIpcHandlers() {
   });
 
   // Opening Balance Matching - Compare balances and generate XML
-  console.log('Registering IPC handler: odbc-compare-opening-balances');
+  safeLog('Registering IPC handler: odbc-compare-opening-balances');
   ipcMain.handle('odbc-compare-opening-balances', async (event, { oldData, newData }) => {
     try {
       // Create comparison report
@@ -639,7 +649,7 @@ function registerIpcHandlers() {
   });
 
   // Fetch Month Wise Data via ODBC
-  console.log('Registering IPC handler: odbc-fetch-month-wise-data');
+  safeLog('Registering IPC handler: odbc-fetch-month-wise-data');
   ipcMain.handle('odbc-fetch-month-wise-data', async (event, { fyStartYear, targetMonth }) => {
     try {
       if (!odbcConnection) {
@@ -707,7 +717,7 @@ function registerIpcHandlers() {
   });
 
   // Fetch GST Not Feeded Data via ODBC
-  console.log('Registering IPC handler: odbc-fetch-gst-not-feeded');
+  safeLog('Registering IPC handler: odbc-fetch-gst-not-feeded');
   ipcMain.handle('odbc-fetch-gst-not-feeded', async () => {
     try {
       if (!odbcConnection) {
@@ -730,14 +740,14 @@ function registerIpcHandlers() {
       let result;
       try {
         result = await odbcConnection.query(query);
-        console.log(`GST Not Feeded: Queried ${result.length} total ledgers`);
+        safeLog(`GST Not Feeded: Queried ${result.length} total ledgers`);
       } catch (err) {
         console.error('Error querying GST data:', err.message);
         // Try without WHERE clause to see what fields are available
         try {
           query = `SELECT TOP 10 $Name, $_PrimaryGroup, $GSTRegistrationType, $GSTIN FROM Ledger`;
           const testResult = await odbcConnection.query(query);
-          console.log('Test query result sample:', testResult[0]);
+          safeLog('Test query result sample:', testResult[0]);
           throw new Error(`Query failed: ${err.message}. Available fields: ${Object.keys(testResult[0] || {}).join(', ')}`);
         } catch (testErr) {
           throw new Error(`Failed to query GST data: ${err.message}`);
@@ -781,7 +791,7 @@ function registerIpcHandlers() {
           return gstinBlank;
         });
 
-      console.log(`GST Not Feeded: Found ${lines.length} ledgers with Regular GST but no GSTIN out of ${result.length} total ledgers checked`);
+      safeLog(`GST Not Feeded: Found ${lines.length} ledgers with Regular GST but no GSTIN out of ${result.length} total ledgers checked`);
 
       // Log sample data for debugging if no results found
       if (lines.length === 0 && result.length > 0) {
@@ -789,10 +799,10 @@ function registerIpcHandlers() {
           const regType = (r['$GSTRegistrationType'] || '').toString().trim().toLowerCase();
           return regType === 'regular';
         });
-        console.log(`Found ${regularLedgers.length} Regular GST ledgers out of ${result.length} total, all have GSTIN entered`);
+        safeLog(`Found ${regularLedgers.length} Regular GST ledgers out of ${result.length} total, all have GSTIN entered`);
         if (regularLedgers.length > 0) {
           const sample = regularLedgers[0];
-          console.log('Sample Regular GST ledger:', {
+          safeLog('Sample Regular GST ledger:', {
             name: sample['$Name'],
             primaryGroup: sample['$_PrimaryGroup'],
             gstRegType: sample['$GSTRegistrationType'],
@@ -827,7 +837,7 @@ function registerIpcHandlers() {
     `;
 
       const result = await odbcConnection.query(query);
-      console.log(`Stock Items: Fetched ${result.length} stock items`);
+      safeLog(`Stock Items: Fetched ${result.length} stock items`);
 
       if (!result || result.length === 0) {
         return { success: true, items: [] };
@@ -844,7 +854,7 @@ function registerIpcHandlers() {
         'Composite Key': `STOCK|${row['$Name'] || ''}`
       }));
 
-      console.log(`Stock Items: Processed ${items.length} items`);
+      safeLog(`Stock Items: Processed ${items.length} items`);
       return { success: true, items };
     } catch (error) {
       console.error('Error fetching stock items:', error);
@@ -890,7 +900,7 @@ function createWindow() {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
-  console.log('Electron app ready - IPC handlers should be registered');
+  safeLog('Electron app ready - IPC handlers should be registered');
   setAppMenu();
   registerIpcHandlers();
   createWindow();
@@ -921,7 +931,7 @@ async function handleApiRequest(endpoint, method, data, token) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    console.log(`[API Request] Method: ${method}, Endpoint: ${endpoint}`, data ? { data } : 'No Data');
+    safeLog(`[API Request] Method: ${method}, Endpoint: ${endpoint}`, data ? { data } : 'No Data');
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method,
@@ -947,7 +957,7 @@ async function handleApiRequest(endpoint, method, data, token) {
       }
     }
 
-    console.log(`[API Response] ${endpoint}:`, json);
+    safeLog(`[API Response] ${endpoint}:`, json);
     return { ok: response.ok, status: response.status, data: json };
   } catch (error) {
     console.error(`API Error [${endpoint}]:`, error);
@@ -977,7 +987,7 @@ ipcMain.handle('gstzen-download-gstr1', async (event, { data, token }) => {
 });
 
 ipcMain.handle('gstzen-api-request', async (event, { endpoint, method, data, token }) => {
-  console.log(`[IPC] gstzen-api-request: ${method} ${endpoint}`);
+  safeLog(`[IPC] gstzen-api-request: ${method} ${endpoint}`);
   return handleApiRequest(endpoint, method, data, token);
 });
 
