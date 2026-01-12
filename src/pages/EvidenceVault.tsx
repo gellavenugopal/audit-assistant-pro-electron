@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -49,6 +49,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ApprovalBadge } from '@/components/audit/ApprovalBadge';
 import { ApprovalActions } from '@/components/audit/ApprovalActions';
 import { UnlockDialog } from '@/components/audit/UnlockDialog';
+import { supabase } from '@/integrations/supabase/client';
 
 const getFileIcon = (mimeType: string | null) => {
   if (!mimeType) return File;
@@ -82,6 +83,7 @@ export default function EvidenceVault() {
   const [workpaperRef, setWorkpaperRef] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [moduleTags, setModuleTags] = useState<Record<string, string[]>>({});
 
   const { 
     files, 
@@ -100,6 +102,54 @@ export default function EvidenceVault() {
     refetch: refetchFiles,
   } = useEvidenceFiles();
   const [unlockDialogFile, setUnlockDialogFile] = useState<EvidenceFile | null>(null);
+
+  useEffect(() => {
+    const loadModuleTags = async () => {
+      if (!currentEngagement) {
+        setModuleTags({});
+        return;
+      }
+
+      try {
+        const { data: programs, error: programError } = await supabase
+          .from('audit_programs_new')
+          .select('id')
+          .eq('engagement_id', currentEngagement.id);
+
+        if (programError) throw programError;
+
+        const programIds = (programs || []).map((program) => program.id);
+        if (programIds.length === 0) {
+          setModuleTags({});
+          return;
+        }
+
+        const { data: attachments, error: attachmentError } = await supabase
+          .from('audit_program_attachments')
+          .select('file_path,audit_program_id')
+          .in('audit_program_id', programIds);
+
+        if (attachmentError) throw attachmentError;
+
+        const nextTags: Record<string, string[]> = {};
+        (attachments || []).forEach((attachment) => {
+          if (!attachment.file_path) return;
+          const tags = nextTags[attachment.file_path] || [];
+          if (!tags.includes('Audit Execution')) {
+            tags.push('Audit Execution');
+          }
+          nextTags[attachment.file_path] = tags;
+        });
+
+        setModuleTags(nextTags);
+      } catch (error) {
+        console.error('Error loading evidence module tags:', error);
+        setModuleTags({});
+      }
+    };
+
+    loadModuleTags();
+  }, [currentEngagement?.id, files.length]);
 
   const filteredEvidence = files.filter((ev) => {
     const matchesSearch =
@@ -376,6 +426,7 @@ export default function EvidenceVault() {
                 <TableHead className="w-32">Status</TableHead>
                 <TableHead className="w-24">Size</TableHead>
                 <TableHead className="w-24">Workpaper Ref</TableHead>
+                <TableHead className="w-32">Module</TableHead>
                 <TableHead className="w-28">Uploaded</TableHead>
                 <TableHead className="w-36">Actions</TableHead>
               </TableRow>
@@ -390,13 +441,14 @@ export default function EvidenceVault() {
                     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                   </TableRow>
                 ))
               ) : filteredEvidence.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center">
+                  <TableCell colSpan={9} className="h-24 text-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <FolderOpen className="h-8 w-8" />
                       <p>No evidence files found</p>
@@ -413,6 +465,7 @@ export default function EvidenceVault() {
               ) : (
                 filteredEvidence.map((evidence) => {
                   const FileIcon = getFileIcon(evidence.mime_type);
+                  const tags = moduleTags[evidence.file_path] || [];
                   
                   return (
                     <TableRow key={evidence.id}>
@@ -446,6 +499,22 @@ export default function EvidenceVault() {
                       </TableCell>
                       <TableCell className="font-mono text-sm">
                         {evidence.workpaper_ref || '—'}
+                      </TableCell>
+                      <TableCell>
+                        {tags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center rounded-md bg-primary/10 px-2 py-1 text-xs text-primary"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Vault</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="text-xs text-muted-foreground">

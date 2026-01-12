@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,7 +15,14 @@ import {
   Unlock,
   Edit2,
   X,
+  Download,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -31,9 +38,11 @@ interface WorkingSectionBoxProps {
   onUpdate: (boxId: string, updates: Partial<AuditExecutionBox>) => void;
   onDelete: (boxId: string) => void;
   onAttach: () => void;
+  onUploadFiles?: (files: FileList | null) => void;
   onStatusChange: (boxId: string, status: BoxStatus) => void;
   onToggleLock: (boxId: string) => void;
   onCommentClick: (boxId: string) => void;
+  onExport?: (format: 'excel' | 'word') => void;
   attachmentCount?: number;
   onMoveUp?: (boxId: string) => void;
   onMoveDown?: (boxId: string) => void;
@@ -96,9 +105,11 @@ export function WorkingSectionBoxComponent({
   onUpdate,
   onDelete,
   onAttach,
+  onUploadFiles,
   onStatusChange,
   onToggleLock,
   onCommentClick,
+  onExport,
   attachmentCount = 0,
   onMoveUp,
   onMoveDown,
@@ -113,6 +124,7 @@ export function WorkingSectionBoxComponent({
   const [headerDirty, setHeaderDirty] = useState(false);
   const [contentDirty, setContentDirty] = useState(false);
   const isLocked = box?.locked === true || String(box?.locked) === 'true';
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setHeader(normalizeHeader(box?.header || ''));
@@ -238,7 +250,7 @@ export function WorkingSectionBoxComponent({
                 )}
               </div>
             )}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {attachmentCount > 0 && (
                 <Badge variant="secondary" className="text-xs">
                   <Paperclip className="h-3 w-3 mr-1" />
@@ -333,14 +345,62 @@ export function WorkingSectionBoxComponent({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onAttach}>
-              <Paperclip className="h-4 w-4 mr-2" />
-              Attach
-            </Button>
+            {onUploadFiles ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Paperclip className="h-4 w-4 mr-2" />
+                    Attach
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={onAttach}>
+                    Attach from Vault
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => uploadInputRef.current?.click()}>
+                    Upload File
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button variant="outline" size="sm" onClick={onAttach}>
+                <Paperclip className="h-4 w-4 mr-2" />
+                Attach
+              </Button>
+            )}
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                onUploadFiles?.(event.target.files);
+                event.currentTarget.value = '';
+              }}
+            />
             <Button variant="outline" size="sm" onClick={() => onCommentClick(box.id)}>
               <MessageSquare className="h-4 w-4 mr-2" />
               Comment
             </Button>
+            {onExport && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Download className="h-4 w-4 mr-2" />
+                    Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onExport('word')}>
+                    Export Word (.docx)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onExport('excel')}>
+                    Export Excel (.xlsx)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             {!isLocked && (
               <Button
                 variant="outline"

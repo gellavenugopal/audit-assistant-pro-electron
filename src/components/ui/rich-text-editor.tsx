@@ -293,15 +293,31 @@ export function RichTextEditor({
           ref={editorRef}
           contentEditable={!disabled}
           suppressContentEditableWarning
+          role="textbox"
+          aria-multiline="true"
+          aria-disabled={disabled}
+          spellCheck={!disabled}
           tabIndex={disabled ? -1 : 0}
-          className="min-h-[96px] px-3 py-2 text-sm outline-none whitespace-pre-wrap break-words"
+          className="min-h-[96px] px-3 py-2 text-sm outline-none whitespace-pre-wrap break-words cursor-text select-text"
+          onMouseDown={(event) => {
+            if (disabled) return;
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            if (disabled) return;
+            event.stopPropagation();
+          }}
           onInput={emitChange}
           onBlur={() => {
             setIsFocused(false);
             saveSelection();
             emitChange();
           }}
-          onFocus={() => setIsFocused(true)}
+          onFocus={() => {
+            setIsFocused(true);
+            saveSelection();
+          }}
+          onKeyDown={saveSelection}
           onKeyUp={saveSelection}
           onMouseUp={saveSelection}
         />
