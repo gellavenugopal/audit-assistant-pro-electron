@@ -103,7 +103,6 @@ export class EngagementLetterGenerator {
 
     // Validate commercial
     if (!masterData.commercial?.professional_fees) errors.push('commercial.professional_fees is required');
-    if (!masterData.commercial?.payment_terms?.trim()) errors.push('commercial.payment_terms is required');
 
     // Conditional validations
     if (masterData.engagement_type.includes('statutory')) {
@@ -129,26 +128,26 @@ export class EngagementLetterGenerator {
     return [
       {
         id: 'statutory_audit_company_with_ifc',
-        label: 'Statutory Audit – Unlisted Company with IFC',
-        description: 'For companies where IFC audit is applicable',
+        label: 'Statutory Audit - Unlisted Company with IFC',
+        description: 'For unlisted companies with Internal Financial Controls (IFC) reporting requirements',
         category: 'Statutory Audit',
       },
       {
         id: 'statutory_audit_company_without_ifc',
-        label: 'Statutory Audit – Unlisted Company without IFC',
+        label: 'Statutory Audit - Unlisted Company without IFC',
         description: 'For companies where IFC audit is not applicable',
         category: 'Statutory Audit',
       },
       {
         id: 'tax_audit_partnership_3ca',
-        label: 'Tax Audit – Partnership Firm (Form 3CA)',
-        description: 'For partnership firms with audited accounts',
+        label: 'Tax Audit - (3CA - Audited)',
+        description: 'For entities with audited financial statements (Form 3CA)',
         category: 'Tax Audit',
       },
       {
         id: 'tax_audit_partnership_3cb',
-        label: 'Tax Audit – Partnership Firm (Form 3CB)',
-        description: 'For partnership firms with non-audited accounts',
+        label: 'Tax Audit - (3CB - Non-Audited)',
+        description: 'For entities with non-audited financial statements (Form 3CB)',
         category: 'Tax Audit',
       },
     ];
@@ -175,7 +174,6 @@ export class EngagementLetterGenerator {
       'auditor.place',
       // Commercial
       'commercial.professional_fees',
-      'commercial.payment_terms',
     ];
 
     const conditionalFields: Record<string, string[]> = {
@@ -231,3 +229,4 @@ export class EngagementLetterGenerator {
     return results;
   }
 }
+

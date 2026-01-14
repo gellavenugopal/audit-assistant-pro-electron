@@ -58,7 +58,7 @@ export function OtherCurrentAssetsNote({ data, noteNumber, reportingScale = 'rup
   }
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded border p-4 space-y-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-semibold">Note {noteNumber}: Other current assets</h3>
       </div>
@@ -78,28 +78,28 @@ export function OtherCurrentAssetsNote({ data, noteNumber, reportingScale = 'rup
             </tr>
           </thead>
           <tbody>
-            {otherAssets.interestAccruedNotDue > 0 && (
+            {otherAssets.interestAccruedNotDue !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Interest accrued but not due on deposits</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(otherAssets.interestAccruedNotDue)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {otherAssets.interestAccruedDue > 0 && (
+            {otherAssets.interestAccruedDue !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Interest accrued and due on deposits</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(otherAssets.interestAccruedDue)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {otherAssets.unbilledReceivables > 0 && (
+            {otherAssets.unbilledReceivables !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Unbilled receivables</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(otherAssets.unbilledReceivables)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {otherAssets.others > 0 && (
+            {otherAssets.others !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Others</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(otherAssets.others)}</td>

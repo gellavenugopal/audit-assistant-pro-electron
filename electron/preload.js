@@ -19,6 +19,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     generateOtp: (requestData, token) => ipcRenderer.invoke('gstzen:generateOtp', { requestData, token }),
     establishSession: (requestData, token) => ipcRenderer.invoke('gstzen:establishSession', { requestData, token }),
   },
+
+  // ODBC methods
+  odbcCheckConnection: () => ipcRenderer.invoke('odbc-check-connection'),
+  odbcTestConnection: () => ipcRenderer.invoke('odbc-test-connection'),
+  odbcFetchTrialBalance: (fromDate, toDate) => ipcRenderer.invoke('odbc-fetch-trial-balance', fromDate, toDate),
+  odbcFetchMonthWise: (fyStartYear, targetMonth) => ipcRenderer.invoke('odbc-fetch-month-wise', fyStartYear, targetMonth),
+  odbcDisconnect: () => ipcRenderer.invoke('odbc-disconnect'),
+  odbcFetchOldTallyLedgers: () => ipcRenderer.invoke('odbc-fetch-old-tally-ledgers'),
+  odbcFetchNewTallyLedgers: () => ipcRenderer.invoke('odbc-fetch-new-tally-ledgers'),
+  odbcCompareOpeningBalances: (data) => ipcRenderer.invoke('odbc-compare-opening-balances', data),
+  odbcFetchMonthWiseData: (data) => ipcRenderer.invoke('odbc-fetch-month-wise-data', data),
+  odbcFetchGSTNotFeeded: () => ipcRenderer.invoke('odbc-fetch-gst-not-feeded'),
+  odbcFetchStockItems: () => ipcRenderer.invoke('odbc-fetch-stock-items'),
 });
 
 // Log when preload script is loaded

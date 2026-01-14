@@ -1,25 +1,13 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CostOfMaterialsConsumedNote } from './pl-notes/CostOfMaterialsConsumedNote';
 import { ChangesInInventoriesNote } from './pl-notes/ChangesInInventoriesNote';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { NoteLedgerItem } from './ScheduleIIIProfitLoss';
+import { getScaleLabel, ReportingScale } from '@/lib/formatters/currency';
+import { GenericLedgerNote } from '@/components/notes/GenericLedgerNote';
+import { NoteHeader } from '@/components/notes/NoteHeader';
+import { NoteLedgerItem, StockItem, LedgerRowBasic as LedgerRow } from '@/types/financialStatements';
 
-interface StockItem {
-  'Item Name': string;
-  'Stock Group': string;
-  'Primary Group': string;
-  'Opening Value': number;
-  'Closing Value': number;
-  'Stock Category': string;
-  'Composite Key': string;
-}
-
-interface LedgerRow {
-  'Ledger Name': string;
+interface LedgerRowWithH3 extends LedgerRow {
   'H3'?: string;
-  'Opening Balance'?: number;
-  'Closing Balance'?: number;
-  [key: string]: string | number | undefined;
 }
 
 // Note configuration - maps note keys to their components and titles
@@ -27,6 +15,7 @@ const NOTE_COMPONENTS: Record<string, {
   title: string;
   component: 'costOfMaterialsConsumed' | 'changesInInventories' | 'ledgerOnly';
 }> = {
+  // P&L Notes with custom components
   costOfMaterialsConsumed: {
     title: 'Cost of materials consumed',
     component: 'costOfMaterialsConsumed',
@@ -35,7 +24,7 @@ const NOTE_COMPONENTS: Record<string, {
     title: 'Changes in inventories of finished goods, work-in-progress and stock-in-trade',
     component: 'changesInInventories',
   },
-  // Notes without prepared components - show ledger-wise details
+  // P&L Notes - ledger-wise details only
   employeeBenefits: {
     title: 'Employee benefits expense',
     component: 'ledgerOnly',
@@ -64,6 +53,108 @@ const NOTE_COMPONENTS: Record<string, {
     title: 'Purchases of stock-in-trade',
     component: 'ledgerOnly',
   },
+  // Balance Sheet Notes - Equity & Liabilities
+  equity: {
+    title: 'Share capital',
+    component: 'ledgerOnly',
+  },
+  reserves: {
+    title: 'Reserves and surplus',
+    component: 'ledgerOnly',
+  },
+  shareWarrants: {
+    title: 'Share warrants',
+    component: 'ledgerOnly',
+  },
+  shareApplication: {
+    title: 'Share application money pending allotment',
+    component: 'ledgerOnly',
+  },
+  borrowings: {
+    title: 'Long-term borrowings',
+    component: 'ledgerOnly',
+  },
+  deferredTax: {
+    title: 'Deferred tax liabilities (Net)',
+    component: 'ledgerOnly',
+  },
+  otherLongTerm: {
+    title: 'Other long-term liabilities',
+    component: 'ledgerOnly',
+  },
+  provisions: {
+    title: 'Long-term provisions',
+    component: 'ledgerOnly',
+  },
+  shortTermBorrowings: {
+    title: 'Short-term borrowings',
+    component: 'ledgerOnly',
+  },
+  payablesMSME: {
+    title: 'Trade payables - MSME',
+    component: 'ledgerOnly',
+  },
+  payables: {
+    title: 'Trade payables - Others',
+    component: 'ledgerOnly',
+  },
+  otherCurrentLiabilities: {
+    title: 'Other current liabilities',
+    component: 'ledgerOnly',
+  },
+  provisionsCurrent: {
+    title: 'Short-term provisions',
+    component: 'ledgerOnly',
+  },
+  // Balance Sheet Notes - Assets
+  fixedAssets: {
+    title: 'Property, Plant and Equipment',
+    component: 'ledgerOnly',
+  },
+  intangibleAssets: {
+    title: 'Intangible assets',
+    component: 'ledgerOnly',
+  },
+  cwip: {
+    title: 'Capital work-in-progress',
+    component: 'ledgerOnly',
+  },
+  intangibleUnderDev: {
+    title: 'Intangible assets under development',
+    component: 'ledgerOnly',
+  },
+  investments: {
+    title: 'Non-current investments',
+    component: 'ledgerOnly',
+  },
+  deferredTaxAsset: {
+    title: 'Deferred tax assets (Net)',
+    component: 'ledgerOnly',
+  },
+  otherNonCurrent: {
+    title: 'Other non-current assets',
+    component: 'ledgerOnly',
+  },
+  currentInvestments: {
+    title: 'Current investments',
+    component: 'ledgerOnly',
+  },
+  inventory: {
+    title: 'Inventories',
+    component: 'ledgerOnly',
+  },
+  receivables: {
+    title: 'Trade receivables',
+    component: 'ledgerOnly',
+  },
+  cash: {
+    title: 'Cash and cash equivalents',
+    component: 'ledgerOnly',
+  },
+  otherCurrent: {
+    title: 'Short-term loans and advances',
+    component: 'ledgerOnly',
+  },
 };
 
 interface Props {
@@ -73,8 +164,8 @@ interface Props {
   noteNumber: string;
   ledgers: NoteLedgerItem[];
   stockData: StockItem[];
-  ledgerData: LedgerRow[];
-  reportingScale?: string;
+  ledgerData: LedgerRowWithH3[];
+  reportingScale?: ReportingScale;
 }
 
 export function NoteContentDialog({
@@ -95,42 +186,6 @@ export function NoteContentDialog({
 
   // Calculate total from ledgers
   const total = ledgers.reduce((sum, l) => sum + Math.abs(l.closingBalance || 0), 0);
-
-  const getScaleLabel = () => {
-    switch (reportingScale) {
-      case 'rupees': return '(Amount in ₹)';
-      case 'thousands': return '(Amount in ₹ Thousands)';
-      case 'lakhs': return '(Amount in ₹ Lakhs)';
-      case 'crores': return '(Amount in ₹ Crores)';
-      case 'auto': return '(Auto Scale)';
-      default: return '';
-    }
-  };
-
-  const formatCurrency = (amount: number) => {
-    if (amount === 0) return '-';
-    const sign = amount < 0 ? '-' : '';
-    const absAmount = Math.abs(amount);
-    
-    switch (reportingScale) {
-      case 'rupees':
-        return `${sign}₹${absAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
-      case 'thousands':
-        return `${sign}₹${(absAmount / 1000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'lakhs':
-        return `${sign}₹${(absAmount / 100000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'crores':
-        return `${sign}₹${(absAmount / 10000000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'auto':
-      default:
-        if (absAmount >= 10000000) {
-          return `${sign}₹${(absAmount / 10000000).toFixed(2)} Cr`;
-        } else if (absAmount >= 100000) {
-          return `${sign}₹${(absAmount / 100000).toFixed(2)} L`;
-        }
-        return `${sign}₹${absAmount.toLocaleString('en-IN')}`;
-    }
-  };
 
   const renderNoteComponent = () => {
     switch (noteConfig?.component) {
@@ -160,51 +215,17 @@ export function NoteContentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <span className="px-2 py-1 bg-primary/10 text-primary text-sm rounded">
-              Note {noteNumber}
-            </span>
-            {title}
-          </DialogTitle>
-          {reportingScale && reportingScale !== 'auto' && (
-            <p className="text-xs text-muted-foreground">{getScaleLabel()}</p>
-          )}
+          <NoteHeader
+            noteNumber={noteNumber}
+            title={title}
+            scaleLabel={reportingScale && reportingScale !== 'auto' ? getScaleLabel(reportingScale) : ''}
+          />
         </DialogHeader>
 
         {hasNoteComponent ? (
           renderNoteComponent()
         ) : (
-          <div>
-            <p className="text-sm text-muted-foreground mb-4">
-              Ledger-wise details showing {ledgers.length} ledger(s) with total of {formatCurrency(total)}
-            </p>
-            <div className="max-h-[400px] overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Ledger Name</TableHead>
-                    <TableHead>Group</TableHead>
-                    <TableHead className="text-right">Opening Balance</TableHead>
-                    <TableHead className="text-right">Closing Balance</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {ledgers.map((ledger, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>{ledger.ledgerName}</TableCell>
-                      <TableCell className="text-muted-foreground text-xs">{ledger.groupName}</TableCell>
-                      <TableCell className="text-right font-mono text-xs">{formatCurrency(ledger.openingBalance)}</TableCell>
-                      <TableCell className="text-right font-mono">{formatCurrency(ledger.closingBalance)}</TableCell>
-                    </TableRow>
-                  ))}
-                  <TableRow className="font-semibold border-t-2">
-                    <TableCell colSpan={3} className="text-right">Total:</TableCell>
-                    <TableCell className="text-right font-mono">{formatCurrency(total)}</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          </div>
+          <GenericLedgerNote ledgers={ledgers} reportingScale={reportingScale} includeSymbol />
         )}
       </DialogContent>
     </Dialog>

@@ -11,29 +11,13 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { LayoutList, List, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
-
-interface StockItem {
-  'Item Name': string;
-  'Stock Group': string;
-  'Primary Group': string;
-  'Opening Value': number;
-  'Closing Value': number;
-  'Stock Category': string;
-  'Composite Key': string;
-}
-
-interface LedgerRow {
-  'Ledger Name': string;
-  'H3'?: string;
-  'Opening Balance'?: number;
-  'Closing Balance'?: number;
-  [key: string]: string | number | undefined;
-}
+import { formatCurrency as sharedFormatCurrency, getScaleLabel, ReportingScale } from '@/lib/formatters/currency';
+import { StockItem, LedgerRowBasic as LedgerRow } from '@/types/financialStatements';
 
 interface Props {
   stockData: StockItem[];
   ledgerData: LedgerRow[];
-  reportingScale?: string;
+  reportingScale?: ReportingScale;
   noteNumber?: string;
 }
 
@@ -44,47 +28,7 @@ export function CostOfMaterialsConsumedNote({
   noteNumber = '20'
 }: Props) {
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('summary');
-  
-  const formatCurrency = (amount: number) => {
-    if (amount === 0) return '-';
-    const sign = amount < 0 ? '-' : '';
-    const absAmount = Math.abs(amount);
-    
-    switch (reportingScale) {
-      case 'rupees':
-        return `${sign}${absAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
-      case 'hundreds':
-        return `${sign}${(absAmount / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'thousands':
-        return `${sign}${(absAmount / 1000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'lakhs':
-        return `${sign}${(absAmount / 100000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'millions':
-        return `${sign}${(absAmount / 1000000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'crores':
-        return `${sign}${(absAmount / 10000000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      case 'auto':
-      default:
-        if (absAmount >= 10000000) {
-          return `${sign}${(absAmount / 10000000).toFixed(2)} Cr`;
-        } else if (absAmount >= 100000) {
-          return `${sign}${(absAmount / 100000).toFixed(2)} L`;
-        }
-        return `${sign}${absAmount.toLocaleString('en-IN')}`;
-    }
-  };
-
-  const getScaleLabel = () => {
-    switch (reportingScale) {
-      case 'rupees': return '(Amount in ₹)';
-      case 'hundreds': return "(Amount in 100's)";
-      case 'thousands': return "(Amount in 1000's)";
-      case 'lakhs': return '(Amount in Lakhs)';
-      case 'millions': return '(Amount in Millions)';
-      case 'crores': return '(Amount in Crores)';
-      default: return '';
-    }
-  };
+  const formatCurrency = (amount: number) => sharedFormatCurrency(amount, reportingScale);
 
   // Calculate inventory values by category
   const calculateMaterialInventory = () => {
@@ -473,7 +417,7 @@ export function CostOfMaterialsConsumedNote({
           <h3 className="text-sm font-semibold">
             Note {noteNumber}: Cost of materials consumed
           </h3>
-          <p className="text-[10px] text-gray-500">{getScaleLabel()}</p>
+          <p className="text-[10px] text-gray-500">{getScaleLabel(reportingScale)}</p>
         </div>
         <div className="flex items-center gap-1">
           {/* Compact segmented control */}

@@ -199,6 +199,7 @@ export function useAuditExecution(engagementId?: string | null) {
 export function useAuditExecutionSections(programId?: string | null) {
   const [sections, setSections] = useState<AuditExecutionSection[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
   const fetchSections = async () => {
     if (!programId) {
@@ -226,6 +227,12 @@ export function useAuditExecutionSections(programId?: string | null) {
   };
 
   const updateSectionStatus = async (sectionId: string, status: BoxStatus) => {
+    setSections((prev) =>
+      prev.map((section) =>
+        section.id === sectionId ? { ...section, status } : section
+      )
+    );
+
     try {
       const { error } = await supabase
         .from('audit_program_sections')
@@ -233,32 +240,45 @@ export function useAuditExecutionSections(programId?: string | null) {
         .eq('id', sectionId);
 
       if (error) throw error;
-      await fetchSections();
     } catch (error: any) {
       console.error('Error updating section status:', error);
       toast.error(error.message || 'Failed to update section status');
+      await fetchSections();
     }
   };
 
   const toggleSectionLock = async (sectionId: string) => {
     const section = sections.find((s) => s.id === sectionId);
     if (!section) return;
+    const nextLocked = !section.locked;
+
+    setSections((prev) =>
+      prev.map((item) =>
+        item.id === sectionId ? { ...item, locked: nextLocked } : item
+      )
+    );
 
     try {
       const { error } = await supabase
         .from('audit_program_sections')
-        .update({ locked: !section.locked })
+        .update({ locked: nextLocked })
         .eq('id', sectionId);
 
       if (error) throw error;
-      await fetchSections();
     } catch (error: any) {
       console.error('Error toggling section lock:', error);
       toast.error(error.message || 'Failed to update section lock');
+      await fetchSections();
     }
   };
 
   const updateSectionName = async (sectionId: string, newName: string) => {
+    setSections((prev) =>
+      prev.map((section) =>
+        section.id === sectionId ? { ...section, name: newName } : section
+      )
+    );
+
     try {
       const { error } = await supabase
         .from('audit_program_sections')
@@ -266,28 +286,178 @@ export function useAuditExecutionSections(programId?: string | null) {
         .eq('id', sectionId);
 
       if (error) throw error;
-      await fetchSections();
     } catch (error: any) {
       console.error('Error updating section name:', error);
       toast.error(error.message || 'Failed to update section name');
+      await fetchSections();
     }
   };
 
   const toggleSectionApplicability = async (sectionId: string) => {
     const section = sections.find((s) => s.id === sectionId);
     if (!section) return;
+    const nextApplicable = !section.is_applicable;
+
+    setSections((prev) =>
+      prev.map((item) =>
+        item.id === sectionId ? { ...item, is_applicable: nextApplicable } : item
+      )
+    );
 
     try {
       const { error } = await supabase
         .from('audit_program_sections')
-        .update({ is_applicable: !section.is_applicable })
+        .update({ is_applicable: nextApplicable })
         .eq('id', sectionId);
 
       if (error) throw error;
-      await fetchSections();
     } catch (error: any) {
       console.error('Error toggling section applicability:', error);
       toast.error(error.message || 'Failed to update section applicability');
+      await fetchSections();
+    }
+  };
+
+  const swapSectionOrder = async (firstId: string, secondId: string) => {
+    if (firstId === secondId) return;
+    const first = sections.find((section) => section.id === firstId);
+    const second = sections.find((section) => section.id === secondId);
+    if (!first || !second) return;
+
+    setSections((prev) => {
+      const next = prev.map((section) => {
+        if (section.id === firstId) return { ...section, order: second.order };
+        if (section.id === secondId) return { ...section, order: first.order };
+        return section;
+      });
+      return [...next].sort((a, b) => a.order - b.order);
+    });
+
+    try {
+      const { error: firstError } = await supabase
+        .from('audit_program_sections')
+        .update({ order: second.order })
+        .eq('id', firstId);
+      if (firstError) throw firstError;
+
+      const { error: secondError } = await supabase
+        .from('audit_program_sections')
+        .update({ order: first.order })
+        .eq('id', secondId);
+      if (secondError) throw secondError;
+    } catch (error: any) {
+      console.error('Error swapping section order:', error);
+      toast.error(error.message || 'Failed to reorder line item');
+      await fetchSections();
+    }
+  };
+
+  const moveSectionUp = async (sectionId: string) => {
+    const ordered = [...sections].sort((a, b) => a.order - b.order);
+    const index = ordered.findIndex((section) => section.id === sectionId);
+    if (index <= 0) return;
+    await swapSectionOrder(sectionId, ordered[index - 1].id);
+  };
+
+  const moveSectionDown = async (sectionId: string) => {
+    const ordered = [...sections].sort((a, b) => a.order - b.order);
+    const index = ordered.findIndex((section) => section.id === sectionId);
+    if (index < 0 || index >= ordered.length - 1) return;
+    await swapSectionOrder(sectionId, ordered[index + 1].id);
+  };
+
+  const createSection = async (name: string) => {
+    if (!programId || !user) {
+      toast.error('Please sign in and select an audit execution.');
+      return null;
+    }
+
+    const nextOrder =
+      sections.length > 0 ? Math.max(...sections.map((section) => section.order)) + 1 : 0;
+
+    try {
+      const { data: newSection, error } = await supabase
+        .from('audit_program_sections')
+        .insert({
+          audit_program_id: programId,
+          name,
+          order: nextOrder,
+          is_expanded: false,
+          is_applicable: true,
+          locked: false,
+          status: 'not-commenced',
+        })
+        .select('id')
+        .single();
+
+      if (error) throw error;
+
+      const boxesToInsert = DEFAULT_BOX_HEADERS.map((header, orderIndex) => ({
+        section_id: newSection.id,
+        header,
+        content: '',
+        order: orderIndex,
+        status: 'not-commenced',
+        locked: false,
+        created_by: user.id,
+      }));
+
+      const { error: boxesError } = await supabase
+        .from('audit_program_boxes')
+        .insert(boxesToInsert);
+
+      if (boxesError) throw boxesError;
+
+      await fetchSections();
+      return newSection.id;
+    } catch (error: any) {
+      console.error('Error creating section:', error);
+      toast.error(error.message || 'Failed to add line item');
+      return null;
+    }
+  };
+
+  const deleteSection = async (sectionId: string) => {
+    try {
+      const { data: boxes, error: boxFetchError } = await supabase
+        .from('audit_program_boxes')
+        .select('id')
+        .eq('section_id', sectionId);
+
+      if (boxFetchError) throw boxFetchError;
+
+      const boxIds = (boxes || []).map((box) => box.id);
+
+      if (boxIds.length > 0) {
+        const { error: boxAttachmentError } = await supabase
+          .from('audit_program_attachments')
+          .delete()
+          .in('box_id', boxIds);
+        if (boxAttachmentError) throw boxAttachmentError;
+      }
+
+      const { error: sectionAttachmentError } = await supabase
+        .from('audit_program_attachments')
+        .delete()
+        .eq('section_id', sectionId);
+      if (sectionAttachmentError) throw sectionAttachmentError;
+
+      const { error: boxDeleteError } = await supabase
+        .from('audit_program_boxes')
+        .delete()
+        .eq('section_id', sectionId);
+      if (boxDeleteError) throw boxDeleteError;
+
+      const { error: sectionDeleteError } = await supabase
+        .from('audit_program_sections')
+        .delete()
+        .eq('id', sectionId);
+      if (sectionDeleteError) throw sectionDeleteError;
+
+      await fetchSections();
+    } catch (error: any) {
+      console.error('Error deleting section:', error);
+      toast.error(error.message || 'Failed to delete line item');
     }
   };
 
@@ -302,6 +472,11 @@ export function useAuditExecutionSections(programId?: string | null) {
     toggleSectionLock,
     updateSectionName,
     toggleSectionApplicability,
+    swapSectionOrder,
+    moveSectionUp,
+    moveSectionDown,
+    createSection,
+    deleteSection,
     refetch: fetchSections,
   };
 }
@@ -363,6 +538,10 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
   };
 
   const updateBox = async (boxId: string, updates: Partial<AuditExecutionBox>) => {
+    setBoxes((prev) =>
+      prev.map((box) => (box.id === boxId ? { ...box, ...updates } : box))
+    );
+
     try {
       const { error } = await supabase
         .from('audit_program_boxes')
@@ -370,10 +549,10 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
         .eq('id', boxId);
 
       if (error) throw error;
-      await fetchBoxes();
     } catch (error: any) {
       console.error('Error updating box:', error);
       toast.error(error.message || 'Failed to update box');
+      await fetchBoxes();
     }
   };
 
@@ -384,7 +563,8 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
   const toggleBoxLock = async (boxId: string) => {
     const box = boxes.find((b) => b.id === boxId);
     if (!box) return;
-    await updateBox(boxId, { locked: !box.locked });
+    const isLocked = box.locked === true || String(box.locked) === 'true';
+    await updateBox(boxId, { locked: !isLocked });
   };
 
   const deleteBox = async (boxId: string) => {

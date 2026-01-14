@@ -75,6 +75,7 @@ import { FilterModal } from '@/components/trial-balance-new/FilterModal';
 import { ClassificationResult } from '@/services/trialBalanceNewClassification';
 import { DEFAULT_GROUP_RULES, DEFAULT_KEYWORD_RULES, DEFAULT_OVERRIDE_RULES } from '@/data/scheduleIIIDefaultRules';
 import { H1_OPTIONS, getH2Options, getH3Options, getH4Options } from '@/data/classificationOptions';
+import { getActualBalanceSign } from '@/utils/naturalBalance';
 
 // Entity Types
 const ENTITY_TYPES = [
@@ -100,6 +101,17 @@ const BUSINESS_TYPES = [
 
 // Disabled entity types (not supported in this phase)
 const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
+
+const getConstitutionFromEntityType = (et: string) => {
+  const lower = et.toLowerCase();
+  if (lower.includes('company') || lower.includes('opc')) return 'company';
+  if (lower.includes('llp') || lower.includes('limited liability')) return 'llp';
+  if (lower.includes('partnership')) return 'partnership';
+  if (lower.includes('proprietorship') || lower.includes('sole') || lower.includes('individual')) return 'proprietorship';
+  if (lower.includes('trust')) return 'trust';
+  if (lower.includes('society')) return 'society';
+  return 'company';
+};
 
 // Helper function to automatically classify H1 and H2 based on Is Revenue and Closing Balance
 function applyAutoH1H2Classification(rows: LedgerRow[]): LedgerRow[] {
@@ -143,6 +155,7 @@ export default function FinancialReview() {
   
   // Entity and Business Info
   const [entityType, setEntityType] = useState<string>('');
+  const [entityTypeDraft, setEntityTypeDraft] = useState<string>('');
   const [entityName, setEntityName] = useState<string>('');
   const [businessType, setBusinessType] = useState<string>('');
   const [includeStockItems, setIncludeStockItems] = useState<boolean>(false);
@@ -150,19 +163,10 @@ export default function FinancialReview() {
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   
   // Derive constitution from entity type
-  const constitution = useMemo(() => {
-    const et = entityType.toLowerCase();
-    if (et.includes('company') || et.includes('opc')) return 'company';
-    if (et.includes('llp') || et.includes('limited liability')) return 'llp';
-    if (et.includes('partnership')) return 'partnership';
-    if (et.includes('proprietorship') || et.includes('sole') || et.includes('individual')) return 'proprietorship';
-    if (et.includes('trust')) return 'trust';
-    if (et.includes('society')) return 'society';
-    return 'company'; // default
-  }, [entityType]);
+  const constitution = useMemo(() => getConstitutionFromEntityType(entityType), [entityType]);
   
   // Data State
-  const [actualData, setActualData] = useState<LedgerRow[]>([]); // NEW: Unclassified actual data
+  const [actualData, setActualData] = useState<LedgerRow[]>([]); // Unclassified actual data
   const [currentData, setCurrentData] = useState<LedgerRow[]>([]); // Classified data
   const [previousData, setPreviousData] = useState<LedgerRow[]>([]);
   const [currentStockData, setCurrentStockData] = useState<any[]>([]);
@@ -191,7 +195,7 @@ export default function FinancialReview() {
   
   // UI State
   const [activeTab, setActiveTab] = useState('actual-tb'); // Start with Actual TB tab
-  
+
   // Column widths for resizable columns - Actual TB
   const {
     columnWidths: actualTbColumnWidths,
@@ -230,14 +234,21 @@ export default function FinancialReview() {
     'H5': 180,
     'Status': 120
   });
+
+  const actualStickyOffsets = useMemo(() => {
+    const selection = 0;
+    const ledger = 32; // slimmer selection column
+    return { selection, ledger };
+  }, []);
+
+  const classifiedStickyOffsets = useMemo(() => {
+    const selection = 0;
+    const ledger = 32;
+    return { selection, ledger };
+  }, []);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [h1Filter, setH1Filter] = useState<string>('all');
-  const [h2Filter, setH2Filter] = useState<string>('all');
-  const [h3Filter, setH3Filter] = useState<string>('all');
-  const [h4Filter, setH4Filter] = useState<string>('all');
-  const [h5Filter, setH5Filter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [balanceFilter, setBalanceFilter] = useState<string>('all'); // all, positive, negative, zero
   const [fromDate, setFromDate] = useState<string>('2024-04-01');
@@ -258,6 +269,13 @@ export default function FinancialReview() {
   const [isResetConfirmDialogOpen, setIsResetConfirmDialogOpen] = useState(false);
   const [ruleTemplateName, setRuleTemplateName] = useState<string>('');
   
+  // Keep draft entity type in sync when dialog opens
+  useEffect(() => {
+    if (isEntityDialogOpen) {
+      setEntityTypeDraft(entityType);
+    }
+  }, [isEntityDialogOpen, entityType]);
+  
   // Compute stock item counts and totals directly via useMemo (avoids infinite loop from callbacks)
   const { stockItemCount, stockTotals } = useMemo(() => {
     // Safety check for array
@@ -276,14 +294,16 @@ export default function FinancialReview() {
       return !(opening === 0 && closing === 0);
     });
     
+    const stockSearchTerm = activeTab === 'stock-items' ? searchTerm : '';
+
     // Apply search filter with null safety
-    const filtered = searchTerm
+    const filtered = stockSearchTerm
       ? nonZeroItems.filter(item => {
           if (!item) return false;
           const itemName = (item['Item Name'] || '').toLowerCase();
           const stockGroup = (item['Stock Group'] || '').toLowerCase();
           const primaryGroup = (item['Primary Group'] || '').toLowerCase();
-          const search = searchTerm.toLowerCase();
+          const search = stockSearchTerm.toLowerCase();
           return itemName.includes(search) || stockGroup.includes(search) || primaryGroup.includes(search);
         })
       : nonZeroItems;
@@ -298,7 +318,7 @@ export default function FinancialReview() {
       stockItemCount: { filtered: filtered.length, total: nonZeroItems.length },
       stockTotals: totals
     };
-  }, [currentStockData, searchTerm]);
+  }, [currentStockData, searchTerm, activeTab]);
   
   // Column filters and sorting state for Actual TB
   const [actualTbColumnFilters, setActualTbColumnFilters] = useState<Record<string, Set<string | number>>>({});
@@ -325,8 +345,9 @@ export default function FinancialReview() {
     let filtered = actualData;
     
     // UNIVERSAL SEARCH FILTER - Works on ALL columns including numeric
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
+    const actualSearch = activeTab === 'actual-tb' ? searchTerm : '';
+    if (actualSearch) {
+      const searchLower = actualSearch.toLowerCase();
       filtered = filtered.filter(row => {
         // Build searchable string including ALL text and numeric columns
         const searchableString = [
@@ -345,17 +366,19 @@ export default function FinancialReview() {
     }
     
     // Group filter
-    if (groupFilter !== 'all') {
-      filtered = filtered.filter(row => (row['Primary Group'] || '') === groupFilter);
+    const appliedGroupFilter = activeTab === 'actual-tb' ? groupFilter : 'all';
+    if (appliedGroupFilter !== 'all') {
+      filtered = filtered.filter(row => (row['Primary Group'] || '') === appliedGroupFilter);
     }
     
     // Balance filter
-    if (balanceFilter !== 'all') {
+    const appliedBalanceFilter = activeTab === 'actual-tb' ? balanceFilter : 'all';
+    if (appliedBalanceFilter !== 'all') {
       filtered = filtered.filter(row => {
         const balance = row['Closing Balance'] || 0;
-        if (balanceFilter === 'positive') return balance > 0;
-        if (balanceFilter === 'negative') return balance < 0;
-        if (balanceFilter === 'zero') return balance === 0;
+        if (appliedBalanceFilter === 'positive') return balance > 0;
+        if (appliedBalanceFilter === 'negative') return balance < 0;
+        if (appliedBalanceFilter === 'zero') return balance === 0;
         return true;
       });
     }
@@ -389,15 +412,16 @@ export default function FinancialReview() {
     }
     
     return filtered;
-  }, [actualData, searchTerm, groupFilter, balanceFilter, actualTbColumnFilters, actualTbSortColumn, actualTbSortDirection]);
+  }, [actualData, searchTerm, groupFilter, balanceFilter, actualTbColumnFilters, actualTbSortColumn, actualTbSortDirection, activeTab]);
   
   // Filtered data for Classified TB
   const filteredData = useMemo(() => {
     let filtered = currentData;
     
     // UNIVERSAL SEARCH FILTER - Works on ALL columns including numeric
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
+    const classifiedSearch = activeTab === 'classified-tb' ? searchTerm : '';
+    if (classifiedSearch) {
+      const searchLower = classifiedSearch.toLowerCase();
       filtered = filtered.filter(row => {
         // Build searchable string including ALL text and numeric columns
         const searchableString = [
@@ -422,33 +446,9 @@ export default function FinancialReview() {
     }
     
     // Status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(row => (row['Status'] || 'Unmapped') === statusFilter);
-    }
-    
-    // H1 filter
-    if (h1Filter !== 'all') {
-      filtered = filtered.filter(row => (row['H1'] || '') === h1Filter);
-    }
-    
-    // H2 filter
-    if (h2Filter !== 'all') {
-      filtered = filtered.filter(row => (row['H2'] || '') === h2Filter);
-    }
-    
-    // H3 filter
-    if (h3Filter !== 'all') {
-      filtered = filtered.filter(row => (row['H3'] || '') === h3Filter);
-    }
-    
-    // H4 filter
-    if (h4Filter !== 'all') {
-      filtered = filtered.filter(row => (row['H4'] || '') === h4Filter);
-    }
-    
-    // H5 filter
-    if (h5Filter !== 'all') {
-      filtered = filtered.filter(row => (row['H5'] || '') === h5Filter);
+    const appliedStatusFilter = activeTab === 'classified-tb' ? statusFilter : 'all';
+    if (appliedStatusFilter !== 'all') {
+      filtered = filtered.filter(row => (row['Status'] || 'Unmapped') === appliedStatusFilter);
     }
     
     // Apply column filters
@@ -480,7 +480,7 @@ export default function FinancialReview() {
     }
     
     return filtered;
-  }, [currentData, searchTerm, statusFilter, h1Filter, h2Filter, h3Filter, h4Filter, h5Filter, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection]);
+  }, [currentData, searchTerm, statusFilter, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection, activeTab]);
   
   // Classification status counter
   const classificationStatus = useMemo(() => {
@@ -507,131 +507,7 @@ export default function FinancialReview() {
     return Array.from(selectedRowIndices).filter(idx => filteredIndices.has(idx)).length;
   }, [selectedRowIndices, filteredData, currentData]);
   
-  // Exception Report - Detect balance anomalies
-  const exceptions = useMemo(() => {
-    const exceptionList: Array<{
-      ledgerName: string;
-      group: string;
-      opening: number;
-      debit: number;
-      credit: number;
-      closing: number;
-      reason: string;
-      severity: 'high' | 'medium' | 'low';
-    }> = [];
-    
-    currentData.forEach(row => {
-      const ledgerName = row['Ledger Name'] || '';
-      const parentGroup = (row['Parent Group'] || '').toLowerCase();
-      const primaryGroup = (row['Primary Group'] || '').toLowerCase();
-      const opening = row['Opening Balance'] || 0;
-      const debit = row['Debit'] || 0;
-      const credit = row['Credit'] || 0;
-      const closing = row['Closing Balance'] || 0;
-      
-      // Sundry Debtors with Credit balance
-      if ((parentGroup.includes('sundry debtors') || parentGroup.includes('sundry debtor') || 
-           primaryGroup.includes('sundry debtors') || primaryGroup.includes('sundry debtor')) && closing < 0) {
-        exceptionList.push({
-          ledgerName,
-          group: row['Parent Group'] || row['Primary Group'] || '',
-          opening, debit, credit, closing,
-          reason: 'Sundry Debtors with Credit balance',
-          severity: 'high'
-        });
-      }
-      
-      // Sundry Creditors with Debit balance
-      if ((parentGroup.includes('sundry creditors') || parentGroup.includes('sundry creditor') || 
-           primaryGroup.includes('sundry creditors') || primaryGroup.includes('sundry creditor')) && closing > 0) {
-        exceptionList.push({
-          ledgerName,
-          group: row['Parent Group'] || row['Primary Group'] || '',
-          opening, debit, credit, closing,
-          reason: 'Sundry Creditors with Debit balance',
-          severity: 'high'
-        });
-      }
-      
-      // Loans / Bank OD / CC with Debit balance (should be credit)
-      if ((parentGroup.includes('loan') || parentGroup.includes('bank od') || parentGroup.includes('bank o/d') ||
-           parentGroup.includes('cash credit') || parentGroup.includes('cc limit') ||
-           primaryGroup.includes('loan') || primaryGroup.includes('bank od') || primaryGroup.includes('cash credit')) && closing > 0) {
-        exceptionList.push({
-          ledgerName,
-          group: row['Parent Group'] || row['Primary Group'] || '',
-          opening, debit, credit, closing,
-          reason: 'Loans/Bank OD/CC with Debit balance',
-          severity: 'high'
-        });
-      }
-      
-      // Bank accounts with Credit balance (overdraft not in OD group)
-      if ((parentGroup.includes('bank account') || primaryGroup.includes('bank account')) && 
-          !parentGroup.includes('od') && !parentGroup.includes('o/d') && closing < 0) {
-        exceptionList.push({
-          ledgerName,
-          group: row['Parent Group'] || row['Primary Group'] || '',
-          opening, debit, credit, closing,
-          reason: 'Bank Account with Credit balance',
-          severity: 'medium'
-        });
-      }
-      
-      // Loans & Advances (Assets) with Credit balance
-      if ((parentGroup.includes('loans and advances') || parentGroup.includes('loans & advances') ||
-           primaryGroup.includes('loans and advances') || primaryGroup.includes('loans & advances')) && closing < 0) {
-        exceptionList.push({
-          ledgerName,
-          group: row['Parent Group'] || row['Primary Group'] || '',
-          opening, debit, credit, closing,
-          reason: 'Loans & Advances (Asset) with Credit balance',
-          severity: 'high'
-        });
-      }
-    });
-    
-    return exceptionList;
-  }, [currentData]);
-  
-  // Cascading dropdown options for H1-H5 (based on current selections)
-  const cascadingOptions = useMemo(() => {
-    // Get unique H1 values
-    const h1Options = Array.from(new Set(currentData.map(row => row['H1']).filter(v => v && v.trim() !== ''))).sort();
-    
-    // Get H2 values filtered by selected H1
-    const h2Options = h1Filter !== 'all' 
-      ? Array.from(new Set(currentData.filter(row => row['H1'] === h1Filter).map(row => row['H2']).filter(v => v && v.trim() !== ''))).sort()
-      : Array.from(new Set(currentData.map(row => row['H2']).filter(v => v && v.trim() !== ''))).sort();
-    
-    // Get H3 values filtered by selected H1 and H2
-    const h3Options = h2Filter !== 'all'
-      ? Array.from(new Set(currentData.filter(row => (h1Filter === 'all' || row['H1'] === h1Filter) && row['H2'] === h2Filter).map(row => row['H3']).filter(v => v && v.trim() !== ''))).sort()
-      : h1Filter !== 'all'
-      ? Array.from(new Set(currentData.filter(row => row['H1'] === h1Filter).map(row => row['H3']).filter(v => v && v.trim() !== ''))).sort()
-      : Array.from(new Set(currentData.map(row => row['H3']).filter(v => v && v.trim() !== ''))).sort();
-    
-    // Get H4 values filtered by selected H1, H2, and H3
-    const h4Options = h3Filter !== 'all'
-      ? Array.from(new Set(currentData.filter(row => 
-          (h1Filter === 'all' || row['H1'] === h1Filter) && 
-          (h2Filter === 'all' || row['H2'] === h2Filter) && 
-          row['H3'] === h3Filter
-        ).map(row => row['H4']).filter(v => v && v.trim() !== ''))).sort()
-      : Array.from(new Set(currentData.map(row => row['H4']).filter(v => v && v.trim() !== ''))).sort();
-    
-    // Get H5 values filtered by selected H1, H2, H3, and H4
-    const h5Options = h4Filter !== 'all'
-      ? Array.from(new Set(currentData.filter(row => 
-          (h1Filter === 'all' || row['H1'] === h1Filter) && 
-          (h2Filter === 'all' || row['H2'] === h2Filter) && 
-          (h3Filter === 'all' || row['H3'] === h3Filter) && 
-          row['H4'] === h4Filter
-        ).map(row => row['H5']).filter(v => v && v.trim() !== ''))).sort()
-      : Array.from(new Set(currentData.map(row => row['H5']).filter(v => v && v.trim() !== ''))).sort();
-    
-    return { h1Options, h2Options, h3Options, h4Options, h5Options };
-  }, [currentData, h1Filter, h2Filter, h3Filter, h4Filter]);
+
   
   // Totals calculation - based on active tab
   const totals = useMemo(() => {
@@ -722,8 +598,11 @@ export default function FinancialReview() {
   }, [odbcConnection, entityType, businessType]);
   
   // Fetch data from Tally after entity selection
-  const handleFetchFromTally = useCallback(async () => {
-    if (!entityType || !businessType) {
+  const handleFetchFromTally = useCallback(async (overrideEntityType?: string) => {
+    const effectiveEntityType = overrideEntityType || entityType;
+    const effectiveConstitution = getConstitutionFromEntityType(effectiveEntityType);
+
+    if (!effectiveEntityType || !businessType) {
       toast({
         title: 'Setup Required',
         description: 'Please complete entity type and business type selection',
@@ -778,7 +657,7 @@ export default function FinancialReview() {
       setActualData(processedData);
       
       // Classify ALL data (no filtering before classification)
-      const classified = classifyDataframeBatch(processedData, savedMappings, businessType, constitution);
+      const classified = classifyDataframeBatch(processedData, savedMappings, businessType, effectiveConstitution);
       
       // VALIDATION: Log data integrity
       console.log(`[DATA INTEGRITY] Ingested: ${lines.length}, Processed: ${processedData.length}, Classified: ${classified.length}`);
@@ -788,6 +667,7 @@ export default function FinancialReview() {
       
       // Import directly based on selected period type
       if (importPeriodType === 'current') {
+        setActualData(processedData);
         setCurrentData(classified);
       } else {
         setPreviousData(classified);
@@ -856,7 +736,45 @@ export default function FinancialReview() {
       setIsFetching(false);
       setIsEntityDialogOpen(false);
     }
-  }, [entityType, businessType, fromDate, toDate, odbcConnection, savedMappings, constitution, importPeriodType, currentEngagement, trialBalanceDB, toast]);
+  }, [entityType, businessType, fromDate, toDate, odbcConnection, savedMappings, importPeriodType, currentEngagement, trialBalanceDB, toast]);
+
+  // Save only entity type override and optionally re-run classification
+  const handleSaveEntityType = useCallback(async () => {
+    if (!entityTypeDraft) {
+      toast({
+        title: 'Entity type required',
+        description: 'Please select an entity type to continue',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const newConstitution = getConstitutionFromEntityType(entityTypeDraft);
+    const hasData = currentData.length > 0 || previousData.length > 0;
+    let proceed = true;
+
+    if (hasData) {
+      proceed = window.confirm('Update entity type and re-run classification on the loaded trial balance? This may change note visibility.');
+    }
+
+    setEntityType(entityTypeDraft);
+
+    if (proceed && currentData.length > 0 && actualData.length > 0) {
+      const reclassified = classifyDataframeBatch(actualData, savedMappings, businessType, newConstitution);
+      setCurrentData(reclassified);
+      toast({
+        title: 'Entity updated',
+        description: 'Entity type overridden and classifications refreshed.',
+      });
+    } else {
+      toast({
+        title: 'Entity updated',
+        description: 'Entity type overridden. Re-run classification when ready.',
+      });
+    }
+
+    setIsEntityDialogOpen(false);
+  }, [entityTypeDraft, currentData.length, previousData.length, actualData, savedMappings, businessType, toast]);
   
   // Handle period selection confirmation
   const handlePeriodConfirm = useCallback(async () => {
@@ -879,7 +797,7 @@ export default function FinancialReview() {
         debit: row['Debit'] || 0,
         credit: row['Credit'] || 0,
         closing_balance: row['Closing Balance'] || 0,
-        balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+        balance_type: getActualBalanceSign(row),
         period_type: importPeriodType,
         period_ending: toDate || null,
         face_group: row.H1 || null,
@@ -1135,8 +1053,15 @@ export default function FinancialReview() {
       setSavedMappings(defaultMappings);
     }
   }, [currentEngagement?.id]);
+
+  // Reset local state buckets when engagement switches to prevent bleed across clients
+  useEffect(() => {
+    setActualData([]);
+    setCurrentData([]);
+    setCurrentStockData([]);
+  }, [currentEngagement?.id]);
   
-  // Load data from database when engagement changes or database lines are loaded
+  // Load data from cache/database when engagement changes
   useEffect(() => {
     if (!currentEngagement?.id) return;
     
@@ -1165,9 +1090,38 @@ export default function FinancialReview() {
         console.error('Failed to load stock data:', e);
       }
     }
+
+    // Load Actual TB from localStorage
+    const savedActual = localStorage.getItem(`tb_actual_${currentEngagement.id}`);
+    let hydrated = false;
+    if (savedActual) {
+      try {
+        const parsedActual = JSON.parse(savedActual);
+        if (Array.isArray(parsedActual) && parsedActual.length > 0) {
+          setActualData(parsedActual);
+          hydrated = true;
+        }
+      } catch (e) {
+        console.error('Failed to load actual TB:', e);
+      }
+    }
+
+    // Load Classified TB from localStorage
+    const savedClassified = localStorage.getItem(`tb_classified_${currentEngagement.id}`);
+    if (savedClassified) {
+      try {
+        const parsedClassified = JSON.parse(savedClassified);
+        if (Array.isArray(parsedClassified) && parsedClassified.length > 0) {
+          setCurrentData(parsedClassified);
+          hydrated = true;
+        }
+      } catch (e) {
+        console.error('Failed to load classified TB:', e);
+      }
+    }
     
-    // Convert database lines to LedgerRow format
-    if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0 && currentData.length === 0) {
+    // Fallback to database if nothing in local cache
+    if (!hydrated && trialBalanceDB.lines && trialBalanceDB.lines.length > 0) {
       const loadedData: LedgerRow[] = trialBalanceDB.lines.map(line => ({
         'Ledger Name': line.account_name,
         'Primary Group': line.ledger_primary_group || '',
@@ -1187,7 +1141,6 @@ export default function FinancialReview() {
         'Status': (line.face_group || line.note_group) ? 'Mapped' : 'Unmapped'
       }));
       
-      // Set both actualData and currentData
       setActualData(loadedData);
       setCurrentData(loadedData);
       
@@ -1209,6 +1162,18 @@ export default function FinancialReview() {
       }));
     }
   }, [currentEngagement?.id, entityType, entityName, businessType]);
+
+  // Persist Actual TB per engagement
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    localStorage.setItem(`tb_actual_${currentEngagement.id}`, JSON.stringify(actualData));
+  }, [actualData, currentEngagement?.id]);
+
+  // Persist Classified TB per engagement
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    localStorage.setItem(`tb_classified_${currentEngagement.id}`, JSON.stringify(currentData));
+  }, [currentData, currentEngagement?.id]);
   
   // Save stock data to localStorage when it changes
   useEffect(() => {
@@ -1226,7 +1191,9 @@ export default function FinancialReview() {
     if (trialBalanceDB.loading) return;
     
     // Debounce the save operation
+    let cancelled = false;
     const saveTimeout = setTimeout(async () => {
+      if (cancelled) return;
       try {
         const dbLines: TrialBalanceLineInput[] = currentData.map(row => ({
           account_code: row['Composite Key'] || '',
@@ -1237,7 +1204,7 @@ export default function FinancialReview() {
           debit: row['Debit'] || 0,
           credit: row['Credit'] || 0,
           closing_balance: row['Closing Balance'] || 0,
-          balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+          balance_type: getActualBalanceSign(row),
           period_type: 'current',
           period_ending: toDate || null,
           face_group: row['H1'] || null,
@@ -1248,14 +1215,17 @@ export default function FinancialReview() {
         }));
         
         // Use upsert mode to avoid duplicates
-        await trialBalanceDB.importLines(dbLines, true);
+        await trialBalanceDB.importLines(dbLines, true, false);
         console.log('Auto-saved trial balance data');
       } catch (error) {
         console.error('Failed to auto-save trial balance:', error);
       }
     }, 2000); // 2 second debounce
     
-    return () => clearTimeout(saveTimeout);
+    return () => {
+      cancelled = true;
+      clearTimeout(saveTimeout);
+    };
   }, [currentData, currentEngagement?.id, toDate]);
   
   useEffect(() => {
@@ -1554,7 +1524,7 @@ export default function FinancialReview() {
             debit: row['Debit'] || 0,
             credit: row['Credit'] || 0,
             closing_balance: row['Closing Balance'] || 0,
-            balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+            balance_type: getActualBalanceSign(row),
             period_type: 'current',
             period_ending: toDate || null,
             face_group: row.H1 || null,
@@ -1735,12 +1705,37 @@ export default function FinancialReview() {
   // Reset all filters
   const handleResetFilters = useCallback(() => {
     setStatusFilter('all');
-    setH1Filter('all');
-    setH2Filter('all');
-    setH3Filter('all');
     setGroupFilter('all');
     setBalanceFilter('all');
   }, []);
+
+  // Delete selected rows from the active grid (Actual or Classified)
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedRowIndices.size === 0) {
+      toast({ title: 'No selection', description: 'Select ledger rows to delete first.' });
+      return;
+    }
+
+    const buildKey = (row: LedgerRow) => row['Composite Key'] || generateLedgerKey(row['Ledger Name'] || '', row['Parent Group'] || row['Primary Group'] || '');
+    const source = activeTab === 'actual-tb' ? actualData : currentData;
+
+    const selectedKeys = new Set(
+      source
+        .map((row, idx) => (selectedRowIndices.has(idx) ? buildKey(row) : null))
+        .filter((key): key is string => Boolean(key))
+    );
+
+    if (selectedKeys.size === 0) {
+      toast({ title: 'Nothing to delete', description: 'Could not resolve selected rows.' });
+      return;
+    }
+
+    setActualData(prev => prev.filter(row => !selectedKeys.has(buildKey(row))));
+    setCurrentData(prev => prev.filter(row => !selectedKeys.has(buildKey(row))));
+    setSelectedRowIndices(new Set());
+
+    toast({ title: 'Deleted', description: `${selectedKeys.size} row(s) removed from this engagement.` });
+  }, [activeTab, actualData, currentData, selectedRowIndices, toast]);
 
   // Clear Data - clears both Actual TB and Classified TB
   const handleClear = useCallback(async () => {
@@ -1761,13 +1756,15 @@ export default function FinancialReview() {
         // Reset filters
         setSearchTerm('');
         setStatusFilter('all');
-        setH1Filter('all');
-        setH2Filter('all');
-        setH3Filter('all');
         setGroupFilter('all');
         setBalanceFilter('all');
         setActualTbColumnFilters({});
         setClassifiedTbColumnFilters({});
+
+        // Clear engagement-scoped caches
+        localStorage.removeItem(`tb_actual_${currentEngagement?.id}`);
+        localStorage.removeItem(`tb_classified_${currentEngagement?.id}`);
+        localStorage.removeItem(`tb_stock_${currentEngagement?.id}`);
         
         toast({
           title: 'Data Cleared',
@@ -2231,9 +2228,6 @@ export default function FinancialReview() {
             {(() => {
               const activeCount = [
                 statusFilter !== 'all',
-                h1Filter !== 'all',
-                h2Filter !== 'all',
-                h3Filter !== 'all',
                 groupFilter !== 'all',
                 balanceFilter !== 'all',
               ].filter(Boolean).length;
@@ -2258,39 +2252,6 @@ export default function FinancialReview() {
                 </button>
               </Badge>
             )}
-            {h1Filter !== 'all' && (
-              <Badge variant="secondary" className="gap-1">
-                {h1Filter}
-                <button
-                  onClick={() => setH1Filter('all')}
-                  className="hover:bg-gray-300 rounded-full p-0.5"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </Badge>
-            )}
-            {h2Filter !== 'all' && (
-              <Badge variant="secondary" className="gap-1">
-                {h2Filter}
-                <button
-                  onClick={() => setH2Filter('all')}
-                  className="hover:bg-gray-300 rounded-full p-0.5"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </Badge>
-            )}
-            {h3Filter !== 'all' && (
-              <Badge variant="secondary" className="gap-1">
-                {h3Filter}
-                <button
-                  onClick={() => setH3Filter('all')}
-                  className="hover:bg-gray-300 rounded-full p-0.5"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </Badge>
-            )}
           </div>
 
           {/* Selection Info & Add Line */}
@@ -2308,6 +2269,16 @@ export default function FinancialReview() {
             >
               <Plus className="w-4 h-4 mr-1" />
               {activeTab === 'stock-items' ? 'Add Item' : 'Add Ledger'}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleDeleteSelected}
+              className="h-9"
+              disabled={selectedRowIndices.size === 0}
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              Delete Selected
             </Button>
           </div>
         </div>
@@ -2387,7 +2358,7 @@ export default function FinancialReview() {
             <Table>
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
-                  <TableHead className="w-12 sticky top-0 bg-white">
+                  <TableHead className="w-8 sticky top-0 bg-white" style={{ left: actualStickyOffsets.selection, zIndex: 20 }}>
                     <input
                       type="checkbox"
                       checked={selectedRowIndices.size === actualData.length && actualData.length > 0}
@@ -2401,7 +2372,7 @@ export default function FinancialReview() {
                       title="Select All / Deselect All"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Ledger Name'] }}>
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: 200, left: actualStickyOffsets.ledger, zIndex: 19 }}>
                     <div className="flex items-center gap-1">
                       Ledger Name
                       <ColumnFilter
@@ -2420,7 +2391,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Parent Group'] }}>
+                  <TableHead className="top-0 bg-white relative" style={{ width: actualTbColumnWidths['Parent Group'] }}>
                     <div className="flex items-center gap-1">
                       Parent Group
                       <ColumnFilter
@@ -2439,7 +2410,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Primary Group'] }}>
+                  <TableHead className="top-0 bg-white relative" style={{ width: actualTbColumnWidths['Primary Group'] }}>
                     <div className="flex items-center gap-1">
                       Primary Group
                       <ColumnFilter
@@ -2458,7 +2429,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Opening Balance'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Opening Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Opening
                       <ColumnFilter
@@ -2478,7 +2449,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Debit'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Debit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Debit
                       <ColumnFilter
@@ -2498,7 +2469,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Credit'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Credit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Credit
                       <ColumnFilter
@@ -2518,7 +2489,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Closing Balance'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Closing Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Closing
                       <ColumnFilter
@@ -2580,44 +2551,28 @@ export default function FinancialReview() {
                           isSelected && "bg-blue-100/50",
                           "cursor-pointer hover:bg-gray-50"
                         )}
-                        onClick={(e) => {
-                          if (e.ctrlKey || e.metaKey) {
-                            // Ctrl+Click: Toggle selection
-                            const newSelection = new Set(selectedRowIndices);
-                            if (isSelected) {
-                              newSelection.delete(originalIndex);
-                            } else {
-                              newSelection.add(originalIndex);
-                            }
-                            setSelectedRowIndices(newSelection);
-                          } else if (e.shiftKey && selectedRowIndices.size > 0) {
-                            // Shift+Click: Range selection
-                            const indices = Array.from(selectedRowIndices);
-                            const lastSelected = Math.max(...indices);
-                            const start = Math.min(lastSelected, originalIndex);
-                            const end = Math.max(lastSelected, originalIndex);
-                            const newSelection = new Set(selectedRowIndices);
-                            for (let i = start; i <= end; i++) {
-                              newSelection.add(i);
-                            }
-                            setSelectedRowIndices(newSelection);
-                          } else {
-                            // Regular click: Single selection
-                            setSelectedRowIndices(new Set([originalIndex]));
-                          }
-                        }}
+                        onClick={(e) => toggleRowSelection(originalIndex, e)}
                       >
-                        <TableCell>
+                        <TableCell className="sticky left-0 bg-white z-10" style={{ left: actualStickyOffsets.selection, width: 32 }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => {}}
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRowSelection(originalIndex, e as unknown as React.MouseEvent);
+                            }}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{row['Ledger Name']}</TableCell>
-                        <TableCell className="text-sm text-gray-600">{row['Parent Group']}</TableCell>
-                        <TableCell className="text-sm">{row['Primary Group']}</TableCell>
+                        <TableCell
+                          className="font-medium sticky bg-white z-10 max-w-[180px] truncate"
+                          style={{ left: actualStickyOffsets.ledger }}
+                          title={row['Ledger Name']}
+                        >
+                          {row['Ledger Name']}
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-600 max-w-[180px] truncate" title={row['Parent Group']}>{row['Parent Group']}</TableCell>
+                        <TableCell className="text-sm max-w-[180px] truncate" title={row['Primary Group']}>{row['Primary Group']}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Opening Balance'])}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Debit'])}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Credit'])}</TableCell>
@@ -2649,119 +2604,11 @@ export default function FinancialReview() {
                 </div>
               )}
               
-              {/* Cascading H1-H5 Filters */}
-              <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 border rounded flex-wrap">
-                <span className="text-xs font-semibold text-gray-700">Hierarchy Filters:</span>
-                
-                <Select value={h1Filter} onValueChange={(value) => {
-                  setH1Filter(value);
-                  if (value === 'all') {
-                    setH2Filter('all');
-                    setH3Filter('all');
-                    setH4Filter('all');
-                    setH5Filter('all');
-                  }
-                }}>
-                  <SelectTrigger className="w-[180px] h-7 text-xs">
-                    <SelectValue placeholder="H1 - All" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">H1 - All</SelectItem>
-                    {cascadingOptions.h1Options.map(opt => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                
-                <Select value={h2Filter} onValueChange={(value) => {
-                  setH2Filter(value);
-                  if (value === 'all') {
-                    setH3Filter('all');
-                    setH4Filter('all');
-                    setH5Filter('all');
-                  }
-                }} disabled={h1Filter === 'all' && cascadingOptions.h2Options.length === 0}>
-                  <SelectTrigger className="w-[180px] h-7 text-xs">
-                    <SelectValue placeholder="H2 - All" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">H2 - All</SelectItem>
-                    {cascadingOptions.h2Options.map(opt => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                
-                <Select value={h3Filter} onValueChange={(value) => {
-                  setH3Filter(value);
-                  if (value === 'all') {
-                    setH4Filter('all');
-                    setH5Filter('all');
-                  }
-                }} disabled={h2Filter === 'all' && cascadingOptions.h3Options.length === 0}>
-                  <SelectTrigger className="w-[180px] h-7 text-xs">
-                    <SelectValue placeholder="H3 - All" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">H3 - All</SelectItem>
-                    {cascadingOptions.h3Options.map(opt => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                
-                <Select value={h4Filter} onValueChange={(value) => {
-                  setH4Filter(value);
-                  if (value === 'all') {
-                    setH5Filter('all');
-                  }
-                }} disabled={h3Filter === 'all' && cascadingOptions.h4Options.length === 0}>
-                  <SelectTrigger className="w-[180px] h-7 text-xs">
-                    <SelectValue placeholder="H4 - All" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">H4 - All</SelectItem>
-                    {cascadingOptions.h4Options.map(opt => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                
-                <Select value={h5Filter} onValueChange={setH5Filter} disabled={h4Filter === 'all' && cascadingOptions.h5Options.length === 0}>
-                  <SelectTrigger className="w-[180px] h-7 text-xs">
-                    <SelectValue placeholder="H5 - All" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">H5 - All</SelectItem>
-                    {cascadingOptions.h5Options.map(opt => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                
-                {(h1Filter !== 'all' || h2Filter !== 'all' || h3Filter !== 'all' || h4Filter !== 'all' || h5Filter !== 'all') && (
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="h-7 text-xs px-2"
-                    onClick={() => {
-                      setH1Filter('all');
-                      setH2Filter('all');
-                      setH3Filter('all');
-                      setH4Filter('all');
-                      setH5Filter('all');
-                    }}
-                  >
-                    Clear Filters
-                  </Button>
-                )}
-              </div>
-              
               <div className="border rounded-lg overflow-hidden">
             <Table>
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
-                  <TableHead className="w-12 sticky top-0 bg-white">
+                  <TableHead className="w-8 sticky top-0 bg-white" style={{ left: classifiedStickyOffsets.selection, zIndex: 20 }}>
                     <input
                       type="checkbox"
                       checked={selectedFilteredCount === filteredData.length && filteredData.length > 0}
@@ -2779,7 +2626,7 @@ export default function FinancialReview() {
                       title="Select All Visible / Deselect All"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Ledger Name'] }}>
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: 200, left: classifiedStickyOffsets.ledger, zIndex: 19 }}>
                     <div className="flex items-center gap-1">
                       Ledger Name
                       <ColumnFilter
@@ -2798,7 +2645,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Parent Group'] }}>
+                  <TableHead className="top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Parent Group'] }}>
                     <div className="flex items-center gap-1">
                       Parent Group
                       <ColumnFilter
@@ -2817,7 +2664,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Primary Group'] }}>
+                  <TableHead className="top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Primary Group'] }}>
                     <div className="flex items-center gap-1">
                       Primary Group
                       <ColumnFilter
@@ -2836,7 +2683,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Opening Balance'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Opening Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Opening
                       <ColumnFilter
@@ -2856,7 +2703,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Debit'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Debit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Debit
                       <ColumnFilter
@@ -2876,7 +2723,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Credit'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Credit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Credit
                       <ColumnFilter
@@ -2896,7 +2743,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Closing Balance'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Closing Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Closing
                       <ColumnFilter
@@ -3070,17 +2917,26 @@ export default function FinancialReview() {
                         tabIndex={0}
                         onFocus={() => setFocusedClassifiedRowIndex(originalIndex)}
                       >
-                        <TableCell onClick={(e) => e.stopPropagation()}>
+                        <TableCell onClick={(e) => e.stopPropagation()} className="sticky left-0 bg-white z-10" style={{ left: classifiedStickyOffsets.selection, width: 32 }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => toggleRowSelection(originalIndex)}
-                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => {}}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRowSelection(originalIndex, e as unknown as React.MouseEvent);
+                            }}
                           />
                         </TableCell>
-                        <TableCell className="font-medium text-sm">{row['Ledger Name']}</TableCell>
-                        <TableCell className="text-xs text-gray-600">{row['Parent Group'] || row['Primary Group'] || '-'}</TableCell>
-                        <TableCell className="text-xs">{row['Primary Group']}</TableCell>
+                        <TableCell
+                          className="font-medium text-sm sticky bg-white z-10 max-w-[180px] truncate"
+                          style={{ left: classifiedStickyOffsets.ledger }}
+                          title={row['Ledger Name']}
+                        >
+                          {row['Ledger Name']}
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-600 max-w-[180px] truncate" title={row['Parent Group'] || row['Primary Group'] || '-'}>{row['Parent Group'] || row['Primary Group'] || '-'}</TableCell>
+                        <TableCell className="text-xs max-w-[180px] truncate" title={row['Primary Group']}>{row['Primary Group']}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Opening Balance'])}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Debit'])}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Credit'])}</TableCell>
@@ -3165,136 +3021,6 @@ export default function FinancialReview() {
                 entityType={entityType}
                 signingDetails={signingDetails}
               />
-            </TabsContent>
-            
-            {/* EXCEPTION REPORT TAB */}
-            <TabsContent value="exceptions" className="mt-0 p-4">
-              <div className="space-y-3">
-                {/* Header */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold">Exception Report</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Review ledgers with unusual balance patterns based on group mappings
-                    </p>
-                  </div>
-                  <Badge variant={exceptions.length > 0 ? "destructive" : "outline"} className="text-xs">
-                    {exceptions.length} {exceptions.length === 1 ? 'Exception' : 'Exceptions'} Found
-                  </Badge>
-                </div>
-                
-                {/* Exception Table */}
-                {exceptions.length === 0 ? (
-                  <div className="border rounded-lg p-8 text-center">
-                    <svg className="w-16 h-16 mx-auto text-green-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <h3 className="text-lg font-semibold mb-2 text-green-700">No Exceptions Found</h3>
-                    <p className="text-muted-foreground">
-                      All ledgers have expected balance patterns based on their group classifications
-                    </p>
-                  </div>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-10">
-                        <TableRow>
-                          <TableHead className="w-10 text-center">
-                            <svg className="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                          </TableHead>
-                          <TableHead>Ledger Name</TableHead>
-                          <TableHead>Group</TableHead>
-                          <TableHead className="text-right">Opening</TableHead>
-                          <TableHead className="text-right">Debit</TableHead>
-                          <TableHead className="text-right">Credit</TableHead>
-                          <TableHead className="text-right">Closing</TableHead>
-                          <TableHead>Issue</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {exceptions.map((exception, idx) => (
-                          <TableRow 
-                            key={idx} 
-                            className={cn(
-                              "cursor-pointer",
-                              exception.severity === 'high' ? 'bg-red-50 hover:bg-red-100' :
-                              exception.severity === 'medium' ? 'bg-yellow-50 hover:bg-yellow-100' :
-                              'bg-blue-50 hover:bg-blue-100'
-                            )}
-                            onClick={() => {
-                              // Find the ledger in Classified TB and switch to that tab
-                              const ledgerIndex = currentData.findIndex(
-                                row => row['Ledger Name'] === exception.ledgerName
-                              );
-                              if (ledgerIndex !== -1) {
-                                setActiveTab('classified');
-                                // Small delay to ensure tab switch happens first
-                                setTimeout(() => {
-                                  // Scroll to and highlight the row
-                                  const rowElement = document.querySelector(
-                                    `[data-ledger-row="${ledgerIndex}"]`
-                                  );
-                                  if (rowElement) {
-                                    rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                  }
-                                }, 100);
-                              }
-                            }}
-                          >
-                            <TableCell className="text-center">
-                              {exception.severity === 'high' && (
-                                <Badge variant="destructive" className="text-[10px] px-1 py-0">High</Badge>
-                              )}
-                              {exception.severity === 'medium' && (
-                                <Badge className="text-[10px] px-1 py-0 bg-yellow-600">Med</Badge>
-                              )}
-                              {exception.severity === 'low' && (
-                                <Badge variant="outline" className="text-[10px] px-1 py-0">Low</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell className="font-medium">{exception.ledgerName}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{exception.group}</TableCell>
-                            <TableCell className="text-right font-mono text-sm">
-                              {exception.opening.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm">
-                              {exception.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm">
-                              {exception.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </TableCell>
-                            <TableCell className={`text-right font-mono text-sm font-semibold ${exception.closing < 0 ? 'text-red-600' : 'text-blue-600'}`}>
-                              {exception.closing.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </TableCell>
-                            <TableCell className="text-xs">{exception.reason}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-                
-                {/* Legend */}
-                {exceptions.length > 0 && (
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground p-3 bg-gray-50 rounded border">
-                    <span className="font-semibold">Legend:</span>
-                    <div className="flex items-center gap-1">
-                      <Badge variant="destructive" className="text-[10px] px-1 py-0">High</Badge>
-                      <span>= Requires immediate review</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Badge className="text-[10px] px-1 py-0 bg-yellow-600">Med</Badge>
-                      <span>= May need verification</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Badge variant="outline" className="text-[10px] px-1 py-0">Low</Badge>
-                      <span>= Minor attention needed</span>
-                    </div>
-                  </div>
-                )}
-              </div>
             </TabsContent>
             
             <TabsContent value="notes" className="mt-0 p-4">
@@ -3629,12 +3355,22 @@ export default function FinancialReview() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
-            {/* Entity Type - Read Only Display */}
+            {/* Entity Type - Override allowed */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Entity Type *</label>
-              <div className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm">
-                {entityType || 'Not configured'}
-              </div>
+              <Select value={entityTypeDraft} onValueChange={setEntityTypeDraft}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select entity type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ENTITY_TYPES.map(type => (
+                    <SelectItem key={type} value={type} disabled={DISABLED_ENTITY_TYPES.includes(type)}>
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Pulled from master client by default. You can override for this import and re-classify without reimporting.</p>
             </div>
 
             {/* Business Type */}
@@ -3706,9 +3442,12 @@ export default function FinancialReview() {
               <Button variant="outline" onClick={() => setIsEntityDialogOpen(false)}>
                 Cancel
               </Button>
+              <Button variant="secondary" onClick={handleSaveEntityType} disabled={!entityTypeDraft}>
+                Save Entity Type
+              </Button>
               <Button 
-                onClick={handleFetchFromTally} 
-                disabled={!entityType || !businessType || isFetching}
+                onClick={() => handleFetchFromTally(entityTypeDraft || entityType)} 
+                disabled={(!entityTypeDraft && !entityType) || !businessType || isFetching}
               >
                 {isFetching ? 'Importing...' : 'Confirm & Import'}
               </Button>
@@ -3867,15 +3606,9 @@ export default function FinancialReview() {
         open={isFilterModalOpen}
         onOpenChange={setIsFilterModalOpen}
         statusFilter={statusFilter}
-        h1Filter={h1Filter}
-        h2Filter={h2Filter}
-        h3Filter={h3Filter}
         groupFilter={groupFilter}
         balanceFilter={balanceFilter}
         onStatusFilterChange={setStatusFilter}
-        onH1FilterChange={setH1Filter}
-        onH2FilterChange={setH2Filter}
-        onH3FilterChange={setH3Filter}
         onGroupFilterChange={setGroupFilter}
         onBalanceFilterChange={setBalanceFilter}
         onResetFilters={handleResetFilters}

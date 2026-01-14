@@ -35,8 +35,8 @@ export function TradeReceivablesNote({ data, noteNumber, reportingScale = 'rupee
       const ledgerName = row.ledgerName?.toLowerCase() || '';
       const value = row.closingBalance || 0;
 
-      if (h3.includes('trade receivable') || h4.includes('trade receivable') || 
-          ledgerName.includes('sundry debtor') || ledgerName.includes('trade receivable')) {
+      if (h3.includes('trade receivable') || h4.includes('trade receivable') ||
+        ledgerName.includes('sundry debtor') || ledgerName.includes('trade receivable')) {
         if (ledgerName.includes('secured')) {
           securedGood += value;
         } else if (ledgerName.includes('doubtful') || ledgerName.includes('bad debt')) {
@@ -59,7 +59,7 @@ export function TradeReceivablesNote({ data, noteNumber, reportingScale = 'rupee
   }
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded border p-4 space-y-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-base font-semibold">Note {noteNumber}: Trade receivables</h3>
       </div>
@@ -74,28 +74,28 @@ export function TradeReceivablesNote({ data, noteNumber, reportingScale = 'rupee
             </tr>
           </thead>
           <tbody>
-            {receivables.securedGood > 0 && (
+            {receivables.securedGood !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Secured, considered good</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(receivables.securedGood)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {receivables.unsecuredGood > 0 && (
+            {receivables.unsecuredGood !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Unsecured, considered good</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(receivables.unsecuredGood)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {receivables.doubtful > 0 && (
+            {receivables.doubtful !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Doubtful</td>
                 <td className="px-3 py-2 text-right text-sm">{formatValue(receivables.doubtful)}</td>
                 <td className="px-3 py-2 text-right text-sm">-</td>
               </tr>
             )}
-            {receivables.provisionDoubtful > 0 && (
+            {receivables.provisionDoubtful !== 0 && (
               <tr className="border-b">
                 <td className="px-3 py-2 text-sm">Less: Provision for doubtful debts</td>
                 <td className="px-3 py-2 text-right text-sm">({formatValue(receivables.provisionDoubtful)})</td>
@@ -114,7 +114,7 @@ export function TradeReceivablesNote({ data, noteNumber, reportingScale = 'rupee
       {/* Ageing Schedule */}
       <div className="mt-6 space-y-4">
         <h4 className="text-sm font-semibold">Ageing for trade receivables from the due date of payment for each of the category as at</h4>
-        
+
         <div className="overflow-x-auto border rounded-lg">
           <table className="w-full text-xs">
             <thead className="bg-gray-100 border-b">

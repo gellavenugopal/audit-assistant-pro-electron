@@ -1,5 +1,6 @@
 // Classification service for Trial Balance New module
 // Based on FS Cursor classification.js
+import { getNaturalBalanceSideFromGroups } from '@/utils/naturalBalance';
 
 export interface ClassificationResult {
   h1: string;
@@ -225,21 +226,36 @@ const SCHEDULE_III_MAPPING: Record<string, {
 }> = {
   'Fixed Assets': {
     face: 'Assets',
-    note: 'PPE & IA (Net)',
-    subnote: 'Net - Freehold Land'
+    note: 'Property, Plant and Equipment',
+    subnote: 'Freehold Land'
+  },
+  'Investments': {
+    face: 'Assets',
+    note: 'Non-Current Investments',
+    subnote: 'Investment in Equity Instruments'
+  },
+  'Loans and Advances': {
+    face: 'Assets',
+    note: 'Short-term Loans and Advances',
+    subnote: 'Loans and Advances to Employees'
+  },
+  'Deposits (Asset)': {
+    face: 'Assets',
+    note: 'Other Non-Current Assets',
+    subnote: 'Security Deposits'
   },
   'Cash-in-hand': {
     face: 'Assets',
-    note: 'Cash and Bank Balance',
+    note: 'Cash and Cash Equivalents',
     subnote: 'Cash on Hand'
   },
   'Bank Accounts': {
     face: 'Assets',
-    note: 'Cash and Bank Balance',
-    subnote: 'Balances with Scheduled Banks in Current Account',
+    note: 'Cash and Cash Equivalents',
+    subnote: 'Balances with Banks',
     balance_logic: {
       negative: { face: 'Liabilities', note: 'Other Current Liabilities', subnote: 'Bank Overdraft' },
-      positive: { face: 'Assets', note: 'Cash and Bank Balance', subnote: 'Balances with Scheduled Banks in Current Account' }
+      positive: { face: 'Assets', note: 'Cash and Cash Equivalents', subnote: 'Balances with Banks' }
     }
   },
   'Sundry Debtors': {
@@ -250,12 +266,17 @@ const SCHEDULE_III_MAPPING: Record<string, {
   'Stock-in-Hand': {
     face: 'Assets',
     note: 'Inventories',
-    subnote: 'Stock-in-Hand'
+    subnote: 'Raw Materials'
   },
   'Closing Stock': {
     face: 'Assets',
     note: 'Inventories',
-    subnote: 'Closing Stock'
+    subnote: 'Finished Goods'
+  },
+  'Prepaid Expenses': {
+    face: 'Assets',
+    note: 'Other Current Assets',
+    subnote: 'Prepaid Expenses'
   },
   'Opening Stock': {
     face: 'Expenses',
@@ -338,7 +359,7 @@ export function classifyLedgerWithPriority(
   // PRIORITY 2: Special Equity Classification Rule
   // If IsRevenue = No AND Primary Group = Capital / Reserves & Surplus AND balance is Credit → H2 = Equity
   const groupLower = tallyGroup.toLowerCase();
-  const isCredit = closingBalance < 0; // Credit balance in accounting
+  const isCredit = closingBalance >= 0; // Credit balances are stored as positive under unified sign convention
   const isRevenueGroup = ['Sales Accounts', 'Direct Incomes', 'Indirect Incomes'].includes(tallyGroup);
   
   if (!isRevenueGroup && 
@@ -442,13 +463,10 @@ export function classifyLedgerWithPriority(
     
     // Determine H1 and H2 based on IsRevenue and closing balance
     const h1 = isRevenue ? 'Profit and Loss' : 'Balance Sheet';
-    const isNegative = closingBalance < 0;
-    let h2 = '';
-    if (h1 === 'Balance Sheet') {
-      h2 = isNegative ? 'Assets' : 'Liabilities';
-    } else { // Profit and Loss
-      h2 = isNegative ? 'Expenses' : 'Income';
-    }
+    const naturalSign = getNaturalBalanceSideFromGroups(undefined, tallyGroup, undefined, isRevenue);
+    const h2 = h1 === 'Profit and Loss'
+      ? (naturalSign === 'Dr' ? 'Expenses' : 'Income')
+      : (naturalSign === 'Dr' ? 'Assets' : 'Liabilities');
     
     if (expenseMatch) {
       return {
@@ -568,17 +586,24 @@ export function classifyDataframeBatch(
     
     let finalH1 = classification.h1;
     let finalH2 = classification.h2;
+    const finalH3 = classification.h3 || '';
+    const finalH4 = classification.h4 || '';
     
     if (!skipAutoClassification) {
-      // Determine H1 based on IsRevenue
-      finalH1 = isRevenue ? 'Profit and Loss' : 'Balance Sheet';
-      
-      // Determine H2 based on H1 and closing balance sign
-      const isNegative = closingBalance < 0;
-      if (finalH1 === 'Balance Sheet') {
-        finalH2 = isNegative ? 'Assets' : 'Liabilities';
-      } else { // Profit and Loss
-        finalH2 = isNegative ? 'Expenses' : 'Income';
+      if (!finalH1) {
+        finalH1 = isRevenue ? 'Profit and Loss' : 'Balance Sheet';
+      }
+
+      if (!finalH2) {
+        const naturalSign = getNaturalBalanceSideFromGroups(
+          classification.h2,
+          row['Primary Group'],
+          row['Parent Group'],
+          isRevenue
+        );
+        finalH2 = finalH1 === 'Profit and Loss'
+          ? (naturalSign === 'Dr' ? 'Expenses' : 'Income')
+          : (naturalSign === 'Dr' ? 'Assets' : 'Liabilities');
       }
     }
     
@@ -586,7 +611,7 @@ export function classifyDataframeBatch(
     let status = 'Mapped';
     if (finalH1 === 'Needs User Input') {
       status = 'Error';
-    } else if (!finalH1 || !finalH2) {
+    } else if (!finalH1 || !finalH2 || !finalH3 || !finalH4) {
       status = 'Unmapped';
     }
     
@@ -594,8 +619,8 @@ export function classifyDataframeBatch(
       ...row,
       'H1': finalH1,
       'H2': finalH2,
-      'H3': classification.h3,
-      'H4': classification.h4,
+      'H3': finalH3,
+      'H4': finalH4,
       'H5': classification.h5,
       'Technical Code': classification.technicalCode,
       'Head Code': classification.headCode,
