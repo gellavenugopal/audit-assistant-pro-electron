@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,12 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileUp, Search, FileText, TrendingUp, Download } from 'lucide-react';
+import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { processAccountingData, summarizeData, deepClean } from '@/utils/srmProcessor';
 
 const SRMPro = () => {
   const [activeTab, setActiveTab] = useState('upload');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any[]>([]);
   const [currentYearData, setCurrentYearData] = useState<Record<string, number>>({});
   const [previousYearData, setPreviousYearData] = useState<Record<string, number>>({});
@@ -25,6 +26,9 @@ const SRMPro = () => {
   const [uploadPeriod, setUploadPeriod] = useState('current');
   const [selectedPeriod, setSelectedPeriod] = useState('current');
   const [selectedYear, setSelectedYear] = useState('');
+  const [sortColumn, setSortColumn] = useState<string>('');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -58,6 +62,7 @@ const SRMPro = () => {
 
         setActiveTab('results');
         toast.success(`${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         toast.error(err.message || 'Error processing file');
       }
@@ -164,6 +169,84 @@ const SRMPro = () => {
     return (val / scaleFactor).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
+  // Mapped and Unmapped counters
+  const mappedCount = useMemo(() => {
+    return data.filter((row) => row['Mapped Category'] && row['Mapped Category'] !== 'NOT MAPPED').length;
+  }, [data]);
+
+  const unmappedCount = useMemo(() => {
+    return data.filter((row) => row['Mapped Category'] === 'NOT MAPPED').length;
+  }, [data]);
+
+  // Sorting and filtering logic
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  const handleFilterChange = (column: string, value: string) => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      [column]: value,
+    }));
+  };
+
+  const filteredAndSortedData = useMemo(() => {
+    let result = [...data];
+
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, filterValue]) => {
+      if (filterValue) {
+        result = result.filter((row) => {
+          const cellValue = String(row[column] || '').toLowerCase();
+          return cellValue.includes(filterValue.toLowerCase());
+        });
+      }
+    });
+
+    // Apply search filter
+    if (search) {
+      result = result.filter((r) => JSON.stringify(r).toLowerCase().includes(search.toLowerCase()));
+    }
+
+    // Apply sorting
+    if (sortColumn) {
+      result.sort((a, b) => {
+        const aVal = a[sortColumn];
+        const bVal = b[sortColumn];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal || '');
+        const bStr = String(bVal || '');
+        return sortDirection === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
+      });
+    }
+
+    return result;
+  }, [data, columnFilters, search, sortColumn, sortDirection]);
+
+  // Calculate totals for trial balance
+  const trialBalanceTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    
+    if (data.length > 0) {
+      Object.keys(data[0]).forEach((key) => {
+        if (typeof data[0][key] === 'number') {
+          totals[key] = data.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+        }
+      });
+    }
+    
+    return totals;
+  }, [data]);
+
   const getColumnHeader = (isPL: boolean, isCurrent: boolean) => {
     if (isPL) {
       if (isCurrent) {
@@ -178,6 +261,7 @@ const SRMPro = () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const renderStatement = (structure: any[], isPL = false) => {
     const scaleLabels: Record<string, string> = {
       '1': 'Rupees',
@@ -187,8 +271,37 @@ const SRMPro = () => {
       '10000000': 'Crores',
     };
 
-    let currentTotal = 0;
-    let previousTotal = 0;
+    let currentLiabilitiesTotal = 0;
+    let previousLiabilitiesTotal = 0;
+    let currentAssetsTotal = 0;
+    let previousAssetsTotal = 0;
+    let isInAssetsSection = false;
+
+    // Pre-calculate totals for Balance Sheet
+    if (!isPL) {
+      structure.forEach((row) => {
+        if (row.label === 'ASSETS') {
+          isInAssetsSection = true;
+        }
+        
+        if (!row.h && !row.sub && row.key) {
+          const currentVal = currentYearData[deepClean(row.key)] || 0;
+          const previousVal = previousYearData[deepClean(row.key)] || 0;
+          
+          if (isInAssetsSection) {
+            currentAssetsTotal += currentVal;
+            previousAssetsTotal += previousVal;
+          } else if (row.label !== 'TOTAL') {
+            currentLiabilitiesTotal += currentVal;
+            previousLiabilitiesTotal += previousVal;
+          }
+        }
+      });
+    }
+
+    const currentDifference = Math.abs(currentAssetsTotal - currentLiabilitiesTotal);
+    const previousDifference = Math.abs(previousAssetsTotal - previousLiabilitiesTotal);
+    const hasDifference = !isPL && (currentDifference > 0.01 || previousDifference > 0.01);
 
     return (
       <div className="space-y-4">
@@ -198,6 +311,11 @@ const SRMPro = () => {
             <p className="text-sm text-muted-foreground">CIN: {cin}</p>
             <CardTitle className="text-xl mt-2">{isPL ? 'Statement of Profit & Loss' : 'Balance Sheet as at 31 March ' + periodYear}</CardTitle>
             <p className="text-sm font-medium">(Amount in ₹ {scaleLabels[scale]})</p>
+            {hasDifference && (
+              <p className="text-red-600 font-bold mt-2">
+                ⚠️ Balance Sheet does not balance! Difference: Current Year: {formatValue(currentDifference)}, Previous Year: {formatValue(previousDifference)}
+              </p>
+            )}
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -216,15 +334,6 @@ const SRMPro = () => {
                     const previousVal = previousYearData[deepClean(row.key)] || 0;
                     const isAlert = row.un && (Math.abs(currentVal) > 0 || Math.abs(previousVal) > 0);
 
-                    if (row.label === 'TOTAL' && !isPL) {
-                      structure.forEach((r) => {
-                        if (!r.h && !r.sub && r.key) {
-                          currentTotal += currentYearData[deepClean(r.key)] || 0;
-                          previousTotal += previousYearData[deepClean(r.key)] || 0;
-                        }
-                      });
-                    }
-
                     let indent = '45px';
                     if (row.h) indent = '10px';
                     else if (row.sub && row.label.match(/^\([a-z]\)/)) indent = '50px';
@@ -233,6 +342,14 @@ const SRMPro = () => {
                     else if (row.label.match(/^\(i+v?\)/)) indent = '75px';
 
                     const showTotal = row.label === 'TOTAL';
+                    let displayCurrentTotal = 0;
+                    let displayPreviousTotal = 0;
+
+                    if (showTotal && !isPL) {
+                      // For liability section total
+                      displayCurrentTotal = currentLiabilitiesTotal;
+                      displayPreviousTotal = previousLiabilitiesTotal;
+                    }
 
                     return (
                       <tr
@@ -240,7 +357,6 @@ const SRMPro = () => {
                         className={`
                           ${row.h ? 'bg-slate-100 font-bold text-lg' : ''}
                           ${row.sub ? 'font-semibold bg-slate-50' : ''}
-                          ${isAlert ? 'bg-red-50 text-red-700' : ''}
                           ${showTotal ? 'bg-blue-50 font-bold text-lg' : ''}
                         `}
                       >
@@ -251,10 +367,10 @@ const SRMPro = () => {
                           {!row.h && !row.sub && !row.un ? row.note || '' : ''}
                         </td>
                         <td className={`text-right px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {showTotal ? formatValue(currentTotal) : !row.h && !row.sub ? formatValue(currentVal) : ''}
+                          {showTotal ? formatValue(displayCurrentTotal) : !row.h && !row.sub ? formatValue(currentVal) : ''}
                         </td>
                         <td className={`text-right px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {showTotal ? formatValue(previousTotal) : !row.h && !row.sub ? formatValue(previousVal) : ''}
+                          {showTotal ? formatValue(displayPreviousTotal) : !row.h && !row.sub ? formatValue(previousVal) : ''}
                         </td>
                       </tr>
                     );
@@ -273,11 +389,10 @@ const SRMPro = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">SRM Pro</h1>
-          <p className="text-muted-foreground mt-1">Financial Statement Planner - Schedule III Format Generator</p>
         </div>
       </div>
 
-      {activeTab !== 'upload' && (
+      {(activeTab === 'balance-sheet' || activeTab === 'profit-loss') && (
         <Card>
           <CardContent className="pt-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -299,23 +414,21 @@ const SRMPro = () => {
                   placeholder="UXXXXXMH2023PTCXXX588"
                 />
               </div>
-              {(activeTab === 'balance-sheet' || activeTab === 'profit-loss' || activeTab === 'summary') && (
-                <div>
-                  <Label htmlFor="scale">Display Scale</Label>
-                  <Select value={scale} onValueChange={setScale}>
-                    <SelectTrigger id="scale">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">Rupees</SelectItem>
-                      <SelectItem value="100">Hundreds</SelectItem>
-                      <SelectItem value="1000">Thousands</SelectItem>
-                      <SelectItem value="100000">Lakhs</SelectItem>
-                      <SelectItem value="10000000">Crores</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <div>
+                <Label htmlFor="scale">Display Scale</Label>
+                <Select value={scale} onValueChange={setScale}>
+                  <SelectTrigger id="scale">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Rupees</SelectItem>
+                    <SelectItem value="100">Hundreds</SelectItem>
+                    <SelectItem value="1000">Thousands</SelectItem>
+                    <SelectItem value="100000">Lakhs</SelectItem>
+                    <SelectItem value="10000000">Crores</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -346,64 +459,165 @@ const SRMPro = () => {
         </TabsList>
 
         <TabsContent value="upload" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Upload Tally Excel</CardTitle>
-              <CardDescription>Required sheets: Mapping | Trial Balance | Hierarchy</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="period-type">Period Type</Label>
-                <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-                  <SelectTrigger id="period-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="current">Current Year</SelectItem>
-                    <SelectItem value="previous">Previous Year</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="financial-year">Financial Year (e.g., 2024)</Label>
-                <Input
-                  id="financial-year"
-                  type="text"
-                  placeholder="2024"
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="file-upload">Select Excel File</Label>
-                <Input
-                  id="file-upload"
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleFileUpload}
-                  disabled={loading}
-                />
-              </div>
-
-              {loading && (
-                <div className="flex items-center justify-center py-8">
-                  <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-                    <p className="mt-4 text-muted-foreground">Processing...</p>
-                  </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card className="md:col-span-1">
+              <CardHeader>
+                <CardTitle className="text-lg">Upload Tally Excel</CardTitle>
+                <CardDescription className="text-xs">Required sheets: Mapping | Trial Balance | Hierarchy</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="period-type" className="text-sm">Period Type</Label>
+                  <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                    <SelectTrigger id="period-type" className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="current">Current Year</SelectItem>
+                      <SelectItem value="previous">Previous Year</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+
+                <div className="space-y-1">
+                  <Label htmlFor="financial-year" className="text-sm">Financial Year</Label>
+                  <Input
+                    id="financial-year"
+                    type="text"
+                    placeholder="2024"
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="h-9"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="file-upload" className="text-sm">Select File</Label>
+                  <Input
+                    id="file-upload"
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={handleFileUpload}
+                    disabled={loading}
+                    className="h-9 text-sm"
+                  />
+                </div>
+
+                {loading && (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                      <p className="mt-2 text-xs text-muted-foreground">Processing...</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {data.length > 0 && (
+              <Card className="md:col-span-3">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Trial Balance Preview</CardTitle>
+                      <CardDescription>Click on column headers to sort</CardDescription>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="flex items-center gap-2 text-green-600">
+                        <CheckCircle className="h-5 w-5" />
+                        <span className="font-semibold">{mappedCount} Mapped</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-red-600">
+                        <XCircle className="h-5 w-5" />
+                        <span className="font-semibold">{unmappedCount} Unmapped</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <Input
+                      placeholder="Search all columns..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="max-w-sm"
+                    />
+                    
+                    <div className="overflow-x-auto border rounded-lg max-h-96">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-800 text-white sticky top-0">
+                          <tr>
+                            {data[0] && Object.keys(data[0]).map((key) => (
+                              <th key={key} className="px-2 py-2 text-left font-medium whitespace-nowrap">
+                                <div className="space-y-1">
+                                  <button
+                                    onClick={() => handleSort(key)}
+                                    className="flex items-center gap-1 hover:text-blue-300"
+                                  >
+                                    {key}
+                                    <ArrowUpDown className="h-3 w-3" />
+                                  </button>
+                                  <Input
+                                    placeholder="Filter..."
+                                    value={columnFilters[key] || ''}
+                                    onChange={(e) => handleFilterChange(key, e.target.value)}
+                                    className="h-6 text-xs bg-white text-black"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredAndSortedData.slice(0, 100).map((row, i) => (
+                            <tr key={i} className={`border-b hover:bg-slate-50`}>
+                              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                              {Object.values(row).map((val: any, j) => (
+                                <td key={j} className="px-2 py-1 whitespace-nowrap text-xs">
+                                  {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-slate-100 font-bold sticky bottom-0">
+                          <tr>
+                            {data[0] && Object.keys(data[0]).map((key, idx) => (
+                              <td key={key} className="px-2 py-2 text-xs whitespace-nowrap">
+                                {idx === 0 ? 'TOTAL:' : typeof trialBalanceTotals[key] === 'number' ? trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}
+                              </td>
+                            ))}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="results" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Trial Balance Results</CardTitle>
-              <CardDescription>Processed ledger data with category mappings</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Trial Balance Results</CardTitle>
+                  <CardDescription>Processed ledger data with category mappings</CardDescription>
+                </div>
+                <div className="flex gap-4">
+                  <div className="flex items-center gap-2 text-green-600">
+                    <CheckCircle className="h-5 w-5" />
+                    <span className="font-semibold">{mappedCount} Mapped</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-red-600">
+                    <XCircle className="h-5 w-5" />
+                    <span className="font-semibold">{unmappedCount} Unmapped</span>
+                  </div>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -419,32 +633,56 @@ const SRMPro = () => {
 
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-800 text-white">
+                    <thead className="bg-slate-800 text-white sticky top-0">
                       <tr>
                         {data[0] && Object.keys(data[0]).map((key) => (
                           <th key={key} className="px-3 py-2 text-left font-medium whitespace-nowrap">
-                            {key}
+                            <div className="space-y-1">
+                              <button
+                                onClick={() => handleSort(key)}
+                                className="flex items-center gap-1 hover:text-blue-300 w-full"
+                              >
+                                {key}
+                                <ArrowUpDown className="h-3 w-3" />
+                              </button>
+                              <Input
+                                placeholder="Filter..."
+                                value={columnFilters[key] || ''}
+                                onChange={(e) => handleFilterChange(key, e.target.value)}
+                                className="h-7 text-xs bg-white text-black"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </div>
                           </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {data
-                        .filter((r) => JSON.stringify(r).toLowerCase().includes(search.toLowerCase()))
+                      {filteredAndSortedData
                         .slice(0, 100)
                         .map((row, i) => (
                           <tr
                             key={i}
-                            className={`border-b ${row['Mapped Category'] === 'NOT MAPPED' ? 'bg-red-50' : 'hover:bg-slate-50'}`}
+                            className={`border-b hover:bg-slate-50`}
                           >
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                             {Object.values(row).map((val: any, j) => (
                               <td key={j} className="px-3 py-2 whitespace-nowrap">
-                                {val}
+                                {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                               </td>
                             ))}
                           </tr>
                         ))}
                     </tbody>
+                    <tfoot className="bg-slate-100 font-bold sticky bottom-0">
+                      <tr>
+                        {data[0] && Object.keys(data[0]).map((key, idx) => (
+                          <td key={key} className="px-3 py-2 whitespace-nowrap">
+                            {idx === 0 ? 'TOTAL:' : typeof trialBalanceTotals[key] === 'number' ? trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}
+                          </td>
+                        ))}
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
