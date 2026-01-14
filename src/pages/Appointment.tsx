@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import { useRef, useState } from 'react';
 import { LettersPage } from '@/components/appointment/Letters';
 import { useEvidenceFiles, EvidenceFile } from '@/hooks/useEvidenceFiles';
-import { Document, Packer, Paragraph, TextRun } from 'docx';
 
 export default function Appointment() {
   const { currentEngagement } = useEngagement();
@@ -53,49 +52,6 @@ export default function Appointment() {
         event.target.value = '';
       }
     };
-  };
-
-  const handleDownloadTemplate = async () => {
-    const clientName = currentEngagement?.client_name || 'Client';
-    const financialYear = currentEngagement?.financial_year || 'FY';
-    const title = `Appointment Letter Template`;
-
-    const doc = new Document({
-      sections: [
-        {
-          children: [
-            new Paragraph({
-              children: [new TextRun({ text: title, bold: true, size: 28 })],
-            }),
-            new Paragraph(''),
-            new Paragraph(`Client: ${clientName}`),
-            new Paragraph(`Financial Year: ${financialYear}`),
-            new Paragraph(''),
-            new Paragraph('To,'),
-            new Paragraph('[Client Name]'),
-            new Paragraph('[Client Address]'),
-            new Paragraph(''),
-            new Paragraph('Subject: Appointment of Statutory Auditor'),
-            new Paragraph(''),
-            new Paragraph(
-              'This letter confirms your appointment as the statutory auditor for the financial year stated above. Please update the details and add applicable terms.'
-            ),
-            new Paragraph(''),
-            new Paragraph('Sincerely,'),
-            new Paragraph('[Audit Firm Name]'),
-            new Paragraph('[Partner Name]'),
-          ],
-        },
-      ],
-    });
-
-    const blob = await Packer.toBlob(doc);
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Appointment_Letter_Template_${clientName.replace(/\s+/g, '_')}_${financialYear}.docx`;
-    link.click();
-    window.URL.revokeObjectURL(url);
   };
 
   const handleGenerateEngagementLetter = () => {
@@ -196,14 +152,6 @@ export default function Appointment() {
                 <UploadCloud className="h-4 w-4 mr-2" />
                 Upload appointment letter
               </Button>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={handleDownloadTemplate}
-              >
-                <FileDown className="h-4 w-4 mr-2" />
-                Download template
-              </Button>
             </div>
             <p className="text-xs text-muted-foreground font-medium">
               Supported formats: PDF (.pdf), JPEG (.jpg, .jpeg), DOC/DOCX
@@ -219,6 +167,7 @@ export default function Appointment() {
               ADT-1 & Challan
             </CardTitle>
             <CardDescription>Capture ADT-1 filing and challan proof.</CardDescription>
+            <p className="text-xs text-muted-foreground">Applicable for Companies only.</p>
           </CardHeader>
           <CardContent className="space-y-3">
             <input
@@ -377,6 +326,45 @@ export default function Appointment() {
             </div>
             <Separator />
             {renderFileList(confidentialityFiles)}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5" />
+              Auditor Eligibility Certificate
+            </CardTitle>
+            <CardDescription>Record the auditor eligibility certificate for this engagement.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">Module will be available soon.</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileSignature className="h-5 w-5" />
+              Communication with Previous Auditor
+            </CardTitle>
+            <CardDescription>Document communication with the previous auditor.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">Module will be available soon.</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ClipboardCheck className="h-5 w-5" />
+              Engagement Acceptance / Continuation Decision Checklist
+            </CardTitle>
+            <CardDescription>Capture acceptance or continuation decision checklist details.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">Module will be available soon.</p>
           </CardContent>
         </Card>
       </div>
