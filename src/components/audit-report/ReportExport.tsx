@@ -44,6 +44,8 @@ import { WordIcon } from '@/components/icons/WordIcon';
 import { PdfIcon } from '@/components/icons/PdfIcon';
 import { BASIS_FOR_OPINION_STARTER } from '@/data/auditReportStandardWordings';
 
+const KAM_ENABLED = false;
+
 interface ReportExportProps {
   engagementId: string;
   setup: AuditReportSetup;
@@ -170,7 +172,7 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
       addParagraph(`We conducted our audit of the Standalone Financial Statements in accordance with the Standards on Auditing ("SAs") specified under section 143(10) of the Act. Our responsibilities under those Standards are further described in the Auditor's Responsibilities for the Audit of the Standalone Financial Statements section of our report. We are independent of the Company in accordance with the Code of Ethics issued by the Institute of Chartered Accountants of India ("ICAI") together with the ethical requirements that are relevant to our audit of the Standalone Financial Statements under the provisions of the Act and the Rules made thereunder, and we have fulfilled our other ethical responsibilities in accordance with these requirements and the ICAI's Code of Ethics. We believe that the audit evidence obtained by us is sufficient and appropriate to provide a basis for our audit opinion on the Standalone Financial Statements.`);
 
       // Key Audit Matters from database
-      if (kams.length > 0) {
+      if (KAM_ENABLED && kams.length > 0) {
         y += 3;
         addHeading('Key Audit Matters');
         addParagraph(`Key audit matters are those matters that, in our professional judgment, were of most significance in our audit of the Standalone Financial Statements of the current period. These matters were addressed in the context of our audit of the Standalone Financial Statements as a whole, and in forming our opinion thereon, and we do not provide a separate opinion on these matters.`);
@@ -609,7 +611,7 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
       );
 
       // Key Audit Matters
-      if (kams.length > 0) {
+      if (KAM_ENABLED && kams.length > 0) {
         children.push(
           new Paragraph({
             text: 'Key Audit Matters',

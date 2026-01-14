@@ -14,6 +14,8 @@ import type { KeyAuditMatter } from '@/hooks/useKeyAuditMatters';
 import type { FirmSettings } from '@/hooks/useFirmSettings';
 import type { Partner } from '@/hooks/usePartners';
 
+const KAM_ENABLED = false;
+
 export type ReportBlock =
   | { kind: 'title'; text: string }
   | { kind: 'subtitle'; text: string }
@@ -135,7 +137,7 @@ export class AuditReportGenerator {
     }
 
     // Key Audit Matters
-    const includeKams = Boolean(content.include_kam ?? setup.is_listed_company);
+    const includeKams = KAM_ENABLED && Boolean(content.include_kam ?? setup.is_listed_company);
     if (includeKams && kams.length > 0) {
       blocks.push({ kind: 'subheading', text: 'Key Audit Matters' });
       blocks.push({ kind: 'paragraph', text: buildKAMIntro() });

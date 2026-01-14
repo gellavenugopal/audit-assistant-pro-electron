@@ -153,7 +153,7 @@ export default function RiskRegister() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Risk Register</h1>
           <p className="text-muted-foreground mt-1">
-            Identify and assess audit risks (ISA 315)
+            Identify,assess audit risks and plan responses thereof
           </p>
         </div>
         <div className="flex gap-2">

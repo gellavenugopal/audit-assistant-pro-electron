@@ -34,6 +34,7 @@ interface MainReportEditorProps {
 }
 
 const statusItems = STATUS_OPTIONS;
+const KAM_ENABLED = false;
 
 function coerceNumber(value: string) {
   if (value.trim() === '') return null;
@@ -69,6 +70,10 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const [previewMode, setPreviewMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [ifcManualOverride, setIfcManualOverride] = useState(false);
+  const optionalTabLabel = KAM_ENABLED ? 'KAM/EoM/Other Matter' : 'EoM/Other Matter';
+  const standardsReference = KAM_ENABLED
+    ? 'SA 701 - KAM; SA 706 - EoM/Other Matter'
+    : 'SA 706 - EoM/Other Matter';
 
   const { setup, saveSetup } = useAuditReportSetup(engagementId);
   const { content, loading: contentLoading, saveContent } = useAuditReportContent(engagementId);
@@ -376,7 +381,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           <TabsList className="grid w-full grid-cols-4 lg:grid-cols-7">
             <TabsTrigger value="configuration">Config</TabsTrigger>
             <TabsTrigger value="opinion">Opinion</TabsTrigger>
-            <TabsTrigger value="optional" className="text-[11px] px-1">KAM/EoM/Other Matter</TabsTrigger>
+            <TabsTrigger value="optional" className="text-[11px] px-1">{optionalTabLabel}</TabsTrigger>
             <TabsTrigger value="sa720" className="text-[11px] px-1">Other Info-SA 720</TabsTrigger>
             <TabsTrigger value="s143" className="text-[11px] px-1">143(3)-Co Act</TabsTrigger>
             <TabsTrigger value="rule11" className="text-[11px] px-1">Rule 11-Co Audit Rule</TabsTrigger>
@@ -636,26 +641,30 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           <TabsContent value="optional" className="space-y-6">
             <div className="bg-muted/50 p-3 rounded-md border">
               <p className="text-sm font-medium">
-                <span className="font-semibold">Standards Reference:</span> SA 701 - KAM; SA 706 - EoM/Other Matter
+                <span className="font-semibold">Standards Reference:</span> {standardsReference}
               </p>
             </div>
             
-            <div className="flex items-center justify-between gap-2">
-              <div className="space-y-1">
-                <Label>Key Audit Matters</Label>
-                <p className="text-sm text-muted-foreground">Toggle inclusion and manage KAMs</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(draft.include_kam)}
-                  onCheckedChange={(v) => updateDraft({ include_kam: !!v })}
-                />
-                <Label className="font-normal">Include KAM section</Label>
-              </div>
-            </div>
-            {draft.include_kam && <KeyAuditMattersEditor engagementId={engagementId} />}
+            {KAM_ENABLED && (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-1">
+                    <Label>Key Audit Matters</Label>
+                    <p className="text-sm text-muted-foreground">Toggle inclusion and manage KAMs</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(draft.include_kam)}
+                      onCheckedChange={(v) => updateDraft({ include_kam: !!v })}
+                    />
+                    <Label className="font-normal">Include KAM section</Label>
+                  </div>
+                </div>
+                {draft.include_kam && <KeyAuditMattersEditor engagementId={engagementId} />}
 
-            <Separator />
+                <Separator />
+              </>
+            )}
 
             <div className="flex items-center justify-between">
               <div>
@@ -815,6 +824,9 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           {/* 5) Section 143(3) */}
           <TabsContent value="s143" className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="md:col-span-2">
+                <Label className="text-foreground font-semibold">143(3)(a) Details sought and obtained</Label>
+              </div>
               <div className="space-y-2">
                 <Label>143(3)(b) Proper books of account</Label>
                 <StatusSelect
