@@ -38,11 +38,9 @@ import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from "./pages/Gstr1Dashboard";
 import ComplianceApplicability from "./pages/ComplianceApplicability";
+import Feedback from "./pages/Feedback";
+import SRMPro from "./pages/SRMPro";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
-import GstzenIntegration from "./pages/GstzenIntegration";
-import GstzenLogin from "./pages/GstzenLogin";
-import Gstr1Dashboard from "./pages/Gstr1Dashboard";
-import ComplianceApplicability from "./pages/ComplianceApplicability";
 
 const queryClient = new QueryClient();
 
@@ -336,6 +334,26 @@ const App = () => (
                         <AuditProgramNew />
                       </MainLayout>
                     </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/feedback"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <Feedback />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/srm-pro"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <SRMPro />
+                      </MainLayout>
+                    </ProtectedRoute>
                   }
                 />
                 <Route path="*" element={<NotFound />} />
