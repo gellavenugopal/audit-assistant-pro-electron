@@ -1,8 +1,28 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { Badge } from '@/components/ui/badge';
+import {
+  ArrowDown,
+  ArrowUp,
+  Lock,
+  Paperclip,
+  MessageSquare,
+  Save,
+  Trash2,
+  Unlock,
+  Edit2,
+  X,
+  Download,
+} from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -10,26 +30,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import { Edit2, Trash2, Save, X, Paperclip, Lock, Unlock, MessageSquare, Bold, Italic, ListOrdered, Strikethrough, Link2, Undo, Redo, List, ChevronUp, ChevronDown } from 'lucide-react';
-import { WorkingSectionBox, BoxStatus } from '@/types/auditProgramNew';
+import { AuditExecutionBox, BoxStatus, LEGACY_BOX_HEADER_MAP } from '@/types/auditExecution';
 import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
 
 interface WorkingSectionBoxProps {
-  box: WorkingSectionBox;
-  onUpdate: (boxId: string, header: string, content: string) => Promise<void>;
-  onDelete: (boxId: string) => Promise<void>;
-  onAttach?: (boxId: string) => void;
-  onStatusChange?: (boxId: string, status: BoxStatus) => void;
-  onToggleLock?: (boxId: string) => void;
-  onCommentClick?: (boxId: string) => void;
+  box: (AuditExecutionBox & { comment_count?: number }) | undefined;
+  onUpdate: (boxId: string, updates: Partial<AuditExecutionBox>) => void;
+  onDelete: (boxId: string) => void;
+  onAttach: () => void;
+  onUploadFiles?: (files: FileList | null) => void;
+  onStatusChange: (boxId: string, status: BoxStatus) => void;
+  onToggleLock: (boxId: string) => void;
+  onCommentClick: (boxId: string) => void;
+  onExport?: (format: 'excel' | 'word') => void;
   attachmentCount?: number;
   onMoveUp?: (boxId: string) => void;
   onMoveDown?: (boxId: string) => void;
@@ -37,443 +50,382 @@ interface WorkingSectionBoxProps {
   isLast?: boolean;
 }
 
+const STATUS_META: Record<
+  BoxStatus,
+  { label: string; triggerClass: string; dotClass: string; itemClass: string }
+> = {
+  'not-commenced': {
+    label: 'Not Commenced',
+    triggerClass: 'border-slate-200 bg-slate-50 text-slate-700',
+    dotClass: 'bg-slate-400',
+    itemClass:
+      'text-slate-700 focus:bg-slate-100 focus:text-slate-800 data-[state=checked]:bg-slate-100 data-[state=checked]:text-slate-800',
+  },
+  'in-progress': {
+    label: 'In Progress',
+    triggerClass: 'border-amber-200 bg-amber-50 text-amber-800',
+    dotClass: 'bg-amber-500',
+    itemClass:
+      'text-amber-700 focus:bg-amber-50 focus:text-amber-800 data-[state=checked]:bg-amber-50 data-[state=checked]:text-amber-800',
+  },
+  review: {
+    label: 'Under Review',
+    triggerClass: 'border-blue-200 bg-blue-50 text-blue-800',
+    dotClass: 'bg-blue-500',
+    itemClass:
+      'text-blue-700 focus:bg-blue-50 focus:text-blue-800 data-[state=checked]:bg-blue-50 data-[state=checked]:text-blue-800',
+  },
+  complete: {
+    label: 'Complete',
+    triggerClass: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    dotClass: 'bg-emerald-500',
+    itemClass:
+      'text-emerald-700 focus:bg-emerald-50 focus:text-emerald-800 data-[state=checked]:bg-emerald-50 data-[state=checked]:text-emerald-800',
+  },
+};
+
+const STATUS_OPTIONS: { value: BoxStatus; label: string }[] = (
+  Object.keys(STATUS_META) as BoxStatus[]
+).map((value) => ({ value, label: STATUS_META[value].label }));
+
+const isValidStatus = (value: unknown): value is BoxStatus =>
+  (Object.keys(STATUS_META) as BoxStatus[]).includes(value as BoxStatus);
+
+const normalizeHeader = (value: string) =>
+  LEGACY_BOX_HEADER_MAP[value.trim()] ?? value.trim();
+const normalizeContent = (value: AuditExecutionBox['content'], status: BoxStatus) => {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  if (text.trim() === '0' && status === 'not-commenced') return '';
+  return text;
+};
+
 export function WorkingSectionBoxComponent({
   box,
   onUpdate,
   onDelete,
   onAttach,
+  onUploadFiles,
   onStatusChange,
   onToggleLock,
   onCommentClick,
+  onExport,
   attachmentCount = 0,
   onMoveUp,
   onMoveDown,
-  isFirst = false,
-  isLast = false,
+  isFirst,
+  isLast,
 }: WorkingSectionBoxProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedHeader, setEditedHeader] = useState(box.header);
-  const [editedContent, setEditedContent] = useState(box.content);
-  const [isSaving, setIsSaving] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const editorRef = useRef<HTMLDivElement>(null);
-
-  const getStatusBadge = (status: BoxStatus) => {
-    const config = {
-      'not-commenced': { label: 'Not Commenced', variant: 'secondary' as const, className: 'bg-gray-200 text-gray-700' },
-      'in-progress': { label: 'In Progress', variant: 'default' as const, className: 'bg-yellow-200 text-yellow-800' },
-      'review': { label: 'Review', variant: 'default' as const, className: 'bg-blue-200 text-blue-800' },
-      'complete': { label: 'Complete', variant: 'default' as const, className: 'bg-green-200 text-green-800' },
-    };
-    const { label, className } = config[status];
-    return <Badge className={className}>{label}</Badge>;
-  };
+  const [header, setHeader] = useState(normalizeHeader(box?.header || ''));
+  const [content, setContent] = useState(
+    normalizeContent(box?.content, box?.status ?? 'not-commenced')
+  );
+  const [editingHeader, setEditingHeader] = useState(false);
+  const [headerDirty, setHeaderDirty] = useState(false);
+  const [contentDirty, setContentDirty] = useState(false);
+  const isLocked = box?.locked === true || String(box?.locked) === 'true';
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!isEditing) {
-      setEditedHeader(box.header);
-      setEditedContent(box.content);
-    }
-  }, [box.id, box.header, box.content, isEditing]);
+    setHeader(normalizeHeader(box?.header || ''));
+    setContent(normalizeContent(box?.content, box?.status ?? 'not-commenced'));
+    setHeaderDirty(false);
+    setContentDirty(false);
+    setEditingHeader(false);
+  }, [box?.id, box?.header, box?.content, box?.status]);
 
   useEffect(() => {
-    // Sync contentEditable div with editedContent when entering edit mode
-    if (isEditing && editorRef.current && editorRef.current.innerHTML !== editedContent) {
-      editorRef.current.innerHTML = cleanContent(editedContent);
+    if (!box || isLocked) return;
+    if (!isValidStatus(box.status)) {
+      onStatusChange(box.id, 'not-commenced');
     }
-  }, [isEditing, editedContent]);
+  }, [box?.id, isLocked, box?.status, onStatusChange]);
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const content = cleanContent(editorRef.current?.innerHTML || editedContent);
-      await onUpdate(box.id, editedHeader, content);
-      toast.success('✨ Demo: Content saved!');
-      setIsEditing(false);
-    } catch (error) {
-      console.error('Error saving box:', error);
-      toast.error('Failed to save content');
-    } finally {
-      setIsSaving(false);
+  if (!box) {
+    return null;
+  }
+
+  const normalizedStatus = isValidStatus(box.status) ? box.status : 'not-commenced';
+  const statusMeta = STATUS_META[normalizedStatus];
+
+  const handleSave = () => {
+    if (isLocked) return;
+    const trimmedHeader = header.trim();
+    onUpdate(box.id, {
+      header: trimmedHeader || box.header,
+      content,
+    });
+    setHeaderDirty(false);
+    setContentDirty(false);
+    setEditingHeader(false);
+  };
+
+  const handleHeaderSave = () => {
+    if (isLocked) return;
+    const trimmedHeader = header.trim();
+    if (!trimmedHeader) {
+      setHeader(normalizeHeader(box.header));
+      setHeaderDirty(false);
+      setEditingHeader(false);
+      return;
     }
+    onUpdate(box.id, { header: trimmedHeader });
+    setHeaderDirty(false);
+    setEditingHeader(false);
   };
 
-  const handleCancel = () => {
-    setEditedHeader(box.header);
-    setEditedContent(box.content);
-    if (editorRef.current) {
-      editorRef.current.innerHTML = cleanContent(box.content);
-    }
-    setIsEditing(false);
-  };
-
-  const applyFormatting = (command: string, value?: string) => {
-    if (!editorRef.current) return;
-    editorRef.current.focus();
-    document.execCommand(command, false, value);
-  };
-
-  const insertCustomList = (listType: string) => {
-    if (!editorRef.current) return;
-    editorRef.current.focus();
-    
-    const listHTML = `<ol style="list-style-type: ${listType}; margin-left: 20px; padding-left: 20px;"><li></li></ol>`;
-    document.execCommand('insertHTML', false, listHTML);
-    
-    // Move cursor inside the list item
-    setTimeout(() => {
-      const selection = window.getSelection();
-      if (selection && editorRef.current) {
-        const range = document.createRange();
-        const listItem = editorRef.current.querySelector('ol li:last-child');
-        if (listItem) {
-          range.setStart(listItem, 0);
-          range.collapse(true);
-          selection.removeAllRanges();
-          selection.addRange(range);
-        }
-      }
-    }, 10);
-  };
-
-  const insertLink = () => {
-    if (!editorRef.current) return;
-    
-    const selection = window.getSelection();
-    const selectedText = selection?.toString() || '';
-    
-    const url = prompt('Enter URL:', 'https://');
-    if (!url) return;
-    
-    editorRef.current.focus();
-    
-    if (selectedText) {
-      // If text is selected, convert it to a link
-      document.execCommand('createLink', false, url);
-    } else {
-      // If no text selected, ask for link text
-      const linkText = prompt('Enter link text:', 'Click here');
-      if (linkText) {
-        const linkHTML = `<a href="${url}" target="_blank" rel="noopener noreferrer">${linkText}</a>&nbsp;`;
-        document.execCommand('insertHTML', false, linkHTML);
-      }
-    }
-  };
-
-  const handleInput = () => {
-    if (editorRef.current) {
-      setEditedContent(editorRef.current.innerHTML);
-    }
-  };
-
-  const handleDelete = async () => {
-    try {
-      await onDelete(box.id);
-      setShowDeleteDialog(false);
-      toast.success('Box deleted successfully');
-    } catch (error) {
-      console.error('Error deleting box:', error);
-    }
-  };
-
-  // Clean content to remove literal \n characters and actual newlines
-  const cleanContent = (content: string) => {
-    if (!content) return content;
-    return content
-      .replace(/^(\s|\\n|<br>|<br\/>)+/gi, '') // Remove whitespace/\n/br at the start
-      .replace(/(\s|\\n|<br>|<br\/>)+$/gi, '') // Remove at the end
-      .replace(/\\n/g, '<br>') // Convert literal \n to br
-      .trim(); // Final trim
+  const handleHeaderCancel = () => {
+    setHeader(normalizeHeader(box.header));
+    setHeaderDirty(false);
+    setEditingHeader(false);
   };
 
   return (
-    <>
-      <Card className={cn("mb-2 border-l-4", box.locked ? "border-l-gray-400" : "border-l-primary/30")}>
-        <CardHeader className="py-2 px-3">
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
-              {getStatusBadge(box.status)}
-              {box.locked && (
-                <Badge variant="outline" className="text-gray-600">
-                  <Lock className="h-3 w-3 mr-1" />
-                  Locked
+    <Card className={cn('border', isLocked && 'opacity-70')}>
+      <CardHeader className="px-4 py-3 pb-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 space-y-2">
+            {editingHeader ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={header}
+                  onChange={(e) => {
+                    setHeader(e.target.value);
+                    setHeaderDirty(true);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleHeaderSave();
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      handleHeaderCancel();
+                    }
+                  }}
+                  disabled={isLocked}
+                  className="h-8 text-sm"
+                  autoFocus
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleHeaderSave}
+                  disabled={!headerDirty}
+                  title="Save header"
+                >
+                  <Save className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleHeaderCancel}
+                  title="Cancel"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                  {normalizeHeader(box.header)}
+                </h4>
+                {!isLocked && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => setEditingHeader(true)}
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+                {isLocked && (
+                  <Badge variant="outline" className="text-xs">
+                    <Lock className="h-3 w-3 mr-1" />
+                    Locked
+                  </Badge>
+                )}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {attachmentCount > 0 && (
+                <Badge variant="secondary" className="text-xs">
+                  <Paperclip className="h-3 w-3 mr-1" />
+                  {attachmentCount}
                 </Badge>
               )}
-              {box.comment_count > 0 && (
-                <Badge variant="outline" className="cursor-pointer hover:bg-accent" onClick={() => onCommentClick?.(box.id)}>
+              {(box.comment_count ?? 0) > 0 && (
+                <Badge variant="outline" className="text-xs">
                   <MessageSquare className="h-3 w-3 mr-1" />
                   {box.comment_count}
                 </Badge>
               )}
             </div>
-            <div className="flex gap-2 items-center">
-              {onStatusChange && !box.locked && (
-                <Select value={box.status} onValueChange={(val) => onStatusChange(box.id, val as BoxStatus)}>
-                  <SelectTrigger className="h-8 w-[140px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="not-commenced">Not Commenced</SelectItem>
-                    <SelectItem value="in-progress">In Progress</SelectItem>
-                    <SelectItem value="review">Review</SelectItem>
-                    <SelectItem value="complete">Complete</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-              {onToggleLock && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onToggleLock(box.id)}
-                  title={box.locked ? "Unlock box" : "Lock box"}
-                >
-                  {box.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                </Button>
-              )}
-              {/* Move Up/Down Buttons */}
-              {!box.locked && (onMoveUp || onMoveDown) && (
-                <div className="flex gap-0.5 border rounded-md">
-                  {onMoveUp && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onMoveUp(box.id)}
-                      disabled={isFirst}
-                      title="Move box up"
-                      className="h-7 w-7 p-0 rounded-r-none border-r"
-                    >
-                      <ChevronUp className="h-4 w-4" />
-                    </Button>
-                  )}
-                  {onMoveDown && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onMoveDown(box.id)}
-                      disabled={isLast}
-                      title="Move box down"
-                      className="h-7 w-7 p-0 rounded-l-none"
-                    >
-                      <ChevronDown className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
-          <div className="flex items-center justify-between">
-            {isEditing ? (
-              <Input
-                value={editedHeader}
-                onChange={(e) => setEditedHeader(e.target.value)}
-                className="font-semibold text-sm h-7"
-                placeholder="Header name"
-              />
-            ) : (
-              <h4 className="font-semibold text-sm text-foreground">{box.header}</h4>
-            )}
-            <div className="flex gap-1">
-              {isEditing ? (
-                <>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="h-7 w-7 p-0"
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={handleCancel}
-                    disabled={isSaving}
-                    className="h-7 w-7 p-0"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {onAttach && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onAttach(box.id)}
-                      className="relative h-7 w-7 p-0"
-                      disabled={box.locked}
-                    >
-                      <Paperclip className="h-3.5 w-3.5" />
-                      {attachmentCount > 0 && (
-                        <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                          {attachmentCount}
-                        </span>
-                      )}
-                    </Button>
-                  )}
-                  {onCommentClick && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onCommentClick(box.id)}
-                      className="relative h-7 w-7 p-0"
-                    >
-                      <MessageSquare className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setIsEditing(true)}
-                    disabled={box.locked}
-                    className="h-7 w-7 p-0"
-                  >
-                    <Edit2 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setShowDeleteDialog(true)}
-                    className="text-destructive hover:text-destructive h-7 w-7 p-0"
-                    disabled={box.locked}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="py-2 px-3">
-          {isEditing ? (
-            <div className="space-y-1">
-              {/* Rich Text Toolbar */}
-              <div className="flex gap-0.5 pb-1 border-b bg-gradient-to-r from-gray-50 to-blue-50 p-1.5 rounded-t-md flex-wrap">
-                <div className="flex gap-0.5 flex-wrap">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onMouseDown={(e) => { e.preventDefault(); applyFormatting('bold'); }}
-                    title="Bold (Ctrl+B)"
-                    className="h-6 w-6 p-0"
-                  >
-                    <Bold className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onMouseDown={(e) => { e.preventDefault(); applyFormatting('italic'); }}
-                    title="Italic (Ctrl+I)"
-                    className="h-6 w-6 p-0"
-                  >
-                    <Italic className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onMouseDown={(e) => { e.preventDefault(); applyFormatting('strikeThrough'); }}
-                    title="Strikethrough"
-                    className="h-6 w-6 p-0"
-                  >
-                    <Strikethrough className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onMouseDown={(e) => { e.preventDefault(); applyFormatting('underline'); }}
-                    title="Underline (Ctrl+U)"
-                    className="h-6 w-6 p-0"
-                  >
-                    <span className="font-bold underline text-xs">U</span>
-                  </Button>
-                </div>
 
-                <div className="w-px bg-gray-300 mx-1 ml-auto" />
-
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onMouseDown={(e) => { e.preventDefault(); applyFormatting('undo'); }}
-                  title="Undo (Ctrl+Z)"
-                  className="h-6 w-6 p-0"
-                >
-                  <Undo className="h-3 w-3" />
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onMouseDown={(e) => { e.preventDefault(); applyFormatting('redo'); }}
-                  title="Redo (Ctrl+Y)"
-                  className="h-6 w-6 p-0"
-                >
-                  <Redo className="h-3 w-3" />
-                </Button>
-              </div>
-
-              {/* WYSIWYG Editor */}
-              <div
-                ref={editorRef}
-                contentEditable={true}
-                onInput={handleInput}
-                className="min-h-[80px] max-h-[250px] overflow-y-auto p-2 border rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary text-sm leading-snug"
-                style={{
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                }}
-                suppressContentEditableWarning
-              />
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Click formatting buttons above to style your text.
-              </p>
-            </div>
-          ) : (
-            <div
-              className={cn(
-                "min-h-[60px] max-h-[200px] overflow-auto p-2 rounded-md border bg-muted/30 cursor-text text-sm leading-snug",
-                !box.content && "flex items-center justify-center"
-              )}
-              onClick={() => {
-                if (!box.locked) setIsEditing(true);
-              }}
+          <div className="flex items-center gap-2">
+            <Select
+              value={normalizedStatus}
+              onValueChange={(value) => onStatusChange(box.id, value as BoxStatus)}
+              disabled={isLocked}
             >
-              {box.content ? (
-                <div 
-                  className="prose prose-sm max-w-none text-sm leading-snug"
-                  dangerouslySetInnerHTML={{ __html: cleanContent(box.content) }}
-                />
-              ) : (
-                <span className="text-muted-foreground italic text-xs">Click here to add content...</span>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              <SelectTrigger
+                className={cn('h-8 w-[160px] text-xs', statusMeta.triggerClass)}
+              >
+                <span className="flex items-center gap-2">
+                  <span className={cn('h-2 w-2 rounded-full', statusMeta.dotClass)} />
+                  <SelectValue placeholder="Status" />
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((option) => (
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    className={STATUS_META[option.value].itemClass}
+                  >
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Box</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Are you sure you want to delete the box "{box.header}"? This action cannot be undone.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-              Cancel
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => onToggleLock(box.id)}
+            >
+              {isLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
             </Button>
-            <Button variant="destructive" onClick={handleDelete}>
-              Delete
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-2 px-4 pb-4 pt-0">
+        <RichTextEditor
+          value={content || ''}
+          onChange={(value) => {
+            setContent(value);
+            setContentDirty(true);
+          }}
+          placeholder="Enter text"
+          disabled={isLocked}
+        />
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {onMoveUp && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => onMoveUp(box.id)}
+                disabled={isFirst || isLocked}
+                title="Move up"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            )}
+            {onMoveDown && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => onMoveDown(box.id)}
+                disabled={isLast || isLocked}
+                title="Move down"
+              >
+                <ArrowDown className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {onUploadFiles ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Paperclip className="h-4 w-4 mr-2" />
+                    Attach
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={onAttach}>
+                    Attach from Vault
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => uploadInputRef.current?.click()}>
+                    Upload File
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button variant="outline" size="sm" onClick={onAttach}>
+                <Paperclip className="h-4 w-4 mr-2" />
+                Attach
+              </Button>
+            )}
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                onUploadFiles?.(event.target.files);
+                event.currentTarget.value = '';
+              }}
+            />
+            <Button variant="outline" size="sm" onClick={() => onCommentClick(box.id)}>
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Comment
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+            {onExport && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Download className="h-4 w-4 mr-2" />
+                    Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onExport('word')}>
+                    Export Word (.docx)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onExport('excel')}>
+                    Export Excel (.xlsx)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {!isLocked && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSave}
+                disabled={!headerDirty && !contentDirty}
+              >
+                <Save className="h-4 w-4 mr-2" />
+                Save
+              </Button>
+            )}
+            {!isLocked && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => onDelete(box.id)}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

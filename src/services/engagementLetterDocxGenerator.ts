@@ -52,12 +52,28 @@ export class EngagementLetterDocxGenerator {
         ],
       });
 
-      const buffer = await Packer.toBuffer(doc);
+      const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+      let buffer: Buffer | undefined;
+      let base64: string | undefined;
+
+      if (isBrowser) {
+        if (typeof (Packer as any).toBlob === 'function') {
+          const blob = await (Packer as any).toBlob(doc);
+          base64 = await this.blobToBase64(blob);
+        } else if (typeof (Packer as any).toBase64String === 'function') {
+          base64 = await (Packer as any).toBase64String(doc);
+        } else {
+          throw new Error('DOCX packer does not support browser output');
+        }
+      } else {
+        buffer = await Packer.toBuffer(doc);
+        base64 = buffer.toString('base64');
+      }
 
       return {
         success: true,
         document_buffer: buffer,
-        document_base64: buffer.toString('base64'),
+        document_base64: base64,
         letter_type: masterData.engagement_type,
         generated_at: new Date().toISOString(),
       };
@@ -255,6 +271,31 @@ export class EngagementLetterDocxGenerator {
       return [new TextRun('')];
     }
     return runs;
+  }
+
+  /**
+   * Convert a Blob to base64 for browser downloads
+   */
+  private static async blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onerror = () => {
+        reject(new Error('Failed to read DOCX blob'));
+      };
+
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== 'string') {
+          reject(new Error('Unexpected FileReader result'));
+          return;
+        }
+        const commaIndex = result.indexOf(',');
+        resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+      };
+
+      reader.readAsDataURL(blob);
+    });
   }
 
   /**

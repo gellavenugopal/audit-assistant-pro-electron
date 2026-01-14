@@ -1,6 +1,5 @@
 ﻿import { useState } from 'react';
 import { StatCard } from '@/components/dashboard/StatCard';
-import { ProgressWidget } from '@/components/dashboard/ProgressWidget';
 import { RiskSummary } from '@/components/dashboard/RiskSummary';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
 import { StatusBadge, getStatusVariant } from '@/components/ui/status-badge';
@@ -10,7 +9,6 @@ import { useDashboardStats } from '@/hooks/useDashboardStats';
 import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { 
-  ClipboardCheck, 
   FileCheck, 
   Briefcase, 
   AlertTriangle,
@@ -29,41 +27,11 @@ export default function Dashboard() {
   const activeEngagement = view === 'engagement' ? currentEngagement : null;
   const materialitySource = view === 'engagement' ? activeEngagement : stats.latestEngagement;
   
-  const proceduresDone = stats.procedures.completed + stats.procedures.reviewed;
-  const totalProcedures = stats.procedures.total || 1; // Avoid division by zero
-
-  const procedureProgress = [
-    { 
-      label: 'Not Started', 
-      value: stats.procedures.notStarted, 
-      total: totalProcedures,
-      color: 'default' as const
-    },
-    { 
-      label: 'In Progress', 
-      value: stats.procedures.inProgress, 
-      total: totalProcedures,
-      color: 'warning' as const
-    },
-    { 
-      label: 'Completed', 
-      value: stats.procedures.completed, 
-      total: totalProcedures,
-      color: 'success' as const
-    },
-    { 
-      label: 'Reviewed', 
-      value: stats.procedures.reviewed, 
-      total: totalProcedures,
-      color: 'success' as const
-    },
-  ];
-
   const formatCurrency = (amount: number | null) => {
-    if (!amount) return 'â€”';
-    if (amount >= 10000000) return `â‚¹${(amount / 10000000).toFixed(1)}Cr`;
-    if (amount >= 100000) return `â‚¹${(amount / 100000).toFixed(1)}L`;
-    return `â‚¹${amount.toLocaleString('en-IN')}`;
+    if (!amount) return '\u2014';
+    if (amount >= 10000000) return `\u20B9${(amount / 10000000).toFixed(1)}Cr`;
+    if (amount >= 100000) return `\u20B9${(amount / 100000).toFixed(1)}L`;
+    return `\u20B9${amount.toLocaleString('en-IN')}`;
   };
 
   return (
@@ -132,13 +100,6 @@ export default function Dashboard() {
               variant="default"
             />
             <StatCard
-              title="Procedures Progress"
-              value={stats.procedures.total > 0 ? `${proceduresDone}/${stats.procedures.total}` : '0'}
-              subtitle={stats.procedures.total > 0 ? `${Math.round((proceduresDone / stats.procedures.total) * 100)}% complete` : 'No procedures yet'}
-              icon={ClipboardCheck}
-              variant="default"
-            />
-            <StatCard
               title="Open Risks"
               value={stats.risks.open}
               subtitle={`${stats.risks.total} total risks identified`}
@@ -160,10 +121,6 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column - Progress & Risk */}
         <div className="space-y-6">
-          <ProgressWidget 
-            title="Procedure Status" 
-            items={procedureProgress} 
-          />
           <RiskSummary
             high={stats.risks.high}
             medium={stats.risks.medium}

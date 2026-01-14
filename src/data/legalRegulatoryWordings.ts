@@ -36,7 +36,7 @@ export function buildLegalRegulatorySection(
   paragraphs.push({ text: '2.\tAs required by Section 143(3) of the Act, we report that:' });
 
   // (a) Information and explanations
-  paragraphs.push(buildInformationAndExplanationsParagraph(content, opinionType, getBasisSectionName()));
+  paragraphs.push(buildInformationAndExplanationsParagraph(opinionType, getBasisSectionName()));
 
   // (b) Proper books of account - 4 variations
   paragraphs.push(buildBooksOfAccountParagraph(setup, content, opinionType, getBasisSectionName()));
@@ -92,26 +92,10 @@ function buildCAROStatement(setup: AuditReportSetup): string {
 }
 
 function buildInformationAndExplanationsParagraph(
-  content: AuditReportMainContent,
   opinionType: OpinionType,
   basisSectionName: string
 ): LegalRegulatoryParagraph {
-  const status = content.clause_143_3_a_information_status;
-  const details = content.clause_143_3_a_information_details;
-
-  // User selected qualified/custom - use their details
-  if (status === 'qualified') {
-    if (details && details.trim()) {
-      return { text: `a.\t${details}` };
-    } else {
-      return { 
-        text: 'a.\t[USER TO COMPLETE - provide custom paragraph for qualified/modified information and explanations];',
-        highlight: 'yellow'
-      };
-    }
-  }
-
-  // Standard - auto-generate based on opinion type
+  // Auto-generate based on opinion type
   if (opinionType === 'unqualified') {
     return { text: 'a.\tWe have sought and obtained all the information and explanations which to the best of our knowledge and belief were necessary for the purposes of our audit;' };
   } else {
@@ -197,7 +181,7 @@ function buildDirectorRemunerationParagraph(setup: AuditReportSetup, content: Au
   const isPrivate = setup.is_private_company;
   
   if (isPrivate) {
-    return { text: `h.\tThis Company being a private limited company, the provisions of managerial remuneration and approvals under section 197 of the Act are not applicable to the Company.` };
+    return { text: `h.\twith respect to the other matters to be included in the Auditors' Report in accordance with the requirements of section 197(16) of the Act, as amended: the same is not applicable to the company, it being a private company.` };
   }
   
   // Public company reporting
@@ -206,6 +190,8 @@ function buildDirectorRemunerationParagraph(setup: AuditReportSetup, content: Au
   
   if (remunerationStatus === 'yes') {
     return { text: `h.\twith respect to the other matters to be included in the Auditors' Report in accordance with the requirements of section 197(16) of the Act, as amended: In our opinion and to the best of our information and according to the explanations given to us, the remuneration paid by the Company to its directors during the year is in accordance with the provisions of section 197 of the Act.` };
+  } else if (remunerationStatus === 'na') {
+    return { text: `h.\twith respect to the other matters to be included in the Auditors' Report in accordance with the requirements of section 197(16) of the Act, as amended: the same is not applicable to the company, it being a private company.` };
   } else if (remunerationStatus === 'no') {
     // Not complied - use details if provided
     if (details && details.trim()) {

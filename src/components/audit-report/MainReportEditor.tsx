@@ -24,7 +24,6 @@ import {
   type OtherMatterItem,
   useAuditReportContent,
 } from '@/hooks/useAuditReportContent';
-import { QUALIFIED_BASIS_EXAMPLE, ADVERSE_BASIS_EXAMPLE, DISCLAIMER_BASIS_EXAMPLE } from '@/data/qualifiedExamples';
 import { AuditReportGenerator } from '@/services/auditReportGenerator';
 import { STATUS_OPTIONS, type StatusValue } from '@/data/auditReportStandardWordings';
 
@@ -35,6 +34,7 @@ interface MainReportEditorProps {
 }
 
 const statusItems = STATUS_OPTIONS;
+const KAM_ENABLED = false;
 
 function coerceNumber(value: string) {
   if (value.trim() === '') return null;
@@ -70,6 +70,10 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const [previewMode, setPreviewMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [ifcManualOverride, setIfcManualOverride] = useState(false);
+  const optionalTabLabel = KAM_ENABLED ? 'KAM/EoM/Other Matter' : 'EoM/Other Matter';
+  const standardsReference = KAM_ENABLED
+    ? 'SA 701 - KAM; SA 706 - EoM/Other Matter'
+    : 'SA 706 - EoM/Other Matter';
 
   const { setup, saveSetup } = useAuditReportSetup(engagementId);
   const { content, loading: contentLoading, saveContent } = useAuditReportContent(engagementId);
@@ -79,10 +83,10 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
   // Get signing partner details from partners table
   const signingPartner = setup?.signing_partner_id ? getPartnerById(setup.signing_partner_id) : null;
+  const isPublicCompanyType = setup?.company_type === 'public_company';
 
   const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
   const [editorBasis, setEditorBasis] = useState<string>('');
-  const [savedExampleForDraftId, setSavedExampleForDraftId] = useState<string | null>(null);
 
   // Auto-calculate IFC applicability
   useEffect(() => {
@@ -112,73 +116,59 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   ]);
 
   useEffect(() => {
+    if (!setup || !isPublicCompanyType) return;
+
+    const patch: Record<string, any> = {};
+
+    if (!setup.is_public_company) patch.is_public_company = true;
+    if (!setup.cash_flow_required) patch.cash_flow_required = true;
+    if (!setup.ifc_applicable) patch.ifc_applicable = true;
+    if (setup.is_private_exceeding_threshold) patch.is_private_exceeding_threshold = false;
+    if (setup.is_private_non_exceeding_threshold) patch.is_private_non_exceeding_threshold = false;
+
+    if (Object.keys(patch).length === 0) return;
+
+    setIfcManualOverride(false);
+    saveSetupPatch(patch);
+  }, [
+    setup?.company_type,
+    setup?.is_public_company,
+    setup?.cash_flow_required,
+    setup?.ifc_applicable,
+    setup?.is_private_exceeding_threshold,
+    setup?.is_private_non_exceeding_threshold,
+    isPublicCompanyType,
+  ]);
+
+  useEffect(() => {
     if (content?.id) setDraft(content);
   }, [content?.id]);
 
   useEffect(() => {
-    // Initialize editorBasis: show user's basis if present, otherwise show illustrative example for qualified/adverse opinion
     if (!draft) return;
-    if (draft.opinion_type === 'qualified') {
-      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : QUALIFIED_BASIS_EXAMPLE);
-    } else if (draft.opinion_type === 'adverse') {
-      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : ADVERSE_BASIS_EXAMPLE);
-    } else if (draft.opinion_type === 'disclaimer') {
-      setEditorBasis(draft.basis_for_opinion?.trim() ? draft.basis_for_opinion : DISCLAIMER_BASIS_EXAMPLE);
-    } else {
-      setEditorBasis(draft.basis_for_opinion || '');
-    }
-  }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion]);
+    const shouldClearBasis =
+      (draft.basis_for_opinion_is_example || draft.opinion_type === 'unqualified') &&
+      (draft.basis_for_opinion?.trim() || draft.basis_for_opinion_is_example);
 
-  useEffect(() => {
-    // Auto-populate and persist illustrative basis into existing drafts when missing (qualified/adverse/disclaimer)
-    if (!draft) return;
-    const shouldPopulate = (type: AuditReportMainContent['opinion_type']) =>
-      draft.opinion_type === type && !(draft.basis_for_opinion?.trim()) && draft.id !== savedExampleForDraftId;
-
-    if (shouldPopulate('qualified')) {
-      const example = QUALIFIED_BASIS_EXAMPLE;
-      const patched: Partial<AuditReportMainContent> = {
-        basis_for_opinion: example,
-        basis_for_opinion_is_example: true,
-      };
-      (async () => {
-        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
-        if (saved) {
-          setDraft(saved as AuditReportMainContent);
-          setSavedExampleForDraftId(draft.id);
-          toast.success('Illustrative qualified basis populated (editable)');
-        }
-      })();
-    } else if (shouldPopulate('adverse')) {
-      const example = ADVERSE_BASIS_EXAMPLE;
-      const patched: Partial<AuditReportMainContent> = {
-        basis_for_opinion: example,
-        basis_for_opinion_is_example: true,
-      };
-      (async () => {
-        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
-        if (saved) {
-          setDraft(saved as AuditReportMainContent);
-          setSavedExampleForDraftId(draft.id);
-          toast.success('Illustrative adverse basis placeholder added (editable)');
-        }
-      })();
-    } else if (shouldPopulate('disclaimer')) {
-      const example = DISCLAIMER_BASIS_EXAMPLE;
-      const patched: Partial<AuditReportMainContent> = {
-        basis_for_opinion: example,
-        basis_for_opinion_is_example: true,
-      };
-      (async () => {
-        const saved = await saveContent({ ...(draft as any), ...(patched as any) });
-        if (saved) {
-          setDraft(saved as AuditReportMainContent);
-          setSavedExampleForDraftId(draft.id);
-          toast.success('Illustrative disclaimer basis placeholder added (editable)');
-        }
-      })();
+    if (shouldClearBasis) {
+      setDraft((prev) =>
+        prev
+          ? ({
+              ...prev,
+              basis_for_opinion: '',
+              basis_for_opinion_is_example: false,
+            } as AuditReportMainContent)
+          : prev
+      );
     }
-  }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion, savedExampleForDraftId, saveContent]);
+
+    if (draft.opinion_type === 'unqualified') {
+      setEditorBasis('');
+      return;
+    }
+
+    setEditorBasis(draft.basis_for_opinion || '');
+  }, [draft?.id, draft?.opinion_type, draft?.basis_for_opinion, draft?.basis_for_opinion_is_example]);
 
   const generator = useMemo(() => {
     if (!setup || !draft) return null;
@@ -199,8 +189,39 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     setDraft((prev) => (prev ? ({ ...prev, ...patch } as AuditReportMainContent) : prev));
   };
 
+  const handleOpinionTypeChange = (value: AuditReportMainContent['opinion_type']) => {
+    const isSwitchingToUnqualified = value === 'unqualified' && draft?.opinion_type !== 'unqualified';
+    if (isSwitchingToUnqualified) {
+      setEditorBasis('');
+      updateDraft({
+        opinion_type: value,
+        basis_for_opinion: '',
+        basis_for_opinion_is_example: false,
+      });
+      return;
+    }
+
+    updateDraft({ opinion_type: value });
+  };
+
+  const ensureBasisForModifiedOpinion = () => {
+    if (!draft) return false;
+    if (draft.opinion_type !== 'unqualified' && !draft.basis_for_opinion?.trim()) {
+      toast.error('Basis for opinion is required for qualified/adverse/disclaimer opinions.');
+      setActiveTab('opinion');
+      return false;
+    }
+    return true;
+  };
+
+  const openPreview = () => {
+    if (!ensureBasisForModifiedOpinion()) return;
+    setPreviewMode(true);
+  };
+
   const saveDraft = async () => {
     if (!draft) return;
+    if (!ensureBasisForModifiedOpinion()) return;
     setSaving(true);
     const saved = await saveContent(draft);
     setSaving(false);
@@ -344,7 +365,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
             </CardTitle>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setPreviewMode(true)} className="gap-2">
+            <Button variant="outline" onClick={openPreview} className="gap-2">
               <Eye className="h-4 w-4" />
               Preview
             </Button>
@@ -357,14 +378,13 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
       </CardHeader>
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
+          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-7">
             <TabsTrigger value="configuration">Config</TabsTrigger>
             <TabsTrigger value="opinion">Opinion</TabsTrigger>
-            <TabsTrigger value="optional" className="text-[11px] px-1">KAM/EoM/Other Matter</TabsTrigger>
+            <TabsTrigger value="optional" className="text-[11px] px-1">{optionalTabLabel}</TabsTrigger>
             <TabsTrigger value="sa720" className="text-[11px] px-1">Other Info-SA 720</TabsTrigger>
             <TabsTrigger value="s143" className="text-[11px] px-1">143(3)-Co Act</TabsTrigger>
             <TabsTrigger value="rule11" className="text-[11px] px-1">Rule 11-Co Audit Rule</TabsTrigger>
-            <TabsTrigger value="signature">Signature</TabsTrigger>
             <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
 
@@ -383,22 +403,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      checked={Boolean(setup.is_small_company)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_small_company: !!v })}
-                    />
-                    <Label className="font-normal">Small Company</Label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_opc)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_opc: !!v })}
-                    />
-                    <Label className="font-normal">One Person Company (OPC)</Label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
                       checked={Boolean(setup.is_public_company)}
                       onCheckedChange={(v) => updateIfcCriteria({ is_public_company: !!v })}
                     />
@@ -408,17 +412,23 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.is_private_exceeding_threshold)}
+                      disabled={isPublicCompanyType}
                       onCheckedChange={(v) => updateIfcCriteria({ is_private_exceeding_threshold: !!v })}
                     />
-                    <Label className="font-normal">Private limited company with Previous year turnover is  Rs 50 Crores or more</Label>
+                    <Label className={`font-normal ${isPublicCompanyType ? 'text-muted-foreground' : ''}`}>
+                      Private limited company with Previous year turnover is  Rs 50 Crores or more
+                    </Label>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.is_private_non_exceeding_threshold)}
+                      disabled={isPublicCompanyType}
                       onCheckedChange={(v) => updateIfcCriteria({ is_private_non_exceeding_threshold: !!v })}
                     />
-                    <Label className="font-normal">Private limited company with Current year during at any point of time exceeding Rs 25Crores</Label>
+                    <Label className={`font-normal ${isPublicCompanyType ? 'text-muted-foreground' : ''}`}>
+                      Private limited company with Current year during at any point of time exceeding Rs 25Crores
+                    </Label>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -460,13 +470,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_listed_company)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_listed_company: !!v })}
-                    />
-                    <Label className="font-normal">Listed company (KAMs typically required)</Label>
-                  </div>
+                  {/* Listed company (KAMs typically required) checkbox hidden as per requirements */}
 
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -543,7 +547,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>CARO annexure letter</Label>
+                    <Label>CARO Report Annexure Number</Label>
                     <Input
                       value={setup.caro_annexure_letter || ''}
                       onChange={(e) => saveSetupPatch({ caro_annexure_letter: e.target.value })}
@@ -551,7 +555,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>IFC annexure letter</Label>
+                    <Label>IFC Report Annexure Number</Label>
                     <Input
                       value={setup.ifc_annexure_letter || ''}
                       onChange={(e) => saveSetupPatch({ ifc_annexure_letter: e.target.value })}
@@ -570,7 +574,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                 <Label>Opinion type</Label>
                 <Select
                   value={draft.opinion_type}
-                  onValueChange={(v) => updateDraft({ opinion_type: v as any })}
+                  onValueChange={(v) => handleOpinionTypeChange(v as AuditReportMainContent['opinion_type'])}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select opinion" />
@@ -593,30 +597,22 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Basis for opinion (editable)</Label>
-              <Textarea
-                rows={5}
-                value={editorBasis}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setEditorBasis(v);
-                  // Persist into draft when user edits (so preview will show user text)
-                  updateDraft({ basis_for_opinion: v, basis_for_opinion_is_example: false });
-                }}
-                placeholder="Leave blank to use the standard starter wording in Preview."
-              />
-            </div>
-
             {draft.opinion_type !== 'unqualified' && (
               <div className="space-y-2">
-                <Label>Qualification / basis details (if any)</Label>
+                <Label>Basis for opinion (editable)</Label>
                 <Textarea
-                  rows={4}
-                  value={draft.qualification_details || ''}
-                  onChange={(e) => updateDraft({ qualification_details: e.target.value })}
-                  placeholder="Describe the matter(s) leading to the modification of opinion."
+                  rows={5}
+                  value={editorBasis}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setEditorBasis(v);
+                    // Persist into draft when user edits (so preview will show user text)
+                    updateDraft({ basis_for_opinion: v, basis_for_opinion_is_example: false });
+                  }}
+                  placeholder="Provide the basis for the modified opinion."
+                  required
                 />
+                <p className="text-xs text-muted-foreground">Required for qualified, adverse, and disclaimer opinions.</p>
               </div>
             )}
 
@@ -645,26 +641,30 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           <TabsContent value="optional" className="space-y-6">
             <div className="bg-muted/50 p-3 rounded-md border">
               <p className="text-sm font-medium">
-                <span className="font-semibold">Standards Reference:</span> SA 701 - KAM; SA 706 - EoM/Other Matter
+                <span className="font-semibold">Standards Reference:</span> {standardsReference}
               </p>
             </div>
             
-            <div className="flex items-center justify-between gap-2">
-              <div className="space-y-1">
-                <Label>Key Audit Matters</Label>
-                <p className="text-sm text-muted-foreground">Toggle inclusion and manage KAMs</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(draft.include_kam)}
-                  onCheckedChange={(v) => updateDraft({ include_kam: !!v })}
-                />
-                <Label className="font-normal">Include KAM section</Label>
-              </div>
-            </div>
-            {draft.include_kam && <KeyAuditMattersEditor engagementId={engagementId} />}
+            {KAM_ENABLED && (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-1">
+                    <Label>Key Audit Matters</Label>
+                    <p className="text-sm text-muted-foreground">Toggle inclusion and manage KAMs</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(draft.include_kam)}
+                      onCheckedChange={(v) => updateDraft({ include_kam: !!v })}
+                    />
+                    <Label className="font-normal">Include KAM section</Label>
+                  </div>
+                </div>
+                {draft.include_kam && <KeyAuditMattersEditor engagementId={engagementId} />}
 
-            <Separator />
+                <Separator />
+              </>
+            )}
 
             <div className="flex items-center justify-between">
               <div>
@@ -824,31 +824,9 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           {/* 5) Section 143(3) */}
           <TabsContent value="s143" className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>143(3)(a) Information and explanations obtained</Label>
-                <Select
-                  value={draft.clause_143_3_a_information_status || 'standard'}
-                  onValueChange={(v) => updateDraft({ clause_143_3_a_information_status: v as StatusValue })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="standard">Standard (auto-adapts to opinion type)</SelectItem>
-                    <SelectItem value="qualified">Qualified / Other remarks (user-defined)</SelectItem>
-                  </SelectContent>
-                </Select>
-                {draft.clause_143_3_a_information_status === 'qualified' && (
-                  <Textarea
-                    rows={2}
-                    value={draft.clause_143_3_a_information_details || ''}
-                    onChange={(e) => updateDraft({ clause_143_3_a_information_details: e.target.value })}
-                    placeholder="Provide custom paragraph for qualified/modified response"
-                    className={!draft.clause_143_3_a_information_details?.trim() ? 'bg-yellow-50' : ''}
-                  />
-                )}
+              <div className="md:col-span-2">
+                <Label className="text-foreground font-semibold">143(3)(a) Details sought and obtained</Label>
               </div>
-
               <div className="space-y-2">
                 <Label>143(3)(b) Proper books of account</Label>
                 <StatusSelect
@@ -916,7 +894,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
               </div>
 
               <div className="space-y-2">
-                <Label>143(3)(h) Managerial remuneration</Label>
+                <Label>197(16) - Managerial Remuneration</Label>
                 <StatusSelect
                   value={draft.clause_143_3_h_remuneration_status}
                   onValueChange={(v) => updateDraft({ clause_143_3_h_remuneration_status: v })}
@@ -1144,71 +1122,9 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
             </div>
           </TabsContent>
 
-          {/* 7) Signature */}
-          <TabsContent value="signature" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Firm name</Label>
-                <Input
-                  value={draft.firm_name || ''}
-                  onChange={(e) => updateDraft({ firm_name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Firm registration no.</Label>
-                <Input
-                  value={draft.firm_registration_no || ''}
-                  onChange={(e) => updateDraft({ firm_registration_no: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Partner name</Label>
-                <Input
-                  value={draft.partner_name || ''}
-                  onChange={(e) => updateDraft({ partner_name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Membership no.</Label>
-                <Input
-                  value={draft.membership_no || ''}
-                  onChange={(e) => updateDraft({ membership_no: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <Separator />
-
-            {!setup ? (
-              <p className="text-sm text-muted-foreground">Setup not loaded.</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label>Place (report city)</Label>
-                  <Input
-                    value={setup.report_city || ''}
-                    onChange={(e) => saveSetupPatch({ report_city: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Report date</Label>
-                  <Input
-                    type="date"
-                    value={setup.report_date || ''}
-                    onChange={(e) => saveSetupPatch({ report_date: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>UDIN</Label>
-                  <Input value={setup.udin || ''} onChange={(e) => saveSetupPatch({ udin: e.target.value })} />
-                </div>
-              </div>
-            )}
-          </TabsContent>
-
-          {/* 8) Preview */}
+          {/* 7) Preview */}
           <TabsContent value="preview" className="space-y-4">
-            <Button variant="outline" className="w-full" onClick={() => setPreviewMode(true)}>
+            <Button variant="outline" className="w-full" onClick={openPreview}>
               Open full preview
             </Button>
             <div className="rounded-md border">

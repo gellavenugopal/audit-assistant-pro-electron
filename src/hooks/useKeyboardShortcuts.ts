@@ -12,6 +12,8 @@ export interface ShortcutConfig {
   category: string;
 }
 
+export const reservedShortcutKeys = new Set(['c', 'v', 'x', 'z']);
+
 // Global navigation shortcuts
 export const navigationShortcuts = [
   { key: 'd', route: '/', description: 'Dashboard', category: 'Navigation' },
@@ -19,10 +21,9 @@ export const navigationShortcuts = [
   { key: 'c', route: '/compliance-applicability', description: 'Compliance Applicability', category: 'Navigation', requiresEngagement: true },
   { key: 't', route: '/trial-balance', description: 'Trial Balance', category: 'Navigation', requiresEngagement: true },
   { key: 'x', route: '/appointment', description: 'Appointment', category: 'Navigation', requiresEngagement: true },
-  { key: 'b', route: '/trial-balance-new', description: 'Trial Balance New', category: 'Navigation', requiresEngagement: true },
+  { key: 'b', route: '/financial-review', description: 'Financial Review', category: 'Navigation', requiresEngagement: true },
   { key: 'm', route: '/materiality', description: 'Materiality', category: 'Navigation', requiresEngagement: true },
   { key: 'r', route: '/risks', description: 'Risk Register', category: 'Navigation', requiresEngagement: true },
-  { key: 'p', route: '/programs', description: 'Audit Programs', category: 'Navigation', requiresEngagement: true },
   { key: 'v', route: '/evidence', description: 'Evidence Vault', category: 'Navigation', requiresEngagement: true },
   { key: 'n', route: '/review-notes', description: 'Review Notes', category: 'Navigation', requiresEngagement: true },
   { key: 'i', route: '/misstatements', description: 'Misstatements', category: 'Navigation', requiresEngagement: true },
@@ -50,9 +51,14 @@ export function useGlobalKeyboardShortcuts() {
       return;
     }
 
-    // Ctrl/Cmd + key for navigation
+    // Ctrl/Cmd + key for navigation (Shift required for reserved keys)
     if (event.ctrlKey || event.metaKey) {
-      const shortcut = navigationShortcuts.find(s => s.key.toLowerCase() === event.key.toLowerCase());
+      const normalizedKey = event.key.toLowerCase();
+      if (reservedShortcutKeys.has(normalizedKey) && !event.shiftKey) {
+        return;
+      }
+
+      const shortcut = navigationShortcuts.find(s => s.key.toLowerCase() === normalizedKey);
       
       if (shortcut) {
         // Check if engagement is required

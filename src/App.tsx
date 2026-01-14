@@ -11,36 +11,34 @@ import { ProtectedEngagementRoute } from "@/components/auth/ProtectedEngagementR
 import { ProtectedAdminRoute } from "@/components/auth/ProtectedAdminRoute";
 import { MainLayout } from "@/components/layout/MainLayout";
 import Dashboard from "./pages/Dashboard";
-import StaffDashboard from "./pages/StaffDashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
-import TrialBalance from "./pages/TrialBalance";
-import TrialBalanceNew from "./pages/TrialBalanceNew";
+// import TrialBalance from "./pages/TrialBalance"; // DEPRECATED - Migrated to TrialBalanceNew
+import FinancialReview from "./pages/FinancialReview";
 import Appointment from "./pages/Appointment";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
-import AuditPrograms from "./pages/AuditPrograms";
-import AuditProgramNew from "./pages/AuditProgramNew";
-import EvidenceVault from "./pages/EvidenceVault";
+import AuditExecution from "./pages/AuditExecution";
 import ProcedureWorkpaper from "./pages/ProcedureWorkpaper";
+import EvidenceVault from "./pages/EvidenceVault";
 import ReviewNotes from "./pages/ReviewNotes";
 import Misstatements from "./pages/Misstatements";
 import AuditTrail from "./pages/AuditTrail";
 import Completion from "./pages/Completion";
 import Settings from "./pages/Settings";
+import Feedback from "./pages/Feedback";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
 import AuditReport from "./pages/AuditReport";
-import Auth from "./pages/Auth";
-import NotFound from "./pages/NotFound";
+import ComplianceApplicability from "./pages/ComplianceApplicability";
 import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from "./pages/Gstr1Dashboard";
-import ComplianceApplicability from "./pages/ComplianceApplicability";
-import Feedback from "./pages/Feedback";
-import SRMPro from "./pages/SRMPro";
+import Auth from "./pages/Auth";
+import NotFound from "./pages/NotFound";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
+
 
 const queryClient = new QueryClient();
 
@@ -88,22 +86,23 @@ const App = () => (
                     </ProtectedRoute>
                   }
                 />
+                {/* Old Trial Balance route - DEPRECATED, redirecting to new */}
                 <Route
                   path="/trial-balance"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <TrialBalance />
+                        <FinancialReview />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
                 />
                 <Route
-                  path="/trial-balance-new"
+                  path="/financial-review"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <TrialBalanceNew />
+                        <FinancialReview />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -149,11 +148,11 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="/programs"
+                  path="/audit-execution"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <AuditPrograms />
+                        <AuditExecution />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -163,7 +162,7 @@ const App = () => (
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <AuditProgramNew />
+                        <AuditExecution />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -249,11 +248,31 @@ const App = () => (
                   }
                 />
                 <Route
+                  path="/feedback"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <Feedback />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
                   path="/settings"
                   element={
                     <ProtectedRoute>
                       <MainLayout>
                         <Settings />
+                      </MainLayout>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/feedback"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <Feedback />
                       </MainLayout>
                     </ProtectedRoute>
                   }
@@ -307,16 +326,6 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="/my-dashboard"
-                  element={
-                    <ProtectedEngagementRoute>
-                      <MainLayout>
-                        <StaffDashboard />
-                      </MainLayout>
-                    </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
                   path="/compliance-applicability"
                   element={
                     <ProtectedEngagementRoute>
@@ -324,36 +333,6 @@ const App = () => (
                         <ComplianceApplicability />
                       </MainLayout>
                     </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
-                  path="/programs-new"
-                  element={
-                    <ProtectedEngagementRoute>
-                      <MainLayout>
-                        <AuditProgramNew />
-                      </MainLayout>
-                    </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
-                  path="/feedback"
-                  element={
-                    <ProtectedRoute>
-                      <MainLayout>
-                        <Feedback />
-                      </MainLayout>
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/srm-pro"
-                  element={
-                    <ProtectedRoute>
-                      <MainLayout>
-                        <SRMPro />
-                      </MainLayout>
-                    </ProtectedRoute>
                   }
                 />
                 <Route path="*" element={<NotFound />} />
@@ -367,3 +346,8 @@ const App = () => (
 );
 
 export default App;
+
+
+
+
+

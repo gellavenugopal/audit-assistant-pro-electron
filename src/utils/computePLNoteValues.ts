@@ -1,5 +1,8 @@
 /**
  * Utility to compute P&L note values and ledger annexures from classified trial balance data
+ * MIGRATION NOTE: This file consumes ONLY the unified ClassifiedLedger model (LedgerRow)
+ * from trial-balance-new. It does NOT use fs_area, aile, or old TrialBalanceLine.
+ * Classification is based on H1, H2, H3, H4, H5 hierarchy only.
  */
 
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
@@ -52,6 +55,8 @@ const H2_TO_NOTE_KEY: Record<string, string> = {
   'Other income': 'otherIncome',
   'Other Income': 'otherIncome',
   // Expense items
+  'Cost of materials consumed': 'costOfMaterialsConsumed',
+  'Cost of Materials Consumed': 'costOfMaterialsConsumed',
   'Employee benefits expense': 'employeeBenefits',
   'Finance costs': 'financeCosts',
   'Depreciation and amortization expense': 'depreciation',
@@ -60,6 +65,19 @@ const H2_TO_NOTE_KEY: Record<string, string> = {
   'Purchases of Stock-in-Trade': 'purchasesOfStockInTrade',
 };
 
+function resolveFallbackNoteKey(h2: string, h3: string): string {
+  const h2Lower = (h2 || '').toLowerCase();
+  const h3Lower = (h3 || '').toLowerCase();
+
+  if (h2Lower.includes('cost of materials consumed') || h3Lower.includes('cost of materials consumed')) {
+    return 'costOfMaterialsConsumed';
+  }
+  if (h2Lower.includes('income') || h2Lower.includes('revenue') || h3Lower.includes('income')) {
+    return 'otherIncome';
+  }
+  return 'otherExpenses';
+}
+
 /**
  * Compute P&L note values from classified ledger data
  */
@@ -67,6 +85,21 @@ export function computePLNoteValues(
   data: LedgerRow[],
   stockData?: StockItem[]
 ): { noteValues: NoteValues; noteLedgers: NoteLedgersMap } {
+  // GUARD: Validate all data is properly classified
+  const unclassified = data.filter(row => 
+    !row.H1 || !row.H2 || !row.H3 || !row.H4 || row.Status !== 'Mapped'
+  );
+  
+  if (unclassified.length > 0) {
+    console.error(
+      `[INTEGRITY ERROR] computePLNoteValues received ${unclassified.length} unclassified ledgers. ` +
+      `This should never happen! All data must be classified before reaching this function.`,
+      unclassified.map(r => r['Ledger Name'])
+    );
+    // Filter out unclassified to prevent corruption
+    data = data.filter(row => row.H1 && row.H2 && row.H3 && row.H4 && row.Status === 'Mapped');
+  }
+  
   const noteValues: NoteValues = {};
   const noteLedgers: NoteLedgersMap = {
     // Income
@@ -94,6 +127,7 @@ export function computePLNoteValues(
   let depreciationTotal = 0;
   let otherExpensesTotal = 0;
   let purchasesOfStockInTradeTotal = 0;
+  let costOfMaterialsConsumedTotal = 0;
 
   // Process ledger data
   data.forEach(row => {
@@ -117,6 +151,9 @@ export function computePLNoteValues(
 
     // Determine note key from H2 or H3
     let noteKey = H2_TO_NOTE_KEY[h2] || H2_TO_NOTE_KEY[h3];
+    if (!noteKey) {
+      noteKey = resolveFallbackNoteKey(h2, h3);
+    }
     
     if (noteKey) {
       const ledgerItem: NoteLedgerItem = {
@@ -141,6 +178,9 @@ export function computePLNoteValues(
           break;
         case 'otherIncome':
           otherIncomeTotal += amount;
+          break;
+        case 'costOfMaterialsConsumed':
+          costOfMaterialsConsumedTotal += amount;
           break;
         case 'employeeBenefits':
           employeeBenefitsTotal += amount;
@@ -182,6 +222,9 @@ export function computePLNoteValues(
   }
   if (noteLedgers.purchasesOfStockInTrade.length > 0) {
     noteValues.purchasesOfStockInTrade = purchasesOfStockInTradeTotal;
+  }
+  if (noteLedgers.costOfMaterialsConsumed.length > 0 && costOfMaterialsConsumedTotal > 0) {
+    noteValues.costOfMaterialsConsumed = costOfMaterialsConsumedTotal;
   }
 
   // Calculate cost of materials consumed and changes in inventories from stock data

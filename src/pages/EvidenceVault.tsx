@@ -34,9 +34,7 @@ import {
   Download, 
   Eye,
   Trash2,
-  Filter,
   FolderOpen,
-  Link2,
   Loader2,
   AlertCircle,
   Lock
@@ -44,8 +42,6 @@ import {
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useEvidenceFiles, EvidenceFile } from '@/hooks/useEvidenceFiles';
-import { useProcedures } from '@/hooks/useProcedures';
-import { useProcedureWorkpaper, ProcedureEvidenceRequirement } from '@/hooks/useWorkingPaper';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -84,13 +80,10 @@ export default function EvidenceVault() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [evidenceType, setEvidenceType] = useState('document');
-  const [linkedProcedureId, setLinkedProcedureId] = useState('');
-  const [linkedRequirementId, setLinkedRequirementId] = useState('');
   const [workpaperRef, setWorkpaperRef] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [filterProcedure, setFilterProcedure] = useState('all');
-  const [procedureRequirements, setProcedureRequirements] = useState<ProcedureEvidenceRequirement[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [moduleTags, setModuleTags] = useState<Record<string, string[]>>({});
 
   const { 
     files, 
@@ -108,51 +101,62 @@ export default function EvidenceVault() {
     canUnlock,
     refetch: refetchFiles,
   } = useEvidenceFiles();
-  const { procedures } = useProcedures(currentEngagement?.id);
   const [unlockDialogFile, setUnlockDialogFile] = useState<EvidenceFile | null>(null);
 
-  // Fetch evidence requirements when procedure is selected
   useEffect(() => {
-    const fetchRequirements = async () => {
-      if (!linkedProcedureId) {
-        setProcedureRequirements([]);
-        setLinkedRequirementId('');
+    const loadModuleTags = async () => {
+      if (!currentEngagement) {
+        setModuleTags({});
         return;
       }
-      
-      const { data } = await supabase
-        .from('procedure_evidence_requirements')
-        .select('*')
-        .eq('procedure_id', linkedProcedureId)
-        .order('sort_order');
-      
-      setProcedureRequirements((data || []).map(r => ({
-        ...r,
-        allowed_file_types: r.allowed_file_types || [],
-      })));
-    };
-    
-    fetchRequirements();
-  }, [linkedProcedureId]);
 
-  // Get procedure name by ID
-  const getProcedureName = (procedureId: string | null) => {
-    if (!procedureId) return null;
-    const procedure = procedures.find(p => p.id === procedureId);
-    return procedure?.procedure_name || procedureId;
-  };
+      try {
+        const { data: programs, error: programError } = await supabase
+          .from('audit_programs_new')
+          .select('id')
+          .eq('engagement_id', currentEngagement.id);
+
+        if (programError) throw programError;
+
+        const programIds = (programs || []).map((program) => program.id);
+        if (programIds.length === 0) {
+          setModuleTags({});
+          return;
+        }
+
+        const { data: attachments, error: attachmentError } = await supabase
+          .from('audit_program_attachments')
+          .select('file_path,audit_program_id')
+          .in('audit_program_id', programIds);
+
+        if (attachmentError) throw attachmentError;
+
+        const nextTags: Record<string, string[]> = {};
+        (attachments || []).forEach((attachment) => {
+          if (!attachment.file_path) return;
+          const tags = nextTags[attachment.file_path] || [];
+          if (!tags.includes('Audit Execution')) {
+            tags.push('Audit Execution');
+          }
+          nextTags[attachment.file_path] = tags;
+        });
+
+        setModuleTags(nextTags);
+      } catch (error) {
+        console.error('Error loading evidence module tags:', error);
+        setModuleTags({});
+      }
+    };
+
+    loadModuleTags();
+  }, [currentEngagement?.id, files.length]);
 
   const filteredEvidence = files.filter((ev) => {
-    const matchesSearch = 
+    const matchesSearch =
       ev.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (ev.linked_procedure && getProcedureName(ev.linked_procedure)?.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (ev.workpaper_ref?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false);
-    
-    const matchesProcedure = filterProcedure === 'all' || 
-      (filterProcedure === 'unlinked' && !ev.linked_procedure) ||
-      ev.linked_procedure === filterProcedure;
-    
-    return matchesSearch && matchesProcedure;
+
+    return matchesSearch;
   });
 
   const handleDrag = (e: React.DragEvent) => {
@@ -188,27 +192,12 @@ export default function EvidenceVault() {
       const uploadedFile = await uploadFile(selectedFile, {
         name: selectedFile.name,
         file_type: evidenceType,
-        linked_procedure: linkedProcedureId || undefined,
         workpaper_ref: workpaperRef || undefined,
       });
-      
-      // If we have a procedure and/or requirement, create the evidence_link
-      if (uploadedFile && linkedProcedureId) {
-        await supabase
-          .from('evidence_links')
-          .insert({
-            evidence_id: uploadedFile.id,
-            procedure_id: linkedProcedureId,
-            evidence_requirement_id: linkedRequirementId || null,
-            linked_by: user.id,
-          });
-      }
-      
+
       // Reset form
       setSelectedFile(null);
       setEvidenceType('document');
-      setLinkedProcedureId('');
-      setLinkedRequirementId('');
       setWorkpaperRef('');
       setIsUploadDialogOpen(false);
     } finally {
@@ -345,40 +334,6 @@ export default function EvidenceVault() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Link to Procedure</Label>
-                  <Select value={linkedProcedureId || "none"} onValueChange={(val) => setLinkedProcedureId(val === "none" ? "" : val)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select procedure (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No procedure</SelectItem>
-                      {procedures.map((proc) => (
-                        <SelectItem key={proc.id} value={proc.id}>
-                          {proc.area} - {proc.procedure_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {linkedProcedureId && procedureRequirements.length > 0 && (
-                  <div className="space-y-2">
-                    <Label>Link to Evidence Requirement</Label>
-                    <Select value={linkedRequirementId || "none"} onValueChange={(val) => setLinkedRequirementId(val === "none" ? "" : val)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select requirement (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No specific requirement</SelectItem>
-                        {procedureRequirements.map((req) => (
-                          <SelectItem key={req.id} value={req.id}>
-                            {req.title} {req.is_required && '(Required)'}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                <div className="space-y-2">
                   <Label>Workpaper Reference</Label>
                   <Input 
                     placeholder="e.g., A.1.1" 
@@ -446,7 +401,7 @@ export default function EvidenceVault() {
         </div>
       </div>
 
-      {/* Search and Filters */}
+      {/* Search */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -457,21 +412,6 @@ export default function EvidenceVault() {
             className="pl-10"
           />
         </div>
-        <Select value={filterProcedure} onValueChange={setFilterProcedure}>
-          <SelectTrigger className="w-[200px]">
-            <Filter className="h-4 w-4 mr-2" />
-            <SelectValue placeholder="Filter by procedure" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Files</SelectItem>
-            <SelectItem value="unlinked">Unlinked Files</SelectItem>
-            {procedures.map((proc) => (
-              <SelectItem key={proc.id} value={proc.id}>
-                {proc.procedure_name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/* Evidence Table */}
@@ -485,8 +425,8 @@ export default function EvidenceVault() {
                 <TableHead className="w-28">Type</TableHead>
                 <TableHead className="w-32">Status</TableHead>
                 <TableHead className="w-24">Size</TableHead>
-                <TableHead>Linked To</TableHead>
                 <TableHead className="w-24">Workpaper Ref</TableHead>
+                <TableHead className="w-32">Module</TableHead>
                 <TableHead className="w-28">Uploaded</TableHead>
                 <TableHead className="w-36">Actions</TableHead>
               </TableRow>
@@ -500,8 +440,8 @@ export default function EvidenceVault() {
                     <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                     <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                   </TableRow>
@@ -525,6 +465,7 @@ export default function EvidenceVault() {
               ) : (
                 filteredEvidence.map((evidence) => {
                   const FileIcon = getFileIcon(evidence.mime_type);
+                  const tags = moduleTags[evidence.file_path] || [];
                   
                   return (
                     <TableRow key={evidence.id}>
@@ -556,20 +497,24 @@ export default function EvidenceVault() {
                       <TableCell className="text-sm text-muted-foreground">
                         {formatFileSize(evidence.file_size)}
                       </TableCell>
-                      <TableCell>
-                        {evidence.linked_procedure ? (
-                          <div className="flex items-center gap-1 text-sm">
-                            <Link2 className="h-3 w-3 text-primary" />
-                            <span className="text-foreground truncate max-w-[200px]">
-                              {getProcedureName(evidence.linked_procedure)}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">—</span>
-                        )}
-                      </TableCell>
                       <TableCell className="font-mono text-sm">
                         {evidence.workpaper_ref || '—'}
+                      </TableCell>
+                      <TableCell>
+                        {tags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center rounded-md bg-primary/10 px-2 py-1 text-xs text-primary"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Vault</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="text-xs text-muted-foreground">
@@ -630,3 +575,4 @@ export default function EvidenceVault() {
     </div>
   );
 }
+

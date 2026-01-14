@@ -33,6 +33,10 @@ export function ColumnFilter({
 }: ColumnFilterProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  // Excel-style number filter state
+  const [numberFilterType, setNumberFilterType] = useState<string>('');
+  const [numberFilterValue, setNumberFilterValue] = useState<string>('');
+  const [numberFilterValue2, setNumberFilterValue2] = useState<string>('');
 
   const uniqueValues = useMemo(() => {
     const unique = Array.from(new Set(values.filter(v => v !== null && v !== undefined && v !== '')));
@@ -53,10 +57,10 @@ export function ColumnFilter({
 
   const handleSelectAll = () => {
     if (allSelected) {
-      // Deselect all (which means show all)
-      onFilterChange(new Set());
+      // Untick: deselect all (show none)
+      onFilterChange(new Set(uniqueValues));
     } else {
-      // Select all
+      // Tick: select all (show all)
       onFilterChange(new Set());
     }
   };
@@ -110,7 +114,7 @@ export function ColumnFilter({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-56 p-0">
+      <PopoverContent align="start" className="w-64 p-0">
         {/* Sort Options */}
         {onSort && (
           <div className="border-b p-2 space-y-1">
@@ -141,6 +145,52 @@ export function ColumnFilter({
           </div>
         )}
 
+        {/* Excel-style Number Filters for numeric columns */}
+        {isNumeric && (
+          <div className="p-2 border-b">
+            <label className="block text-xs font-semibold mb-1">Number Filters</label>
+            <select
+              className="w-full text-xs border rounded p-1 mb-1"
+              value={numberFilterType}
+              onChange={e => setNumberFilterType(e.target.value)}
+            >
+              <option value="">None</option>
+              <option value="equals">Equals...</option>
+              <option value="notEquals">Does Not Equal...</option>
+              <option value="greater">Greater Than...</option>
+              <option value="greaterOrEqual">Greater Than Or Equal To...</option>
+              <option value="less">Less Than...</option>
+              <option value="lessOrEqual">Less Than Or Equal To...</option>
+              <option value="between">Between...</option>
+              <option value="top10">Top 10...</option>
+              <option value="aboveAvg">Above Average</option>
+              <option value="belowAvg">Below Average</option>
+              <option value="custom">Custom Filter...</option>
+            </select>
+            {/* Filter value input(s) */}
+            {numberFilterType && numberFilterType !== 'aboveAvg' && numberFilterType !== 'belowAvg' && numberFilterType !== 'top10' && numberFilterType !== 'custom' && (
+              <div className="flex gap-2 mb-1">
+                <Input
+                  type="number"
+                  className="h-7 text-xs"
+                  placeholder="Value"
+                  value={numberFilterValue}
+                  onChange={e => setNumberFilterValue(e.target.value)}
+                />
+                {numberFilterType === 'between' && (
+                  <Input
+                    type="number"
+                    className="h-7 text-xs"
+                    placeholder="And"
+                    value={numberFilterValue2}
+                    onChange={e => setNumberFilterValue2(e.target.value)}
+                  />
+                )}
+              </div>
+            )}
+            {/* Note: Actual filtering logic to be implemented in table filter handler */}
+          </div>
+        )}
         {/* Search */}
         <div className="p-2 border-b">
           <div className="relative">

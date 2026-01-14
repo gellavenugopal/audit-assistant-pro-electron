@@ -54,12 +54,12 @@ In our opinion and to the best of our information and according to the explanati
     case 'qualified':
       return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.
 
-In our opinion and to the best of our information and according to the explanations given to us, except for the effects of the matter(s) described in the Basis for Qualified Opinion section of our report, the aforesaid standalone financial statements give the information required by the Act in the manner so required and give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at ${periodEndLabel}, ${profitAndCashPhrase} for the year ended on that date.`;
+In our opinion and to the best of our information and according to the explanations given to us, except for the effects of the matter(s) described in the Basis for Qualified Opinion section of our report, the aforesaid standalone financial statements give the information required by the Companies Act, 2013 ("the Act") in the manner so required and give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at ${periodEndLabel}, ${profitAndCashPhrase} for the year ended on that date.`;
     
     case 'adverse':
       return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.
 
-In our opinion, because of the significance of the matter(s) discussed in the Basis for Adverse Opinion section of our report, the accompanying financial statements do not give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at ${periodEndLabel}, ${profitAndCashPhrase} for the year ended on that date.`;
+In our opinion, because of the significance of the matter(s) discussed in the Basis for Adverse Opinion section of our report, the accompanying standalone financial statements do not give the information required by the Companies Act, 2013 ("the Act") in the manner so required and do not give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at ${periodEndLabel}, ${profitAndCashPhrase} for the year ended on that date.`;
 
     case 'disclaimer':
       return `We have audited the accompanying standalone financial statements of ${entityName} ("the Company"), which comprise the Balance Sheet as at ${periodEndLabel}, the Statement of Profit and Loss${cashFlowIntro} for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements")${branchAuditorClause}.
@@ -91,7 +91,11 @@ In preparing the standalone financial statements, management is responsible for 
 The Board of Directors is also responsible for overseeing the Company's financial reporting process.`;
 }
 
-export function buildAuditorResponsibilitiesParagraph(ifcApplicable: boolean) {
+export function buildAuditorResponsibilitiesParagraph(ifcApplicable: boolean, includeKAM: boolean) {
+  const kamParagraph = includeKAM
+    ? "\n\nFrom the matters communicated with those charged with governance, we determine those matters that were of most significance in the audit of the Standalone Financial Statements of the current period and are therefore the key audit matters. We describe these matters in our auditor's report unless law or regulation precludes public disclosure about the matter or when, in extremely rare circumstances, we determine that a matter should not be communicated in our report because the adverse consequences of doing so would reasonably be expected to outweigh the public interest benefits of such communication."
+    : '';
+
   if (ifcApplicable) {
     return `Our objectives are to obtain reasonable assurance about whether the standalone financial statements as a whole are free from material misstatement, whether due to fraud or error, and to issue an auditors' report that includes our opinion. Reasonable assurance is a high level of assurance but is not a guarantee that an audit conducted in accordance with SAs will always detect a material misstatement when it exists. Misstatements can arise from fraud or error and are considered material if, individually or in aggregate, they could reasonably be expected to influence the economic decisions of users taken on the basis of these standalone financial statements.
 
@@ -107,9 +111,11 @@ As part of an audit in accordance with SAs, we exercise professional judgment an
 
 •	Evaluate the overall presentation, structure and content of the standalone financial statements, including the disclosures, and whether the standalone financial statements represent the underlying transactions and events in a manner that achieves fair presentation
 
+Materiality is the magnitude of misstatements in the standalone financial statements that, individually or in aggregate, makes it probable that the economic decisions of a reasonably knowledgeable user of the financial statements may be influenced. We consider quantitative materiality and qualitative factors in (i) planning the scope of our audit work and in evaluating the results of our work; and (ii) to evaluate the effect of any identified misstatements in the financial statements.
+
 We communicate with those charged with governance regarding, among other matters, the planned scope and timing of the audit and significant audit findings, including any significant deficiencies in internal control that we identify during our audit.
 
-We also provide those charged with governance with a statement that we have complied with relevant ethical requirements regarding independence, and to communicate with them all relationships and other matters that may reasonably be thought to bear on our independence, and where applicable, related safeguards`;
+We also provide those charged with governance with a statement that we have complied with relevant ethical requirements regarding independence, and to communicate with them all relationships and other matters that may reasonably be thought to bear on our independence, and where applicable, related safeguards${kamParagraph}`;
   } else {
     return `Our objectives are to obtain reasonable assurance about whether the standalone financial statements as a whole are free from material misstatement, whether due to fraud or error, and to issue an auditors' report that includes our opinion. Reasonable assurance is a high level of assurance but is not a guarantee that an audit conducted in accordance with SAs will always detect a material misstatement when it exists. Misstatements can arise from fraud or error and are considered material if, individually or in aggregate, they could reasonably be expected to influence the economic decisions of users taken on the basis of these standalone financial statements.
 
@@ -125,9 +131,11 @@ As part of an audit in accordance with SAs, we exercise professional judgment an
 
 •	Evaluate the overall presentation, structure and content of the standalone financial statements, including the disclosures, and whether the standalone financial statements represent the underlying transactions and events in a manner that achieves fair presentation
 
+Materiality is the magnitude of misstatements in the standalone financial statements that, individually or in aggregate, makes it probable that the economic decisions of a reasonably knowledgeable user of the financial statements may be influenced. We consider quantitative materiality and qualitative factors in (i) planning the scope of our audit work and in evaluating the results of our work; and (ii) to evaluate the effect of any identified misstatements in the financial statements.
+
 We communicate with those charged with governance regarding, among other matters, the planned scope and timing of the audit and significant audit findings, including any significant deficiencies in internal control that we identify during our audit.
 
-We also provide those charged with governance with a statement that we have complied with relevant ethical requirements regarding independence, and to communicate with them all relationships and other matters that may reasonably be thought to bear on our independence, and where applicable, related safeguards`;
+We also provide those charged with governance with a statement that we have complied with relevant ethical requirements regarding independence, and to communicate with them all relationships and other matters that may reasonably be thought to bear on our independence, and where applicable, related safeguards${kamParagraph}`;
   }
 }
 

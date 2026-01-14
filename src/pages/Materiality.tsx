@@ -20,24 +20,24 @@ import { useTeamMembers } from '@/hooks/useTeamMembers';
 // ICAI-CAQD SUGGESTED MATERIALITY GUIDANCE (ADVISORY)
 const CAQD_GUIDE: Record<string, Record<string, string>> = {
   "Revenue / Gross Receipts": {
-    "Low Risk": "0.80% – 1.00%",
-    "Medium Risk": "0.70% – 0.80%",
-    "High Risk": "0.50% – 0.70%"
+    "Low Risk": "0.80% \u2013 1.00%",
+    "Medium Risk": "0.70% \u2013 0.80%",
+    "High Risk": "0.50% \u2013 0.70%"
   },
   "Profit Before Tax": {
-    "Low Risk": "8% – 10%",
-    "Medium Risk": "7% – 8%",
-    "High Risk": "5% – 7%"
+    "Low Risk": "8% \u2013 10%",
+    "Medium Risk": "7% \u2013 8%",
+    "High Risk": "5% \u2013 7%"
   },
   "Total Assets": {
-    "Low Risk": "1.6% – 2.0%",
-    "Medium Risk": "1.3% – 1.6%",
-    "High Risk": "1.0% – 1.3%"
+    "Low Risk": "1.6% \u2013 2.0%",
+    "Medium Risk": "1.3% \u2013 1.6%",
+    "High Risk": "1.0% \u2013 1.3%"
   },
   "Net Worth": {
-    "Low Risk": "3.85% – 5.0%",
-    "Medium Risk": "3.15% – 3.85%",
-    "High Risk": "2.0% – 3.15%"
+    "Low Risk": "3.85% \u2013 5.0%",
+    "Medium Risk": "3.15% \u2013 3.85%",
+    "High Risk": "2.0% \u2013 3.15%"
   }
 };
 
@@ -133,7 +133,7 @@ export default function Materiality() {
   const [remarks, setRemarks] = useState('');
 
   // CAQD Guidance
-  const [caqdSuggestion, setCaqdSuggestion] = useState('—');
+  const [caqdSuggestion, setCaqdSuggestion] = useState('\u2014');
 
   // Calculate risk totals
   useEffect(() => {
@@ -228,7 +228,7 @@ export default function Materiality() {
   };
 
   const parseRange = (rangeStr: string): [number, number] => {
-    const parts = rangeStr.replace('%', '').split('–').map(s => s.trim());
+    const parts = rangeStr.replace('%', '').split('\u2013').map(s => s.trim());
     return [parseFloat(parts[0]), parseFloat(parts[1])];
   };
 
@@ -412,11 +412,11 @@ export default function Materiality() {
 
   const formatCurrency = (amount: number) => {
     if (amount >= 10000000) {
-      return `₹${(amount / 10000000).toFixed(2)} Cr`;
+      return `\u20B9${(amount / 10000000).toFixed(2)} Cr`;
     } else if (amount >= 100000) {
-      return `₹${(amount / 100000).toFixed(2)} L`;
+      return `\u20B9${(amount / 100000).toFixed(2)} L`;
     }
-    return `₹${amount.toLocaleString('en-IN')}`;
+    return `\u20B9${amount.toLocaleString('en-IN')}`;
   };
 
   return (
@@ -425,7 +425,7 @@ export default function Materiality() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            ICAI – Materiality & Risk Assessment Tool (SA-320)
+            ICAI \u2013 Materiality & Risk Assessment Tool (SA-320)
           </h1>
           <p className="text-muted-foreground mt-1">
             Calculate materiality and assess risk of material misstatement

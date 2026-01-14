@@ -8,13 +8,13 @@ import {
   buildManagementResponsibilitiesParagraph,
 } from '@/data/auditReportStandardWordings';
 import { buildLegalRegulatorySection } from '@/data/legalRegulatoryWordings';
-import { QUALIFIED_BASIS_EXAMPLE, ADVERSE_BASIS_EXAMPLE, DISCLAIMER_BASIS_EXAMPLE } from '@/data/qualifiedExamples';
-
 import type { AuditReportSetup } from '@/hooks/useAuditReportSetup';
 import type { AuditReportMainContent } from '@/hooks/useAuditReportContent';
 import type { KeyAuditMatter } from '@/hooks/useKeyAuditMatters';
 import type { FirmSettings } from '@/hooks/useFirmSettings';
 import type { Partner } from '@/hooks/usePartners';
+
+const KAM_ENABLED = false;
 
 export type ReportBlock =
   | { kind: 'title'; text: string }
@@ -56,7 +56,7 @@ export class AuditReportGenerator {
     const blocks: ReportBlock[] = [
       { kind: 'title', text: 'Independent Auditor’s Report' },
       { kind: 'subtitle', text: addressee },
-      { kind: 'heading', text: 'Report on the Audit of the Financial Statements' },
+      { kind: 'heading', text: 'Report on the Audit of the Standalone Financial Statements' },
       {
         kind: 'subheading',
         text: buildOpinionHeading(content.opinion_type),
@@ -79,38 +79,28 @@ export class AuditReportGenerator {
 
     // Basis for Opinion
     blocks.push({ kind: 'subheading', text: this.basisHeading(content.opinion_type) });
-    const rawBasis = content.basis_for_opinion?.trim();
-    // Qualified opinion: render basis (example or user text) first, then always show the standard auditor-responsibilities paragraph unhighlighted
+    const rawBasis = content.basis_for_opinion_is_example ? '' : content.basis_for_opinion?.trim();
+    // Qualified opinion: render user basis first, then always show the standard auditor-responsibilities paragraph
     if (content.opinion_type === 'qualified') {
-      if (content.basis_for_opinion_is_example || !rawBasis) {
-        blocks.push({ kind: 'paragraph', text: rawBasis || QUALIFIED_BASIS_EXAMPLE, highlight: 'yellow' });
-      } else {
+      if (rawBasis) {
         blocks.push({ kind: 'paragraph', text: rawBasis });
       }
       // Always append the standard second paragraph (auditor responsibilities / independence wording) unhighlighted
       blocks.push({ kind: 'paragraph', text: BASIS_FOR_OPINION_STARTER['qualified'] });
     } else if (content.opinion_type === 'adverse') {
-      // Adverse opinion: first line is user-defined reason (yellow by default), then constant starter
-      if (content.basis_for_opinion_is_example || !rawBasis) {
-        blocks.push({ kind: 'paragraph', text: rawBasis || ADVERSE_BASIS_EXAMPLE, highlight: 'yellow' });
-      } else {
+      // Adverse opinion: first line is user-defined reason, then constant starter
+      if (rawBasis) {
         blocks.push({ kind: 'paragraph', text: rawBasis });
       }
       blocks.push({ kind: 'paragraph', text: BASIS_FOR_OPINION_STARTER['adverse'] });
     } else if (content.opinion_type === 'disclaimer') {
       // Disclaimer: entirely user-defined single paragraph; no constant second paragraph
-      if (content.basis_for_opinion_is_example || !rawBasis) {
-        blocks.push({ kind: 'paragraph', text: rawBasis || DISCLAIMER_BASIS_EXAMPLE, highlight: 'yellow' });
-      } else {
+      if (rawBasis) {
         blocks.push({ kind: 'paragraph', text: rawBasis });
       }
     } else {
-      // Non-qualified opinions: use user basis if present otherwise the appropriate starter
-      blocks.push({ kind: 'paragraph', text: rawBasis || BASIS_FOR_OPINION_STARTER[content.opinion_type] });
-    }
-
-    if (content.opinion_type !== 'unqualified' && content.qualification_details?.trim()) {
-      blocks.push({ kind: 'paragraph', text: content.qualification_details.trim() });
+      // Unqualified opinion: always use the standard starter wording
+      blocks.push({ kind: 'paragraph', text: BASIS_FOR_OPINION_STARTER['unqualified'] });
     }
 
     // Emphasis of Matter
@@ -147,7 +137,7 @@ export class AuditReportGenerator {
     }
 
     // Key Audit Matters
-    const includeKams = Boolean(content.include_kam ?? setup.is_listed_company);
+    const includeKams = KAM_ENABLED && Boolean(content.include_kam ?? setup.is_listed_company);
     if (includeKams && kams.length > 0) {
       blocks.push({ kind: 'subheading', text: 'Key Audit Matters' });
       blocks.push({ kind: 'paragraph', text: buildKAMIntro() });
@@ -173,7 +163,7 @@ export class AuditReportGenerator {
     blocks.push({ kind: 'paragraph', text: buildManagementResponsibilitiesParagraph(includeCashFlow) });
 
     blocks.push({ kind: 'subheading', text: "Auditor's Responsibilities for the Audit of the Standalone Financial Statements" });
-    blocks.push({ kind: 'paragraph', text: buildAuditorResponsibilitiesParagraph(Boolean(setup.ifc_applicable)) });
+    blocks.push({ kind: 'paragraph', text: buildAuditorResponsibilitiesParagraph(Boolean(setup.ifc_applicable), includeKams) });
 
     // Other Matter
     const hasBranchAuditorsMatter = setup.has_branch_auditors;
@@ -276,7 +266,7 @@ export class AuditReportGenerator {
         : null,
       content.clause_143_3_f_disqualified_details || null,
       content.clause_143_3_g_qualification_impact ? `143(3)(g) Qualification impact: ${content.clause_143_3_g_qualification_impact}` : null,
-      content.clause_143_3_h_remuneration_status ? `143(3)(h) Managerial remuneration: ${content.clause_143_3_h_remuneration_status}` : null,
+      content.clause_143_3_h_remuneration_status ? `197(16) - Managerial Remuneration: ${content.clause_143_3_h_remuneration_status}` : null,
       content.clause_143_3_h_details || null,
       content.clause_143_3_i_ifc_qualification ? `143(3)(i) IFC: ${content.clause_143_3_i_ifc_qualification}` : null,
     ]);

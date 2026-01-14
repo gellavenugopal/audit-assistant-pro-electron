@@ -247,7 +247,7 @@ export function useTrialBalance(engagementId: string | undefined) {
     }
   };
 
-  const importLines = async (data: TrialBalanceLineInput[], upsertMode: boolean = true) => {
+  const importLines = async (data: TrialBalanceLineInput[], upsertMode: boolean = true, showToast: boolean = true) => {
     if (!engagementId || !user) return false;
 
     try {
@@ -318,18 +318,22 @@ export function useTrialBalance(engagementId: string | undefined) {
       setCurrentVersion(newVersion);
       await fetchLines();
       
-      toast({
-        title: 'Success',
-        description: `Imported ${data.length} lines as Version ${newVersion}${upsertMode ? ' (duplicates updated)' : ''}`,
-      });
+      if (showToast) {
+        toast({
+          title: 'Success',
+          description: `Imported ${data.length} lines as Version ${newVersion}${upsertMode ? ' (duplicates updated)' : ''}`,
+        });
+      }
       return true;
     } catch (error: any) {
       console.error('Error importing lines:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to import trial balance',
-        variant: 'destructive',
-      });
+      if (showToast) {
+        toast({
+          title: 'Error',
+          description: 'Failed to import trial balance',
+          variant: 'destructive',
+        });
+      }
       return false;
     }
   };

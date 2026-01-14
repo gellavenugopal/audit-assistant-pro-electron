@@ -1,16 +1,16 @@
 
 import React, { useState } from "react";
+import { CheckCircle2, Minus, XCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 
 const UNIT_MAP = {
-  "Ones (₹)": 1,
-  "Thousands (₹1,000)": 1_000,
-  "Lakhs (₹1,00,000)": 1_00_000,
-  "Crores (₹1,00,00,000)": 1_00_00_000,
+  "Ones (\u20B9)": 1,
+  "Thousands (\u20B91,000)": 1_000,
+  "Lakhs (\u20B91,00,000)": 1_00_000,
+  "Crores (\u20B91,00,00,000)": 1_00_00_000,
 };
 
 const ENTITY_CLASSIFICATION_MAP = {
@@ -46,7 +46,7 @@ const yesNoOptions = [
 
 const ComplianceApplicability: React.FC = () => {
   // State for all input fields
-  const [denomination, setDenomination] = useState("Ones (₹)");
+  const [denomination, setDenomination] = useState("Ones (\u20B9)");
   const [cyTurnover, setCyTurnover] = useState("");
   const [cyCapital, setCyCapital] = useState("");
   const [pyTurnover, setPyTurnover] = useState("");
@@ -68,11 +68,36 @@ const ComplianceApplicability: React.FC = () => {
 
   // Results
   const [results, setResults] = useState<Array<[string, string, string]>>([]);
+  const [resultReasons, setResultReasons] = useState<Array<[string, string]>>([]);
 
   // Update constitution options when entityClass changes
   React.useEffect(() => {
     setConstitution(ENTITY_CLASSIFICATION_MAP[entityClass][0]);
   }, [entityClass]);
+
+  function sanitizeNumeric(value: string) {
+    const cleaned = value.replace(/,/g, "");
+    const parts = cleaned.split(".");
+    const intPart = parts[0].replace(/\D/g, "");
+    const fracPart = parts.length > 1 ? parts.slice(1).join("").replace(/\D/g, "") : "";
+    return fracPart.length > 0 ? `${intPart}.${fracPart}` : intPart;
+  }
+
+  function formatIndianNumber(value: string) {
+    const cleaned = sanitizeNumeric(value);
+    if (!cleaned) return "";
+    const [intPart, fracPart] = cleaned.split(".");
+    const last3 = intPart.slice(-3);
+    const rest = intPart.slice(0, -3);
+    const grouped = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ",");
+    const formatted = rest ? `${grouped},${last3}` : last3;
+    return fracPart ? `${formatted}.${fracPart}` : formatted;
+  }
+
+  function parseNumber(value: string) {
+    const cleaned = sanitizeNumeric(value);
+    return parseFloat(cleaned || "0");
+  }
 
   // Logic functions
   function determineTaxAudit(turnover: number) {
@@ -95,12 +120,12 @@ const ComplianceApplicability: React.FC = () => {
   function evaluateCompliance() {
     try {
       const m = UNIT_MAP[denomination];
-      const cy_turnover = parseFloat(cyTurnover || "0") * m;
-      const cy_capital = parseFloat(cyCapital || "0") * m;
-      const py_turnover = parseFloat(pyTurnover || "0") * m;
-      const py_networth = parseFloat(pyNetworth || "0") * m;
-      const py_borrowings = parseFloat(pyBorrowings || "0") * m;
-      const py_netprofit = parseFloat(pyNetprofit || "0") * m;
+      const cy_turnover = parseNumber(cyTurnover) * m;
+      const cy_capital = parseNumber(cyCapital) * m;
+      const py_turnover = parseNumber(pyTurnover) * m;
+      const py_networth = parseNumber(pyNetworth) * m;
+      const py_borrowings = parseNumber(pyBorrowings) * m;
+      const py_netprofit = parseNumber(pyNetprofit) * m;
 
       const is_company = entityClass === "Company";
       const is_listed = constitution === "Listed Company";
@@ -184,201 +209,392 @@ const ComplianceApplicability: React.FC = () => {
         ["IFC Reporting", ifc, "Section 143(3)(i)"],
         ["AOC-2 (RPT)", aoc2, "Section 188"],
       ];
+      const reasonsArr: Array<[string, string]> = [
+        [
+          "Small Company",
+          !is_company
+            ? "Not applicable because the entity is not a company."
+            : small_company
+              ? "Yes because paid-up capital <= 10 Cr and turnover <= 100 Cr, and the entity is not listed, OPC, Section 8, holding, or subsidiary."
+              : "No because one or more thresholds or exclusions apply (listed/OPC/Section 8/holding/subsidiary or capital/turnover exceed limits).",
+        ],
+        [
+          "CARO Applicability",
+          !is_company
+            ? "Not applicable because CARO applies only to companies."
+            : is_listed
+              ? "Yes because listed companies are covered under CARO."
+              : small_company || is_opc || is_section8
+                ? "No because small companies, OPCs, and Section 8 companies are exempt."
+                : "Yes because the company is not exempt under CARO thresholds or category.",
+        ],
+        [
+          "Auditor Rotation",
+          !is_company
+            ? "Not applicable because the entity is not a company."
+            : auditor_rotation === "Yes"
+              ? "Yes because paid-up capital or borrowings meet the rotation thresholds for the company type."
+              : "No because the rotation thresholds are not met.",
+        ],
+        [
+          "CSR Applicability",
+          !is_company
+            ? "Not applicable because the entity is not a company."
+            : csr === "Yes"
+              ? "Yes because net worth >= 500 Cr, turnover >= 1,000 Cr, or net profit >= 5 Cr."
+              : "No because CSR thresholds are not met.",
+        ],
+        [
+          "Tax Audit Applicability",
+          tax_audit === "Yes"
+            ? "Yes because turnover limits or cash receipt/payment or presumptive conditions trigger tax audit."
+            : "No because tax audit thresholds and conditions are not met.",
+        ],
+        [
+          "Cash Flow Statement",
+          !is_company
+            ? "Not applicable because the entity is not a company."
+            : cashflow === "No"
+              ? "No because the entity is a small company/OPC/dormant company."
+              : "Yes because the entity is not exempt from cash flow requirements.",
+        ],
+        [
+          "IFC Reporting",
+          !is_company
+            ? "Not applicable because the entity is not a company."
+            : ifc === "Yes"
+              ? "Yes because the company is listed, a public company, or a private company meeting turnover/borrowing thresholds."
+              : "No because IFC thresholds are not met.",
+        ],
+        [
+          "AOC-2 (RPT)",
+          !is_company
+            ? "Not applicable because the entity is not a company."
+            : aoc2 === "Yes"
+              ? "Yes because related party transactions are indicated."
+              : "No because no related party transactions are indicated.",
+        ],
+      ];
       setResults(resultsArr);
+      setResultReasons(reasonsArr);
     } catch (e) {
       setResults([]);
+      setResultReasons([]);
     }
   }
 
   // UI
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-blue-900 mb-2">Compliance Applicability Engine</h1>
-      <p className="text-gray-600 mb-6">Statutory Applicability & Audit Planning Tool</p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-sky-50">
+      <div className="mx-auto max-w-6xl px-6 pb-8 pt-4">
+        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-semibold text-slate-900">
+              Compliance Applicability Engine
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">
+              Statutory applicability checks and audit planning signals in one view.
+            </p>
+          </div>
+          <Button className="px-6" onClick={evaluateCompliance}>
+            Evaluate Compliance
+          </Button>
+        </div>
 
-      {/* Input Panels */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {/* Financial Parameters */}
-        <div className="bg-white rounded-lg border p-4">
-          <h2 className="font-semibold text-blue-800 mb-2 text-base">Financial Parameters</h2>
-          <div className="space-y-2">
-            <Label>Current Year Turnover</Label>
-            <Input value={cyTurnover} onChange={e => setCyTurnover(e.target.value)} type="number" placeholder="0" />
-            <Label>Paid-up Capital</Label>
-            <Input value={cyCapital} onChange={e => setCyCapital(e.target.value)} type="number" placeholder="0" />
-            <Label>Previous Year Turnover</Label>
-            <Input value={pyTurnover} onChange={e => setPyTurnover(e.target.value)} type="number" placeholder="0" />
-            <Label>Previous Year Net Worth</Label>
-            <Input value={pyNetworth} onChange={e => setPyNetworth(e.target.value)} type="number" placeholder="0" />
-            <Label>Previous Year Borrowings</Label>
-            <Input value={pyBorrowings} onChange={e => setPyBorrowings(e.target.value)} type="number" placeholder="0" />
-            <Label>Previous Year Net Profit</Label>
-            <Input value={pyNetprofit} onChange={e => setPyNetprofit(e.target.value)} type="number" placeholder="0" />
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-stretch">
+              <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm lg:h-full">
+                <h2 className="text-sm font-semibold text-slate-700">Financial Parameters</h2>
+                <div className="mt-4 space-y-3">
+                  <div className="space-y-2">
+                    <Label>Current Year Turnover</Label>
+                    <Input
+                      value={cyTurnover}
+                      onChange={e => setCyTurnover(formatIndianNumber(e.target.value))}
+                      onBlur={e => setCyTurnover(formatIndianNumber(e.target.value))}
+                      inputMode="decimal"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Paid-up Capital</Label>
+                    <Input
+                      value={cyCapital}
+                      onChange={e => setCyCapital(formatIndianNumber(e.target.value))}
+                      onBlur={e => setCyCapital(formatIndianNumber(e.target.value))}
+                      inputMode="decimal"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Previous Year Turnover</Label>
+                    <Input
+                      value={pyTurnover}
+                      onChange={e => setPyTurnover(formatIndianNumber(e.target.value))}
+                      onBlur={e => setPyTurnover(formatIndianNumber(e.target.value))}
+                      inputMode="decimal"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Previous Year Net Worth</Label>
+                    <Input
+                      value={pyNetworth}
+                      onChange={e => setPyNetworth(formatIndianNumber(e.target.value))}
+                      onBlur={e => setPyNetworth(formatIndianNumber(e.target.value))}
+                      inputMode="decimal"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Previous Year Borrowings</Label>
+                    <Input
+                      value={pyBorrowings}
+                      onChange={e => setPyBorrowings(formatIndianNumber(e.target.value))}
+                      onBlur={e => setPyBorrowings(formatIndianNumber(e.target.value))}
+                      inputMode="decimal"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Previous Year Net Profit</Label>
+                    <Input
+                      value={pyNetprofit}
+                      onChange={e => setPyNetprofit(formatIndianNumber(e.target.value))}
+                      onBlur={e => setPyNetprofit(formatIndianNumber(e.target.value))}
+                      inputMode="decimal"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex h-full flex-col gap-6">
+                <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm flex-1">
+                  <h2 className="text-sm font-semibold text-slate-700">Income-tax Parameters</h2>
+                  <div className="mt-4 space-y-3">
+                    <div className="space-y-2">
+                      <Label>Assessee Type</Label>
+                      <Select value={assesseeType} onValueChange={setAssesseeType}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Business">Business</SelectItem>
+                          <SelectItem value="Profession">Profession</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Cash Receipts &gt; 5%</Label>
+                      <Select value={cashReceipt} onValueChange={setCashReceipt}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Cash Payments &gt; 5%</Label>
+                      <Select value={cashPayment} onValueChange={setCashPayment}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Presumptive Scheme</Label>
+                      <Select value={presumptive} onValueChange={setPresumptive}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Lower than Presumptive</Label>
+                      <Select value={lowerPresumptive} onValueChange={setLowerPresumptive}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm flex-1">
+                  <h2 className="text-sm font-semibold text-slate-700">Company Law Parameters</h2>
+                  <div className="mt-4 space-y-3">
+                    <div className="space-y-2">
+                      <Label>Significant RPT Exists</Label>
+                      <Select value={rpt} onValueChange={setRpt}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {yesNoOptions.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm lg:col-span-2">
+                <h2 className="text-sm font-semibold text-slate-700">Entity Classification</h2>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Amount Denomination</Label>
+                    <Select value={denomination} onValueChange={setDenomination}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.keys(UNIT_MAP).map(unit => (
+                          <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Entity Type</Label>
+                    <Select value={entityClass} onValueChange={setEntityClass}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Company">Company</SelectItem>
+                        <SelectItem value="Non-Company">Non-Company</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Constitution</Label>
+                    <Select value={constitution} onValueChange={setConstitution}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {ENTITY_CLASSIFICATION_MAP[entityClass].map(opt => (
+                          <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Sub-Constitution</Label>
+                    <Select value={subConstitution} onValueChange={setSubConstitution}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Neither">Neither</SelectItem>
+                        <SelectItem value="Holding Company">Holding Company</SelectItem>
+                        <SelectItem value="Subsidiary Company">Subsidiary Company</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Dormant Company</Label>
+                    <Select value={dormant} onValueChange={setDormant}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {yesNoOptions.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div className="flex flex-col gap-4 lg:sticky lg:top-24 lg:self-start">
+            <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-900">Evaluation Output</h2>
+                  <p className="text-xs text-slate-500">Right-side results update on every run.</p>
+                </div>
+                <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">
+                  {results.length} checks
+                </span>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {results.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                    No evaluation yet. Click "Evaluate Compliance" to view outcomes.
+                  </div>
+                )}
+
+                {results.map(([area, applicable, statute]) => {
+                  const isYes = applicable === "Yes";
+                  const isNo = applicable === "No";
+                  const badgeClass = isYes
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : isNo
+                      ? "bg-rose-50 text-rose-700 border-rose-200"
+                      : "bg-slate-50 text-slate-600 border-slate-200";
+
+                  return (
+                    <div key={area} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{area}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {STATUTE_LINKS[statute] ? (
+                              <a
+                                href={STATUTE_LINKS[statute]}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-slate-600 underline decoration-dotted underline-offset-4 hover:text-slate-900"
+                              >
+                                {statute}
+                              </a>
+                            ) : (
+                              statute
+                            )}
+                          </p>
+                        </div>
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass}`}>
+                          {isYes ? <CheckCircle2 className="h-4 w-4" /> : isNo ? <XCircle className="h-4 w-4" /> : <Minus className="h-4 w-4" />}
+                          {isYes ? "Yes" : isNo ? "No" : "N/A"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
           </div>
         </div>
 
-        {/* Income-tax Parameters */}
-        <div className="bg-white rounded-lg border p-4">
-          <h2 className="font-semibold text-blue-800 mb-2 text-base">Income-tax Parameters</h2>
-          <div className="space-y-2">
-            <Label>Assessee Type</Label>
-            <Select value={assesseeType} onValueChange={setAssesseeType}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Business">Business</SelectItem>
-                <SelectItem value="Profession">Profession</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label>Cash Receipts &gt; 5%</Label>
-            <Select value={cashReceipt} onValueChange={setCashReceipt}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {yesNoOptions.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Label>Cash Payments &gt; 5%</Label>
-            <Select value={cashPayment} onValueChange={setCashPayment}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {yesNoOptions.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Label>Presumptive Scheme</Label>
-            <Select value={presumptive} onValueChange={setPresumptive}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {yesNoOptions.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Label>Lower than Presumptive</Label>
-            <Select value={lowerPresumptive} onValueChange={setLowerPresumptive}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {yesNoOptions.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Label>RPT Exists</Label>
-            <Select value={rpt} onValueChange={setRpt}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {yesNoOptions.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* Entity Classification */}
-        <div className="bg-white rounded-lg border p-4">
-          <h2 className="font-semibold text-blue-800 mb-2 text-base">Entity Classification</h2>
-          <div className="space-y-2">
-            <Label>Amount Denomination</Label>
-            <Select value={denomination} onValueChange={setDenomination}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Object.keys(UNIT_MAP).map(unit => (
-                  <SelectItem key={unit} value={unit}>{unit}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Label>Entity Type</Label>
-            <Select value={entityClass} onValueChange={setEntityClass}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Company">Company</SelectItem>
-                <SelectItem value="Non-Company">Non-Company</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label>Constitution</Label>
-            <Select value={constitution} onValueChange={setConstitution}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {ENTITY_CLASSIFICATION_MAP[entityClass].map(opt => (
-                  <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Label>Sub-Constitution</Label>
-            <Select value={subConstitution} onValueChange={setSubConstitution}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Neither">Neither</SelectItem>
-                <SelectItem value="Holding Company">Holding Company</SelectItem>
-                <SelectItem value="Subsidiary Company">Subsidiary Company</SelectItem>
-              </SelectContent>
-            </Select>
-            <Label>Dormant Company</Label>
-            <Select value={dormant} onValueChange={setDormant}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {yesNoOptions.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-
-      {/* Evaluate Button */}
-      <div className="mb-8 text-center">
-        <Button className="px-8 py-2 text-base font-semibold" onClick={evaluateCompliance}>
-          Evaluate Compliance
-        </Button>
-      </div>
-
-      {/* Results Table */}
-      {results.length > 0 && (
-        <div className="bg-white rounded-lg border p-4 mb-8">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Compliance Area</TableHead>
-                <TableHead>Applicable</TableHead>
-                <TableHead>Statutory Reference</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {results.map(([area, applicable, statute], i) => (
-                <TableRow key={area}>
-                  <TableCell>{area}</TableCell>
-                  <TableCell className={applicable === "Yes" ? "font-bold bg-gray-100" : ""}>{applicable}</TableCell>
-                  <TableCell>
-                    {STATUTE_LINKS[statute] ? (
-                      <a
-                        href={STATUTE_LINKS[statute]}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-700 underline hover:text-blue-900"
-                      >
-                        {statute}
-                      </a>
-                    ) : (
-                      statute
-                    )}
-                  </TableCell>
-                </TableRow>
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-white/90 px-6 py-5 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-800">Evaluation Basis</h3>
+          {resultReasons.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-600">
+              Run evaluation to see the exact reason for each decision.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-2 text-sm text-slate-600">
+              {resultReasons.map(([label, reason]) => (
+                <li key={label}>
+                  <span className="font-semibold text-slate-700">{label}:</span> {reason}
+                </li>
               ))}
-            </TableBody>
-          </Table>
+            </ul>
+          )}
         </div>
-      )}
-
-      {/* Footer */}
-      <div className="text-center text-xs text-slate-500 mt-8">
-        © R. Rampuria &amp; Company | Chartered Accountants | Internal Professional Tool
       </div>
     </div>
   );
 };
 
 export default ComplianceApplicability;
+
+

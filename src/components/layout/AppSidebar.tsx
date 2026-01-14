@@ -6,13 +6,13 @@ import {
   FileSpreadsheet,
   Calculator,
   AlertTriangle,
-  ClipboardList,
   FileCheck,
   MessageSquare,
   AlertCircle,
   Lock,
   History,
   Settings,
+  ClipboardList,
   ChevronLeft,
   ChevronRight,
   Wrench,
@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { reservedShortcutKeys } from '@/hooks/useKeyboardShortcuts';
 
 // Items that are always accessible
 const alwaysActiveItems = [
@@ -36,13 +37,11 @@ const alwaysActiveItems = [
 
 // Items that require an engagement to be selected
 const engagementDependentItems = [
-  { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
-  { name: 'Trial Balance New', href: '/trial-balance-new', icon: FileSpreadsheet },
-  { name: 'Appointment', href: '/appointment', icon: FileSignature },
-  { name: 'Materiality', href: '/materiality', icon: Calculator },
+  { name: 'Financial Review', href: '/financial-review', icon: FileSpreadsheet },
+  { name: 'Appointment & Eng Letter', href: '/appointment', icon: FileSignature },
+  { name: 'Materiality & Risk Assessment', href: '/materiality', icon: Calculator },
   { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
-  { name: 'Audit Programs', href: '/programs', icon: ClipboardList },
-  { name: 'Audit Program New', href: '/programs-new', icon: FileText },
+  { name: 'Audit Execution', href: '/audit-execution', icon: ClipboardList },
   { name: 'Evidence Vault', href: '/evidence', icon: FileCheck },
   { name: 'Review Notes', href: '/review-notes', icon: MessageSquare },
   { name: 'Misstatements', href: '/misstatements', icon: AlertCircle },
@@ -55,7 +54,6 @@ const engagementDependentItems = [
 const secondaryNavItems = [
   { name: 'Audit Trail', href: '/audit-trail', icon: History, requiresEngagement: true },
   { name: 'Completion', href: '/completion', icon: Lock, requiresEngagement: true },
-  { name: 'My Tasks', href: '/my-dashboard', icon: ClipboardList, staffOnly: true },
   { name: 'Admin', href: '/admin', icon: Shield, adminOnly: true },
   { name: 'Admin Settings', href: '/admin/settings', icon: Settings, adminOnly: true },
 ];
@@ -75,9 +73,19 @@ export function AppSidebar() {
 
   const renderName = (name: string) => {
     if (!name) return name;
+    const firstLetter = name[0];
+    const useDoubleUnderline = reservedShortcutKeys.has(firstLetter.toLowerCase());
+
     return (
       <>
-        <span className="underline underline-offset-2">{name[0]}</span>
+        <span
+          className={cn(
+            'underline underline-offset-2',
+            useDoubleUnderline && 'decoration-double'
+          )}
+        >
+          {firstLetter}
+        </span>
         <span>{name.slice(1)}</span>
       </>
     );

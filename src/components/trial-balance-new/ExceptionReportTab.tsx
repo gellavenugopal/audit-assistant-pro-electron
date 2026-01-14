@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
+import { getNaturalBalanceSide, BalanceSign } from '@/utils/naturalBalance';
 import {
   DenseTable,
   DenseTableBody,
@@ -43,67 +44,70 @@ export function ExceptionReportTab({ classifiedData }: Props) {
 
     classifiedData.forEach(row => {
       const group = (row['Primary Group'] || '').toLowerCase();
-      const balance = row['Closing Balance'] || 0;
-      const isCredit = balance < 0;
-      const isDebit = balance > 0;
+      const closing = Number(row['Closing Balance'] || 0);
+      if (closing === 0) return; // skip zero balance
+
+      const expectedSign: BalanceSign = getNaturalBalanceSide(row);
+      const actualSign: BalanceSign = closing < 0 ? 'Dr' : 'Cr';
+      const displayBalance = Math.abs(closing);
 
       // Rule 1: Debtors with Credit balance
-      if ((group.includes('debtor') || group.includes('sundry debtor')) && isCredit) {
+      if ((group.includes('debtor') || group.includes('sundry debtor')) && actualSign !== expectedSign) {
         result.debtorsCredit.push({
           ledgerName: row['Ledger Name'] || '',
           group: row['Primary Group'] || '',
-          balance,
-          expectedSign: 'Dr',
-          actualSign: 'Cr',
+          balance: displayBalance,
+          expectedSign,
+          actualSign,
           classification: row.H2,
         });
       }
 
       // Rule 2: Creditors with Debit balance
-      if ((group.includes('creditor') || group.includes('sundry creditor')) && isDebit) {
+      if ((group.includes('creditor') || group.includes('sundry creditor')) && actualSign !== expectedSign) {
         result.creditorsDebit.push({
           ledgerName: row['Ledger Name'] || '',
           group: row['Primary Group'] || '',
-          balance,
-          expectedSign: 'Cr',
-          actualSign: 'Dr',
+          balance: displayBalance,
+          expectedSign,
+          actualSign,
           classification: row.H2,
         });
       }
 
       // Rule 3: Loans/OD/CC with Debit balance
       if ((group.includes('loan') || group.includes('bank od') || group.includes('bank o.d') || 
-           group.includes('cash credit') || group.includes('overdraft')) && isDebit) {
+           group.includes('cash credit') || group.includes('overdraft')) && actualSign !== expectedSign) {
         result.loansDebit.push({
           ledgerName: row['Ledger Name'] || '',
           group: row['Primary Group'] || '',
-          balance,
-          expectedSign: 'Cr',
-          actualSign: 'Dr',
+          balance: displayBalance,
+          expectedSign,
+          actualSign,
           classification: row.H2,
         });
       }
 
       // Rule 4: Bank accounts with Credit balance
-      if (group.includes('bank account') && isCredit) {
+      if (group.includes('bank account') && actualSign !== expectedSign) {
         result.bankCredit.push({
           ledgerName: row['Ledger Name'] || '',
           group: row['Primary Group'] || '',
-          balance,
-          expectedSign: 'Dr',
-          actualSign: 'Cr',
+          balance: displayBalance,
+          expectedSign,
+          actualSign,
           classification: row.H2,
         });
       }
 
       // Rule 5: Loans & Advances (Assets) with Credit balance
-      if (group.includes('loans and advances') && row.H1 === 'Balance Sheet' && isCredit) {
+      if (group.includes('loans and advances') && row.H1 === 'Balance Sheet' && actualSign !== expectedSign) {
         result.loansAdvancesCredit.push({
           ledgerName: row['Ledger Name'] || '',
           group: row['Primary Group'] || '',
-          balance,
-          expectedSign: 'Dr',
-          actualSign: 'Cr',
+          balance: displayBalance,
+          expectedSign,
+          actualSign,
           classification: row.H2,
         });
       }
