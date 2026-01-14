@@ -115,6 +115,7 @@ const SRMPro = () => {
     { label: '(f) Other current assets', key: 'Other current assets' },
     { label: 'Uncategorised Current assets', key: 'Uncategorised Current assets', un: true },
     { label: 'Suspense', key: 'Suspense' },
+    { label: 'TOTAL', h: true },
   ];
 
   const plStructure = [
@@ -276,12 +277,17 @@ const SRMPro = () => {
     let currentAssetsTotal = 0;
     let previousAssetsTotal = 0;
     let isInAssetsSection = false;
+    let totalCount = 0;
 
     // Pre-calculate totals for Balance Sheet
     if (!isPL) {
       structure.forEach((row) => {
         if (row.label === 'ASSETS') {
           isInAssetsSection = true;
+        }
+        
+        if (row.label === 'TOTAL') {
+          totalCount++;
         }
         
         if (!row.h && !row.sub && row.key) {
@@ -291,7 +297,7 @@ const SRMPro = () => {
           if (isInAssetsSection) {
             currentAssetsTotal += currentVal;
             previousAssetsTotal += previousVal;
-          } else if (row.label !== 'TOTAL') {
+          } else if (totalCount === 0) {
             currentLiabilitiesTotal += currentVal;
             previousLiabilitiesTotal += previousVal;
           }
@@ -344,11 +350,21 @@ const SRMPro = () => {
                     const showTotal = row.label === 'TOTAL';
                     let displayCurrentTotal = 0;
                     let displayPreviousTotal = 0;
+                    let isAssetTotal = false;
 
                     if (showTotal && !isPL) {
-                      // For liability section total
-                      displayCurrentTotal = currentLiabilitiesTotal;
-                      displayPreviousTotal = previousLiabilitiesTotal;
+                      // Check if this is Assets total (second TOTAL) or Liabilities total (first TOTAL)
+                      const totalIndex = structure.indexOf(row);
+                      const assetsIndex = structure.findIndex(r => r.label === 'ASSETS');
+                      isAssetTotal = totalIndex > assetsIndex;
+                      
+                      if (isAssetTotal) {
+                        displayCurrentTotal = currentAssetsTotal;
+                        displayPreviousTotal = previousAssetsTotal;
+                      } else {
+                        displayCurrentTotal = currentLiabilitiesTotal;
+                        displayPreviousTotal = previousLiabilitiesTotal;
+                      }
                     }
 
                     return (
@@ -561,7 +577,7 @@ const SRMPro = () => {
                                     placeholder="Filter..."
                                     value={columnFilters[key] || ''}
                                     onChange={(e) => handleFilterChange(key, e.target.value)}
-                                    className="h-6 text-xs bg-white text-black"
+                                    className="h-6 text-xs bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
                                     onClick={(e) => e.stopPropagation()}
                                   />
                                 </div>
@@ -631,6 +647,25 @@ const SRMPro = () => {
                   />
                 </div>
 
+                {/* Totals Summary */}
+                {data.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-lg border">
+                    {Object.keys(data[0]).map((key) => {
+                      if (typeof data[0][key] === 'number' && trialBalanceTotals[key]) {
+                        return (
+                          <div key={key} className="text-center">
+                            <p className="text-xs text-muted-foreground font-medium">{key}</p>
+                            <p className="text-lg font-bold text-slate-800">
+                              {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+                )}
+
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-800 text-white sticky top-0">
@@ -649,7 +684,7 @@ const SRMPro = () => {
                                 placeholder="Filter..."
                                 value={columnFilters[key] || ''}
                                 onChange={(e) => handleFilterChange(key, e.target.value)}
-                                className="h-7 text-xs bg-white text-black"
+                                className="h-7 text-xs bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
                                 onClick={(e) => e.stopPropagation()}
                               />
                             </div>
