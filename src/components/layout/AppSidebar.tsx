@@ -20,6 +20,7 @@ import {
   Shield,
   FileText,
   FileSignature,
+  Package,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -48,6 +49,7 @@ const engagementDependentItems = [
   { name: 'Audit Report', href: '/audit-report', icon: FileText },
   { name: 'VERA Tools', href: '/audit-tools', icon: Wrench },
   { name: 'Feedback', href: '/feedback', icon: MessageSquare },
+  { name: 'SRM Pro', href: '/srm-pro', icon: Package },
 ];
 
 const secondaryNavItems = [
