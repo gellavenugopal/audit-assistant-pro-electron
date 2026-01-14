@@ -38,7 +38,7 @@ import Gstr1Dashboard from "./pages/Gstr1Dashboard";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
-
+import SRMPro from "./pages/SRMPro";
 
 const queryClient = new QueryClient();
 
@@ -333,6 +333,16 @@ const App = () => (
                         <ComplianceApplicability />
                       </MainLayout>
                     </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/srm-pro"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <SRMPro />
+                      </MainLayout>
+                    </ProtectedRoute>
                   }
                 />
                 <Route path="*" element={<NotFound />} />
