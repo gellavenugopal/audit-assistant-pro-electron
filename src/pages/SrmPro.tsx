@@ -236,6 +236,7 @@ const SRMPro = () => {
     { label: '(3) Cost of materials consumed', key: 'Cost of materials consumed' },
     { label: '(4) Purchases of Stock-in-Trade', key: 'Purchases of Stock-in-Trade' },
     { label: '(5) Changes in inventories of finished goods, work-in-progress and Stock-in-Trade', key: 'Changes in inventories of finished goods, work-in-progress and Stock-in-Trade' },
+    { label: 'Uncategorised Purchase Accounts', key: 'Uncategorised Purchase Accounts', un: true },
     { label: '(6) Employee benefit expense', sub: true },
     { label: '(a) Salaries and wages', key: 'Salaries and wages' },
     { label: '(b) Contribution to provident and other funds', key: 'Contribution to provident and other funds' },
@@ -660,7 +661,7 @@ const SRMPro = () => {
           </TabsTrigger>
           <TabsTrigger value="results" disabled={!data.length} className="flex items-center gap-2">
             <Search className="h-4 w-4" />
-            Results
+            Mapped TB
           </TabsTrigger>
           <TabsTrigger value="summary" disabled={!data.length} className="flex items-center gap-2">
             <FileText className="h-4 w-4" />
@@ -917,7 +918,7 @@ const SRMPro = () => {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Trial Balance Results</CardTitle>
+                  <CardTitle>Mapped Trial Balance</CardTitle>
                   <CardDescription>Processed ledger data with category mappings</CardDescription>
                 </div>
                 <div className="flex gap-4">
