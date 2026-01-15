@@ -388,13 +388,13 @@ const SRMPro = () => {
         Group: '',
         Parent: '',
         'Mapped Category': 'Uncategorised Purchase Accounts',
-        AmountValue: -totalOpeningInventories,
+        AmountValue: totalOpeningInventories,
         '2nd Parent After Primary': '',
         'Logic Trace': 'Stock Details - Opening Inventories'
       }));
     }
     
-    // 2. Closing Inventories (negative value, for Balance Sheet)
+    // 2. Closing Inventories (positive value, for Balance Sheet)
     if (totalClosingInventories > 0) {
       inventoryAdjustments.push(createInventoryRow({
         Period: data[0]?.Period || '',
@@ -404,21 +404,21 @@ const SRMPro = () => {
         OpeningBalance: 0,
         Debit: 0,
         Credit: 0,
-        ClosingBalance: -totalClosingInventories,
+        ClosingBalance: totalClosingInventories,
         IsRevenue: false,
         IsDeemedPositive: false,
-        TrailBalance: -totalClosingInventories,
+        TrailBalance: totalClosingInventories,
         Ledger: 'Closing Inventories',
         'Ledger Parent': '',
         Group: '',
         Parent: '',
         'Mapped Category': 'Inventories',
-        AmountValue: -totalClosingInventories,
+        AmountValue: totalClosingInventories,
         '2nd Parent After Primary': '',
         'Logic Trace': 'Stock Details - Closing Inventories (BS)'
       }));
       
-      // 3. Closing Inventories (PL) (positive value, mapped to Uncategorised Purchase Accounts)
+      // 3. Closing Inventories (PL) (negative value, mapped to Uncategorised Purchase Accounts)
       inventoryAdjustments.push(createInventoryRow({
         Period: data[0]?.Period || '',
         Branch: data[0]?.Branch || '',
@@ -427,16 +427,16 @@ const SRMPro = () => {
         OpeningBalance: 0,
         Debit: 0,
         Credit: 0,
-        ClosingBalance: totalClosingInventories,
+        ClosingBalance: -totalClosingInventories,
         IsRevenue: false,
         IsDeemedPositive: false,
-        TrailBalance: totalClosingInventories,
+        TrailBalance: -totalClosingInventories,
         Ledger: 'Closing Inventories (PL)',
         'Ledger Parent': '',
         Group: '',
         Parent: '',
         'Mapped Category': 'Uncategorised Purchase Accounts',
-        AmountValue: totalClosingInventories,
+        AmountValue: -totalClosingInventories,
         '2nd Parent After Primary': '',
         'Logic Trace': 'Stock Details - Closing Inventories (PL)'
       }));
@@ -862,7 +862,7 @@ const SRMPro = () => {
           let previousVal = previousYearData[deepClean(row.key)] || 0;
           
           // Add profit to Reserves & Surplus
-          if (deepClean(row.key) === deepClean('Uncategorised Reserves and Surplus')) {
+          if (deepClean(row.key) === deepClean('Reserves and surplus') || deepClean(row.key) === deepClean('Uncategorised Reserves and Surplus')) {
             currentVal += currentProfit;
             previousVal += previousProfit;
           }
@@ -922,7 +922,7 @@ const SRMPro = () => {
                     let previousVal = previousYearData[deepClean(row.key)] || 0;
                     
                     // Add profit to Reserves & Surplus for Balance Sheet
-                    if (!isPL && deepClean(row.key) === deepClean('Uncategorised Reserves and Surplus')) {
+                    if (!isPL && (deepClean(row.key) === deepClean('Reserves and surplus') || deepClean(row.key) === deepClean('Uncategorised Reserves and Surplus'))) {
                       // Calculate profit from P&L
                       let currentPLRevenueTotal = 0;
                       let previousPLRevenueTotal = 0;
@@ -1106,7 +1106,7 @@ const SRMPro = () => {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5 bg-white border-b-2 border-gray-200 shadow-sm">
+        <TabsList className="grid w-full grid-cols-7 bg-white border-b-2 border-gray-200 shadow-sm">
           <TabsTrigger 
             value="upload" 
             className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 transition-all duration-200"
@@ -1145,6 +1145,22 @@ const SRMPro = () => {
           >
             <TrendingUp className="h-4 w-4" />
             P & L Account
+          </TabsTrigger>
+          <TabsTrigger 
+            value="balance-sheet-2" 
+            disabled={!data.length} 
+            className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-all duration-200"
+          >
+            <FileText className="h-4 w-4" />
+            BS2
+          </TabsTrigger>
+          <TabsTrigger 
+            value="profit-loss-2" 
+            disabled={!data.length} 
+            className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-all duration-200"
+          >
+            <TrendingUp className="h-4 w-4" />
+            PL2
           </TabsTrigger>
         </TabsList>
 
@@ -1912,6 +1928,8 @@ const SRMPro = () => {
 
         <TabsContent value="balance-sheet">{renderStatement(bsStructure, false)}</TabsContent>
         <TabsContent value="profit-loss">{renderStatement(plStructure, true)}</TabsContent>
+        <TabsContent value="balance-sheet-2">{renderStatement(bsStructure, false)}</TabsContent>
+        <TabsContent value="profit-loss-2">{renderStatement(plStructure, true)}</TabsContent>
       </Tabs>
 
       {/* Edit Row Dialog */}
