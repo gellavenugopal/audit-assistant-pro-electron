@@ -3159,10 +3159,11 @@ const SRMPro = () => {
         
         <TabsContent value="notes" className="mt-0 p-4">
           <Tabs defaultValue="capital-notes" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mb-4">
+            <TabsList className="grid w-full grid-cols-4 mb-4">
               <TabsTrigger value="capital-notes">Capital Notes</TabsTrigger>
               <TabsTrigger value="liability-notes">Liability Notes</TabsTrigger>
               <TabsTrigger value="fa-notes">FA Notes</TabsTrigger>
+              <TabsTrigger value="additional-disclosures">Additional Disclosures</TabsTrigger>
             </TabsList>
 
             {/* Capital Notes Sub-Tab */}
@@ -3672,6 +3673,356 @@ const SRMPro = () => {
                     className="min-h-[80px] text-sm"
                     placeholder="Enter depreciation method and rates applied..."
                   />
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Additional Disclosures Sub-Tab */}
+            <TabsContent value="additional-disclosures" className="space-y-4">
+              <div className="space-y-4">
+                {/* Note Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-semibold">Additional Disclosures (Schedule III)</h3>
+                  <div className="flex items-center gap-4">
+                    <Button size="sm" onClick={() => toast.success('Save functionality coming soon')}>
+                      <Save className="h-4 w-4 mr-2" />
+                      Save
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => toast.success('Export functionality coming soon')}>
+                      <Download className="w-4 h-4 mr-2" />
+                      Download
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Share Capital Section */}
+                <div className="border rounded-lg p-4 bg-slate-50">
+                  <h4 className="text-base font-semibold mb-4 text-slate-800">1. Share Capital</h4>
+                  
+                  <div className="space-y-6">
+                    {/* Authorised Share Capital */}
+                    <div>
+                      <h5 className="text-sm font-medium mb-3 text-slate-700">Authorised Share Capital</h5>
+                      <div className="overflow-x-auto border rounded">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-700 text-white">
+                              <th className="px-3 py-2 text-left font-medium">Particulars</th>
+                              <th className="px-3 py-2 text-right font-medium">Number of Shares</th>
+                              <th className="px-3 py-2 text-right font-medium">Value per Share (₹)</th>
+                              <th className="px-3 py-2 text-right font-medium">Amount (₹ in '00)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="border-b hover:bg-white">
+                              <td className="px-3 py-2">
+                                <Input placeholder="Equity Shares of Rs. 10 each" className="h-8 text-xs" />
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input type="number" className="h-8 text-right text-xs" placeholder="0" />
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input type="number" className="h-8 text-right text-xs" placeholder="10" />
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Issued, Subscribed and Fully Paid Up Share Capital */}
+                    <div>
+                      <h5 className="text-sm font-medium mb-3 text-slate-700">Issued, Subscribed and Fully Paid Up Share Capital</h5>
+                      <div className="overflow-x-auto border rounded">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-slate-700 text-white">
+                              <th className="px-3 py-2 text-left font-medium">Particulars</th>
+                              <th className="px-3 py-2 text-right font-medium">31-March-2025</th>
+                              <th className="px-3 py-2 text-right font-medium">31-March-2024</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="border-b hover:bg-white">
+                              <td className="px-3 py-2">Equity Shares, of Rs. 10 each, No. of Equity Shares</td>
+                              <td className="px-3 py-2">
+                                <Input type="number" className="h-8 text-right text-xs" placeholder="0" />
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input type="number" className="h-8 text-right text-xs" placeholder="0" />
+                              </td>
+                            </tr>
+                            <tr className="border-b hover:bg-white">
+                              <td className="px-3 py-2">Amount (₹ in '00)</td>
+                              <td className="px-3 py-2">
+                                <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                              </td>
+                              <td className="px-3 py-2">
+                                <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                              </td>
+                            </tr>
+                            <tr className="bg-slate-100 font-medium">
+                              <td className="px-3 py-2">Total</td>
+                              <td className="px-3 py-2 text-right">-</td>
+                              <td className="px-3 py-2 text-right">-</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reserves and Surplus Section */}
+                <div className="border rounded-lg p-4 bg-slate-50">
+                  <h4 className="text-base font-semibold mb-4 text-slate-800">2. Reserves and Surplus</h4>
+                  
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Capital Reserves</label>
+                        <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Securities Premium</label>
+                        <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">General Reserve</label>
+                        <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Revaluation Reserve</label>
+                        <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs font-medium text-slate-600">Statement of Profit and Loss</label>
+                        <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs font-medium text-slate-600">Other Reserves</label>
+                        <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trade Payables Section */}
+                <div className="border rounded-lg p-4 bg-slate-50">
+                  <h4 className="text-base font-semibold mb-4 text-slate-800">3. Trade Payables Ageing Schedule</h4>
+                  
+                  <div className="overflow-x-auto border rounded">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-700 text-white">
+                          <th className="px-2 py-2 text-left">Particulars</th>
+                          <th className="px-2 py-2 text-right">Less than 1 year</th>
+                          <th className="px-2 py-2 text-right">1-2 years</th>
+                          <th className="px-2 py-2 text-right">2-3 years</th>
+                          <th className="px-2 py-2 text-right">More than 3 years</th>
+                          <th className="px-2 py-2 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-2 py-2">MSME</td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2 text-right text-xs">-</td>
+                        </tr>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-2 py-2">Others</td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2 text-right text-xs">-</td>
+                        </tr>
+                        <tr className="bg-slate-100 font-medium">
+                          <td className="px-2 py-2">Total</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Trade Receivables Section */}
+                <div className="border rounded-lg p-4 bg-slate-50">
+                  <h4 className="text-base font-semibold mb-4 text-slate-800">4. Trade Receivables Ageing Schedule</h4>
+                  
+                  <div className="overflow-x-auto border rounded">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-700 text-white">
+                          <th className="px-2 py-2 text-left">Particulars</th>
+                          <th className="px-2 py-2 text-right">Less than 6 months</th>
+                          <th className="px-2 py-2 text-right">6 months - 1 year</th>
+                          <th className="px-2 py-2 text-right">1-2 years</th>
+                          <th className="px-2 py-2 text-right">2-3 years</th>
+                          <th className="px-2 py-2 text-right">More than 3 years</th>
+                          <th className="px-2 py-2 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-2 py-2">Undisputed (Good)</td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2 text-right text-xs">-</td>
+                        </tr>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-2 py-2">Undisputed (Doubtful)</td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2"><Input type="number" className="h-6 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-2 py-2 text-right text-xs">-</td>
+                        </tr>
+                        <tr className="bg-slate-100 font-medium">
+                          <td className="px-2 py-2">Total</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                          <td className="px-2 py-2 text-right">-</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Auditor Remuneration Section */}
+                <div className="border rounded-lg p-4 bg-slate-50">
+                  <h4 className="text-base font-semibold mb-4 text-slate-800">5. Auditor's Remuneration</h4>
+                  
+                  <div className="overflow-x-auto border rounded">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-700 text-white">
+                          <th className="px-3 py-2 text-left font-medium">Particulars</th>
+                          <th className="px-3 py-2 text-right font-medium">Current Year (₹)</th>
+                          <th className="px-3 py-2 text-right font-medium">Previous Year (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-3 py-2">Auditor Fee</td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" /></td>
+                        </tr>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-3 py-2">For Taxation Matters</td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" /></td>
+                        </tr>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-3 py-2">For Other Services</td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" /></td>
+                        </tr>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-3 py-2">Reimbursement of Expenses</td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" /></td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" /></td>
+                        </tr>
+                        <tr className="bg-slate-100 font-medium">
+                          <td className="px-3 py-2">Total</td>
+                          <td className="px-3 py-2 text-right">-</td>
+                          <td className="px-3 py-2 text-right">-</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Related Party Transactions Section */}
+                <div className="border rounded-lg p-4 bg-slate-50">
+                  <h4 className="text-base font-semibold mb-4 text-slate-800">6. Related Party Transactions</h4>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">Nature of Transaction</label>
+                      <Input placeholder="e.g., Director Remuneration, Loan Taken" className="h-8 text-xs" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Name of Related Party</label>
+                        <Input placeholder="Enter name" className="h-8 text-xs" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Current Year Amount</label>
+                        <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-slate-600">Previous Year Amount</label>
+                        <Input type="number" className="h-8 text-right text-xs" placeholder="0.00" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ratio Analysis Section */}
+                <div className="border rounded-lg p-4 bg-slate-50">
+                  <h4 className="text-base font-semibold mb-4 text-slate-800">7. Key Ratio Analysis</h4>
+                  
+                  <div className="overflow-x-auto border rounded">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-700 text-white">
+                          <th className="px-3 py-2 text-left font-medium">Ratio</th>
+                          <th className="px-3 py-2 text-right font-medium">Current Year</th>
+                          <th className="px-3 py-2 text-right font-medium">Previous Year</th>
+                          <th className="px-3 py-2 text-right font-medium">Change %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-3 py-2">Current Ratio</td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" step="0.01" /></td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" step="0.01" /></td>
+                          <td className="px-3 py-2 text-right text-xs">-</td>
+                        </tr>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-3 py-2">Debt-Equity Ratio</td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" step="0.01" /></td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" step="0.01" /></td>
+                          <td className="px-3 py-2 text-right text-xs">-</td>
+                        </tr>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-3 py-2">Return on Equity</td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" step="0.01" /></td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" step="0.01" /></td>
+                          <td className="px-3 py-2 text-right text-xs">-</td>
+                        </tr>
+                        <tr className="border-b hover:bg-white">
+                          <td className="px-3 py-2">Net Profit Ratio</td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" step="0.01" /></td>
+                          <td className="px-3 py-2"><Input type="number" className="h-8 text-right text-xs" placeholder="0.00" step="0.01" /></td>
+                          <td className="px-3 py-2 text-right text-xs">-</td>
+                        </tr>
+                        <tr className="bg-slate-100">
+                          <td colSpan={4} className="px-3 py-2">
+                            <Textarea placeholder="Enter reasons for significant variances..." className="text-xs" />
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </TabsContent>
