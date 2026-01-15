@@ -12,7 +12,7 @@ declare global {
       };
       // ODBC methods
       odbcCheckConnection: () => Promise<{ success: boolean; isConnected?: boolean; error?: string }>;
-      odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
+      odbcTestConnection: (port?: string) => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
       odbcFetchTrialBalance: () => Promise<{ success: boolean; error?: string; data?: any[] }>;
       odbcFetchMonthWise: (fyStartYear: number, targetMonth: string) => Promise<{ success: boolean; error?: string; data?: { plLines: any[]; bsLines: any[]; months: string[]; fyStartYear: number; targetMonth: string } }>;
       odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;

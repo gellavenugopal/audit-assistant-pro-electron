@@ -23,6 +23,8 @@ export interface LedgerRow {
   'Debit': number;
   'Credit': number;
   'Closing Balance': number;
+  'ABS Opening Balance'?: number;
+  'ABS Closing Balance'?: number;
   'Is Revenue'?: string;
   'H1'?: string;
   'H2'?: string;
