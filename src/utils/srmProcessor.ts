@@ -14,81 +14,186 @@ export const deepClean = (val: any): string => {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
 };
 
+// Helper function to extract 2nd highest parent after "Primary"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const processAccountingData = (workbook: XLSX.WorkBook): any[] => {
-  const s1Raw = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as DataRow[];
-  const s2Raw = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[1]], { header: 1 }) as DataRow[];
-  const s3Raw = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[2]], { header: 1 }) as DataRow[];
-
-  // 1. Build Mapping Master (Sheet 1)
-  // Logic: Column C (Parent) -> Column D (Category)
-  const mappingMap: Record<string, string> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  s1Raw.forEach((row: any[]) => {
-    const parentKey = deepClean(row[2]);
-    if (parentKey) mappingMap[parentKey] = row[3];
-  });
-
-  // 2. Build Tally Hierarchy (Sheet 3)
-  // Logic: Find the cell containing "Primary", take the cell to its left
-  const hierarchyMap: Record<string, string> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  s3Raw.forEach((row: any[]) => {
-    if (!row || row.length < 2) return;
-    const ledgerName = deepClean(row[0]); // $Name is usually Col A
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cleanRow = row.map((cell: any) => deepClean(cell));
-    const pIdx = cleanRow.findIndex((cell: string) => cell.includes('primary'));
-    if (pIdx > 0) {
-      hierarchyMap[ledgerName] = cleanRow[pIdx - 1];
+const extract2ndParentAfterPrimary = (row: any[], parentIdx: number, groupColIndices: number[]): string => {
+  // The hierarchy goes: Ledger -> Parent -> Group.$Parent -> Group.$Parent.1 -> ... -> Primary
+  // We need to find the 2nd level after Primary
+  
+  // Check Group.$Parent columns from right to left (highest to lowest hierarchy)
+  for (let i = groupColIndices.length - 1; i >= 0; i--) {
+    const colIdx = groupColIndices[i];
+    if (colIdx >= 0 && row[colIdx]) {
+      const value = String(row[colIdx]).trim();
+      // Skip if it contains "Primary" marker
+      if (value.includes('\x04') || value.toLowerCase().includes('primary')) {
+        // The next column to the left should be the 2nd parent after Primary
+        if (i > 0) {
+          const nextIdx = groupColIndices[i - 1];
+          if (nextIdx >= 0 && row[nextIdx]) {
+            return String(row[nextIdx]).trim();
+          }
+        }
+        // If no more group columns, use Parent column
+        if (parentIdx >= 0 && row[parentIdx]) {
+          return String(row[parentIdx]).trim();
+        }
+      }
     }
-  });
+  }
+  
+  // Fallback: use Parent column
+  if (parentIdx >= 0 && row[parentIdx]) {
+    return String(row[parentIdx]).trim();
+  }
+  
+  return '';
+};
 
-  // 3. Find Start of Trial Balance (Sheet 2)
+
+export const processAccountingData = (
+  workbook: XLSX.WorkBook, 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let headerRowIdx = s2Raw.findIndex((row: any[]) =>
+  mappingData?: any[][], 
+  assesseeType?: '3' | '4' | '5'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any[] => {
+  // NEW FORMAT: Single sheet with all data
+  // Columns: Period, Branch, Ledger Code, Name, OpeningBalance, Debit, Credit, ClosingBalance,
+  //          IsRevenue, IsDeemedPositive, TrailBalance, PrimaryGroup, Parent, Groups.$Parent.1-8
+  
+  const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as DataRow[];
+  
+  // Find header row (look for 'Name' or 'OpeningBalance' columns)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let headerRowIdx = sheetData.findIndex((row: any[]) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     row.some((cell: any) => {
       const c = deepClean(cell);
-      return c.includes('ledger') || c.includes('particulars') || c.includes('name') || c.includes('1-apr');
+      return c.includes('name') || c.includes('openingbalance') || c.includes('closingbalance') || c.includes('parent');
     })
   );
   if (headerRowIdx === -1) headerRowIdx = 0;
 
-  const headers = (s2Raw[headerRowIdx] || []) as DataRow;
-  const dataRows = s2Raw.slice(headerRowIdx + 1);
+  const headers = (sheetData[headerRowIdx] || []) as DataRow;
+  const dataRows = sheetData.slice(headerRowIdx + 1);
 
-  // Auto-detect Ledger and Amount columns
-  const ledgerIdx =
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    headers.findIndex((h: any) => {
-      const s = deepClean(h);
-      return s.includes('ledger') || s.includes('particulars') || s.includes('name');
-    }) || 0;
-
+  // Map column names to indices
+  const colMap: Record<string, number> = {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const amtIdx = headers.findIndex((h: any) => {
-    const s = deepClean(h);
-    return s.includes('amount') || s.includes('closing') || s.includes('31-mar') || s.includes('1-apr');
+  headers.forEach((header: any, idx: number) => {
+    const cleanHeader = deepClean(header);
+    colMap[cleanHeader] = idx;
   });
 
-  // 4. Transform Data
+  // Helper to find column index by multiple possible names
+  const findCol = (...names: string[]): number => {
+    for (const name of names) {
+      const cleanName = deepClean(name);
+      if (colMap[cleanName] !== undefined) return colMap[cleanName];
+      // Partial match
+      const partialMatch = Object.keys(colMap).find(k => k.includes(cleanName) || cleanName.includes(k));
+      if (partialMatch) return colMap[partialMatch];
+    }
+    return -1;
+  };
+
+  // Find key column indices
+  const nameIdx = findCol('name', 'ledger', 'particulars');
+  const parentIdx = findCol('parent');
+  const primaryGroupIdx = findCol('primarygroup', 'primary group', 'group');
+  const openingBalIdx = findCol('openingbalance', 'opening balance', 'opening');
+  const debitIdx = findCol('debit');
+  const creditIdx = findCol('credit');
+  const closingBalIdx = findCol('closingbalance', 'closing balance', 'closing');
+  const isDeemedPositiveIdx = findCol('isdeemedpositive', 'is deemed positive', 'deemedpositive');
+  
+  // Find all Group.$Parent columns for hierarchy extraction
+  const groupColIndices: number[] = [];
+  Object.keys(colMap).forEach(key => {
+    if (key.includes('group') && key.includes('parent')) {
+      groupColIndices.push(colMap[key]);
+    }
+  });
+  groupColIndices.sort((a, b) => a - b); // Sort by column index
+
+  console.log('Column mapping:', {
+    nameIdx, parentIdx, primaryGroupIdx, openingBalIdx, 
+    debitIdx, creditIdx, closingBalIdx, isDeemedPositiveIdx,
+    groupColIndices,
+    headers: headers.slice(0, 15) // Show first 15 headers
+  });
+  
+  // Build mapping lookup from mapping data
+  // Mapping structure: [Constitution, Level 1, Level 2, Level 3, Level 4, Level 5, Level 6, ...]
+  // We match on Level 2 (column index 2) and use Level 3 (column index 3) as mapped category
+  const mappingLookup: Record<string, string> = {};
+  if (mappingData && mappingData.length > 0 && assesseeType) {
+    mappingData.forEach(row => {
+      const constitution = String(row[0] || '').trim();
+      if (constitution === assesseeType) {
+        const level2 = String(row[2] || '').trim(); // 2nd parent to match
+        const level3 = String(row[3] || '').trim(); // Mapped category
+        if (level2 && level3) {
+          mappingLookup[deepClean(level2)] = level3;
+        }
+      }
+    });
+    console.log('Mapping lookup built:', Object.keys(mappingLookup).length, 'rules for assessee type', assesseeType);
+  }
+  
+  // Validate critical columns
+  if (nameIdx === -1) {
+    console.error('Available columns:', headers);
+    throw new Error('Could not find Name/Ledger column. Available columns: ' + headers.join(', '));
+  }
+  if (closingBalIdx === -1) {
+    console.warn('Could not find ClosingBalance column. Will try to calculate from Opening + Debit - Credit');
+  }
+
+  // Transform Data
   const results = dataRows
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((row: any[]) => {
-      if (!row || row.length === 0 || !row[ledgerIdx]) return null;
+    .map((row: any[], rowIndex: number) => {
+      if (!row || row.length === 0 || !row[nameIdx]) return null;
 
-      const rawName = row[ledgerIdx];
-      const cleanedName = deepClean(rawName);
-      const parent = hierarchyMap[cleanedName];
-      const category = parent ? mappingMap[parent] || 'NOT MAPPED' : 'NOT MAPPED';
-
-      // Numeric parsing
-      const rawAmt = row[amtIdx !== -1 ? amtIdx : ledgerIdx + 1];
-      let cleanAmt = 0;
-      if (rawAmt !== undefined) {
-        cleanAmt = parseFloat(String(rawAmt).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0;
+      const name = row[nameIdx];
+      
+      // Skip empty rows or summary rows
+      if (!name || String(name).trim() === '' || String(name).toLowerCase().includes('total')) {
+        return null;
       }
+      
+      const parent = parentIdx >= 0 ? row[parentIdx] : '';
+      const primaryGroup = primaryGroupIdx >= 0 ? row[primaryGroupIdx] : '';
+      const isDeemedPositive = isDeemedPositiveIdx >= 0 ? (row[isDeemedPositiveIdx] === 1 || row[isDeemedPositiveIdx] === '1' || row[isDeemedPositiveIdx] === true) : false;
+      
+      // Extract 2nd highest parent after Primary for mapping
+      const secondParentAfterPrimary = extract2ndParentAfterPrimary(row, parentIdx, groupColIndices);
+      const cleanSecondParent = deepClean(secondParentAfterPrimary);
+      
+      // Get mapped category using the mapping lookup
+      let category = 'NOT MAPPED';
+      if (mappingLookup && cleanSecondParent && mappingLookup[cleanSecondParent]) {
+        category = mappingLookup[cleanSecondParent];
+      }
+
+      // Get closing balance (primary amount to use)
+      let closingBalance = 0;
+      if (closingBalIdx >= 0 && row[closingBalIdx] !== undefined && row[closingBalIdx] !== null && row[closingBalIdx] !== '') {
+        closingBalance = parseFloat(String(row[closingBalIdx]).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0;
+      } else {
+        // Calculate from Opening + Debit - Credit if ClosingBalance not available
+        const opening = openingBalIdx >= 0 ? (parseFloat(String(row[openingBalIdx] || 0).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0) : 0;
+        const debit = debitIdx >= 0 ? (parseFloat(String(row[debitIdx] || 0).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0) : 0;
+        const credit = creditIdx >= 0 ? (parseFloat(String(row[creditIdx] || 0).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0) : 0;
+        closingBalance = opening + debit - credit;
+      }
+
+      // Apply sign correction using IsDeemedPositive flag
+      // IsDeemedPositive = 1: Flip sign (for Assets/Expenses with debit balances)
+      // IsDeemedPositive = 0: Keep as is (for Liabilities/Income with credit balances)
+      const correctedAmount = isDeemedPositive ? -closingBalance : closingBalance;
 
       // Build row object preserving original data
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,15 +202,24 @@ export const processAccountingData = (workbook: XLSX.WorkBook): any[] => {
       headers.forEach((h: any, i: number) => {
         obj[h || `Col_${i}`] = row[i];
       });
+      
+      // Add computed/standardized fields
+      obj['Ledger'] = name;
+      obj['Ledger Parent'] = parent;
+      obj['Group'] = primaryGroup;
       obj['Mapped Category'] = category;
-      obj['AmountValue'] = cleanAmt;
-      obj['Logic Trace'] = parent ? `Parent: ${parent}` : 'Hierarchy Match Failed';
+      obj['AmountValue'] = correctedAmount;
+      obj['2nd Parent After Primary'] = secondParentAfterPrimary; // For debugging
+      obj['Logic Trace'] = `Parent: ${parent} | 2nd: ${secondParentAfterPrimary} | Mapped: ${category}${isDeemedPositive ? ' (Sign flipped)' : ''}`;
 
       return obj;
     })
     .filter((r) => r !== null);
 
   console.log('Processed Rows:', results.length);
+  if (results.length > 0) {
+    console.log('Sample processed row:', results[0]);
+  }
   return results;
 };
 

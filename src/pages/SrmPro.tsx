@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { processAccountingData, summarizeData, deepClean } from '@/utils/srmProcessor';
 
@@ -28,7 +29,190 @@ const SRMPro = () => {
   const [selectedYear, setSelectedYear] = useState('');
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [filterSearches, setFilterSearches] = useState<Record<string, string>>({});
+  const [assesseeType, setAssesseeType] = useState<'3' | '4' | '5'>('3'); // 3=Corporate, 4=Non-Corporate, 5=LLP
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [mappingData, setMappingData] = useState<any[]>([]);
+  const [mappingLoaded, setMappingLoaded] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rowNotes, setRowNotes] = useState<Record<number, string>>({});
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rowEvidence, setRowEvidence] = useState<Record<number, File[]>>({});
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [stockDetailsOpen, setStockDetailsOpen] = useState(false);
+  const [stockDetails, setStockDetails] = useState({
+    rawMaterialOpening: '',
+    rawMaterialClosing: '',
+    finishedGoodsOpening: '',
+    finishedGoodsClosing: '',
+    wipOpening: '',
+    wipClosing: '',
+    stockInTradeOpening: '',
+    stockInTradeClosing: '',
+  });
+
+  // Load mapping file on mount
+  useEffect(() => {
+    const loadMappingFile = async () => {
+      try {
+        const response = await fetch('/SRM_Pro/Mapping.xlsx');
+        if (!response.ok) {
+          console.warn('Mapping file not found, will use default mapping');
+          return;
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+        
+        // Skip header row
+        const dataRows = jsonData.slice(1);
+        setMappingData(dataRows);
+        setMappingLoaded(true);
+        console.log('Mapping file loaded successfully:', dataRows.length, 'mapping rules');
+      } catch (error) {
+        console.error('Error loading mapping file:', error);
+        toast.error('Could not load mapping file. Using default mapping.');
+      }
+    };
+    
+    loadMappingFile();
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + K to focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[placeholder="Search ledgers..."]') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+      }
+      // Ctrl/Cmd + 1-5 for tab navigation
+      if ((e.ctrlKey || e.metaKey) && ['1', '2', '3', '4', '5'].includes(e.key)) {
+        e.preventDefault();
+        const tabs = ['upload', 'results', 'summary', 'balance-sheet', 'profit-loss'];
+        const tabIndex = parseInt(e.key) - 1;
+        if (tabIndex === 0 || data.length > 0) {
+          setActiveTab(tabs[tabIndex]);
+        }
+      }
+      // Ctrl/Cmd + Shift + C to clear data
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C' && data.length > 0) {
+        e.preventDefault();
+        handleClearData();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [data, activeTab]);
+
+  const handleClearData = () => {
+    setData([]);
+    setCurrentYearData({});
+    setPreviousYearData({});
+    setSummary({});
+    setSearch('');
+    setSortColumn('');
+    setSortDirection('asc');
+    setColumnFilters({});
+    setSelectedPeriod('current');
+    setSelectedYear('');
+    setPeriodYear('');
+    setActiveTab('upload');
+    toast.success('All data cleared successfully');
+    // Reset file input
+    const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+    if (fileInput) fileInput.value = '';
+  };
+
+  const handleExportToExcel = (type: 'tb' | 'bs' | 'pl') => {
+    try {
+      let wb: XLSX.WorkBook;
+      let fileName = '';
+
+      if (type === 'tb') {
+        // Export Mapped Trial Balance
+        fileName = `Mapped_TB_${companyName}_${periodYear}.xlsx`;
+        wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, 'Mapped TB');
+      } else if (type === 'bs') {
+        // Export Balance Sheet
+        fileName = `Balance_Sheet_${companyName}_${periodYear}.xlsx`;
+        wb = XLSX.utils.book_new();
+        const bsData = bsStructure.map(row => ({
+          'Particulars': row.label,
+          'Note No.': (!row.h && !row.sub && !row.un) ? (('note' in row) ? row.note || '' : '') : '',
+          [`${periodYear}`]: row.key ? formatValue(currentYearData[deepClean(row.key)] || 0) : (row.label === 'TOTAL' ? formatValue(0) : ''),
+          [`${parseInt(periodYear) - 1}`]: row.key ? formatValue(previousYearData[deepClean(row.key)] || 0) : (row.label === 'TOTAL' ? formatValue(0) : '')
+        }));
+        const ws = XLSX.utils.json_to_sheet(bsData);
+        XLSX.utils.book_append_sheet(wb, ws, 'Balance Sheet');
+      } else {
+        // Export P&L
+        fileName = `Profit_Loss_${companyName}_${periodYear}.xlsx`;
+        wb = XLSX.utils.book_new();
+        const plData = plStructure.map(row => ({
+          'Particulars': row.label,
+          'Note No.': (!row.h && !row.sub && !row.un) ? (('note' in row) ? row.note || '' : '') : '',
+          [`${periodYear}`]: row.key ? formatValue(currentYearData[deepClean(row.key)] || 0) : '',
+          [`${parseInt(periodYear) - 1}`]: row.key ? formatValue(previousYearData[deepClean(row.key)] || 0) : ''
+        }));
+        const ws = XLSX.utils.json_to_sheet(plData);
+        XLSX.utils.book_append_sheet(wb, ws, 'P&L Statement');
+      }
+
+      XLSX.writeFile(wb, fileName);
+      toast.success(`${type.toUpperCase()} exported to Excel successfully`);
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export to Excel');
+    }
+  };
+
+  const handleAddNote = (rowIndex: number, note: string) => {
+    setRowNotes(prev => ({ ...prev, [rowIndex]: note }));
+    setHasUnsavedChanges(true);
+  };
+
+  const handleUploadEvidence = (rowIndex: number, files: FileList | null) => {
+    if (files && files.length > 0) {
+      const fileArray = Array.from(files);
+      setRowEvidence(prev => ({ ...prev, [rowIndex]: [...(prev[rowIndex] || []), ...fileArray] }));
+      setHasUnsavedChanges(true);
+      toast.success(`${files.length} file(s) uploaded for row ${rowIndex + 1}`);
+    }
+  };
+
+  const handleDeleteRow = (rowIndex: number) => {
+    const newData = data.filter((_, i) => i !== rowIndex);
+    setData(newData);
+    setHasUnsavedChanges(true);
+    toast.success('Row deleted');
+  };
+
+  const handleSaveChanges = () => {
+    // In a real application, this would save to a database
+    setHasUnsavedChanges(false);
+    toast.success('Changes saved successfully');
+  };
+
+  const handleSaveStockDetails = () => {
+    // Validate that at least some data is entered
+    const hasData = Object.values(stockDetails).some(val => val !== '');
+    if (!hasData) {
+      toast.error('Please enter at least one value');
+      return;
+    }
+    
+    // In a real application, this would save to a database
+    setStockDetailsOpen(false);
+    toast.success('Stock details saved successfully');
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -47,8 +231,23 @@ const SRMPro = () => {
     reader.onload = (evt) => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        const processed = processAccountingData(wb);
-        if (processed.length === 0) throw new Error('No ledgers found. Check Sheet 2 column headers.');
+        
+        console.log('Workbook loaded. Sheet names:', wb.SheetNames);
+        console.log('Number of sheets:', wb.SheetNames.length);
+        
+        // Process with mapping data and assessee type
+        const processed = processAccountingData(wb, mappingData, assesseeType);
+        
+        console.log('Processed data:', processed.length, 'rows');
+        console.log('Using assessee type:', assesseeType === '3' ? 'Corporate' : assesseeType === '4' ? 'Non-Corporate' : 'LLP');
+        console.log('Mapping loaded:', mappingLoaded ? 'Yes' : 'No');
+        if (processed.length > 0) {
+          console.log('Sample row:', processed[0]);
+        }
+        
+        if (processed.length === 0) {
+          throw new Error('No ledgers found. Please check that your Excel file has the correct column headers (Name, Parent, OpeningBalance, Debit, Credit, ClosingBalance, IsDeemedPositive).');
+        }
 
         setData(processed);
         const summarized = summarizeData(processed);
@@ -60,10 +259,17 @@ const SRMPro = () => {
           setPreviousYearData(summarized);
         }
 
+        const mappedCount = processed.filter(r => r['Mapped Category'] !== 'NOT MAPPED').length;
+        const unmappedCount = processed.length - mappedCount;
+        
         setActiveTab('results');
-        toast.success(`${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully`);
+        toast.success(
+          `${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully. ` +
+          `${processed.length} ledgers imported (${mappedCount} mapped, ${unmappedCount} unmapped).`
+        );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
+        console.error('File processing error:', err);
         toast.error(err.message || 'Error processing file');
       }
       setLoading(false);
@@ -126,11 +332,13 @@ const SRMPro = () => {
     { label: '(c) Other operating revenues', key: 'Other operating revenues' },
     { label: 'Uncategorised Revenue from operations', key: 'Uncategorised Revenue from operations', un: true },
     { label: '(2) Other Income', key: 'Other income' },
+    { label: 'Uncategorised Income', key: 'Uncategorised Income', un: true },
     { label: 'Total Revenue', sub: true },
     { label: 'EXPENSES', h: true },
     { label: '(3) Cost of materials consumed', key: 'Cost of materials consumed' },
     { label: '(4) Purchases of Stock-in-Trade', key: 'Purchases of Stock-in-Trade' },
     { label: '(5) Changes in inventories of finished goods, work-in-progress and Stock-in-Trade', key: 'Changes in inventories of finished goods, work-in-progress and Stock-in-Trade' },
+    { label: 'Uncategorised Purchase Accounts', key: 'Uncategorised Purchase Accounts', un: true },
     { label: '(6) Employee benefit expense', sub: true },
     { label: '(a) Salaries and wages', key: 'Salaries and wages' },
     { label: '(b) Contribution to provident and other funds', key: 'Contribution to provident and other funds' },
@@ -154,7 +362,7 @@ const SRMPro = () => {
     { label: '(j) Bad debts written off', key: 'Bad debts written off' },
     { label: '(k) Provision for doubtful debts', key: 'Provision for doubtful debts' },
     { label: '(l) Miscellaneous expenses', key: 'Miscellaneous expenses' },
-    { label: 'Uncategorised Other expenses', key: 'Uncategorised Other expenses', un: true },
+    { label: 'Uncategorised expenses', key: 'Uncategorised expenses', un: true },
     { label: 'Total Expenses', sub: true },
     { label: '(10) Prior period items', key: 'Prior period items' },
     { label: 'Profit/(Loss) before tax', sub: true },
@@ -190,21 +398,45 @@ const SRMPro = () => {
   };
 
   const handleFilterChange = (column: string, value: string) => {
-    setColumnFilters((prev) => ({
-      ...prev,
-      [column]: value,
-    }));
+    setColumnFilters((prev) => {
+      const currentFilters = prev[column] || [];
+      if (currentFilters.includes(value)) {
+        // Remove if already selected
+        const newFilters = currentFilters.filter(v => v !== value);
+        return newFilters.length > 0 ? { ...prev, [column]: newFilters } : { ...prev, [column]: [] };
+      } else {
+        // Add to selected
+        return { ...prev, [column]: [...currentFilters, value] };
+      }
+    });
   };
+
+  // Get unique values for each column for dropdown filters
+  const getUniqueColumnValues = useMemo(() => {
+    const uniqueValues: Record<string, string[]> = {};
+    if (data.length > 0) {
+      Object.keys(data[0]).forEach((key) => {
+        const values = new Set<string>();
+        data.forEach((row) => {
+          const val = String(row[key] || '').trim();
+          if (val) values.add(val);
+        });
+        uniqueValues[key] = Array.from(values).sort();
+      });
+    }
+    return uniqueValues;
+  }, [data]);
 
   const filteredAndSortedData = useMemo(() => {
     let result = [...data];
 
-    // Apply column filters
-    Object.entries(columnFilters).forEach(([column, filterValue]) => {
-      if (filterValue) {
+    // Apply column filters (array-based multi-selection)
+    Object.entries(columnFilters).forEach(([column, selectedValues]) => {
+      if (selectedValues && selectedValues.length > 0) {
         result = result.filter((row) => {
-          const cellValue = String(row[column] || '').toLowerCase();
-          return cellValue.includes(filterValue.toLowerCase());
+          const cellValue = String(row[column] || '');
+          // Match if cell value is in the selected values
+          return selectedValues.includes(cellValue);
         });
       }
     });
@@ -239,8 +471,15 @@ const SRMPro = () => {
     
     if (data.length > 0) {
       Object.keys(data[0]).forEach((key) => {
-        if (typeof data[0][key] === 'number') {
-          totals[key] = data.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+        // Try to parse as number for any column that might contain numeric values
+        const firstVal = data[0][key];
+        const testNum = typeof firstVal === 'number' ? firstVal : parseFloat(String(firstVal || '').replace(/,/g, ''));
+        
+        if (!isNaN(testNum)) {
+          totals[key] = data.reduce((sum, row) => {
+            const val = typeof row[key] === 'number' ? row[key] : parseFloat(String(row[key] || '').replace(/,/g, ''));
+            return sum + (isNaN(val) ? 0 : val);
+          }, 0);
         }
       });
     }
@@ -279,6 +518,47 @@ const SRMPro = () => {
     let isInAssetsSection = false;
     let totalCount = 0;
 
+    // Pre-calculate totals for P&L
+    let currentRevenueTotal = 0;
+    let previousRevenueTotal = 0;
+    let currentExpensesTotal = 0;
+    let previousExpensesTotal = 0;
+    let currentTaxExpense = 0;
+    let previousTaxExpense = 0;
+    let isInExpensesSection = false;
+    let isInTaxSection = false;
+
+    if (isPL) {
+      structure.forEach((row) => {
+        if (row.label === 'EXPENSES') {
+          isInExpensesSection = true;
+        }
+        if (row.label === '(11) Tax expense') {
+          isInTaxSection = true;
+        }
+        if (row.label === 'Profit/(Loss) for the period') {
+          isInTaxSection = false;
+        }
+        
+        if (!row.h && !row.sub && row.key) {
+          const currentVal = currentYearData[deepClean(row.key)] || 0;
+          const previousVal = previousYearData[deepClean(row.key)] || 0;
+          
+          if (isInTaxSection) {
+            currentTaxExpense += currentVal;
+            previousTaxExpense += previousVal;
+          } else if (isInExpensesSection) {
+            currentExpensesTotal += currentVal;
+            previousExpensesTotal += previousVal;
+          } else {
+            // Income section
+            currentRevenueTotal += currentVal;
+            previousRevenueTotal += previousVal;
+          }
+        }
+      });
+    }
+
     // Pre-calculate totals for Balance Sheet
     if (!isPL) {
       structure.forEach((row) => {
@@ -312,14 +592,23 @@ const SRMPro = () => {
     return (
       <div className="space-y-4">
         <Card>
-          <CardHeader className="text-center">
+          <CardHeader className="text-center relative">
+            <Button 
+              onClick={() => handleExportToExcel(isPL ? 'pl' : 'bs')} 
+              variant="outline" 
+              size="sm"
+              className="absolute top-4 right-4 gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export Excel
+            </Button>
             <CardTitle className="text-2xl">{companyName}</CardTitle>
             <p className="text-sm text-muted-foreground">CIN: {cin}</p>
             <CardTitle className="text-xl mt-2">{isPL ? 'Statement of Profit & Loss' : 'Balance Sheet as at 31 March ' + periodYear}</CardTitle>
             <p className="text-sm font-medium">(Amount in ₹ {scaleLabels[scale]})</p>
             {hasDifference && (
               <p className="text-red-600 font-bold mt-2">
-                ⚠️ Balance Sheet does not balance! Difference: Current Year: {formatValue(currentDifference)}, Previous Year: {formatValue(previousDifference)}
+                ⚠️ Balance Sheet does not match! Difference: Current Year: {formatValue(currentDifference)}, Previous Year: {formatValue(previousDifference)}
               </p>
             )}
           </CardHeader>
@@ -351,6 +640,30 @@ const SRMPro = () => {
                     let displayCurrentTotal = 0;
                     let displayPreviousTotal = 0;
                     let isAssetTotal = false;
+                    
+                    // Handle P&L totals
+                    let showPLTotal = false;
+                    if (isPL) {
+                      if (row.label === 'Total Revenue') {
+                        showPLTotal = true;
+                        displayCurrentTotal = currentRevenueTotal;
+                        displayPreviousTotal = previousRevenueTotal;
+                      } else if (row.label === 'Total Expenses') {
+                        showPLTotal = true;
+                        displayCurrentTotal = currentExpensesTotal;
+                        displayPreviousTotal = previousExpensesTotal;
+                      } else if (row.label === 'Profit/(Loss) before tax') {
+                        showPLTotal = true;
+                        displayCurrentTotal = currentRevenueTotal - currentExpensesTotal;
+                        displayPreviousTotal = previousRevenueTotal - previousExpensesTotal;
+                      } else if (row.label === 'Profit/(Loss) for the period') {
+                        showPLTotal = true;
+                        const currentPBT = currentRevenueTotal - currentExpensesTotal;
+                        const previousPBT = previousRevenueTotal - previousExpensesTotal;
+                        displayCurrentTotal = currentPBT - currentTaxExpense;
+                        displayPreviousTotal = previousPBT - previousTaxExpense;
+                      }
+                    }
 
                     if (showTotal && !isPL) {
                       // Check if this is Assets total (second TOTAL) or Liabilities total (first TOTAL)
@@ -374,19 +687,20 @@ const SRMPro = () => {
                           ${row.h ? 'bg-slate-100 font-bold text-lg' : ''}
                           ${row.sub ? 'font-semibold bg-slate-50' : ''}
                           ${showTotal ? 'bg-blue-50 font-bold text-lg' : ''}
+                          ${showPLTotal ? 'bg-blue-50 font-bold text-lg' : ''}
                         `}
                       >
                         <td style={{ paddingLeft: indent }} className={`px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
                           {row.label}
                         </td>
                         <td className={`text-center px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {!row.h && !row.sub && !row.un ? row.note || '' : ''}
+                          {!row.h && !row.sub && !row.un && !showPLTotal ? row.note || '' : ''}
                         </td>
                         <td className={`text-right px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {showTotal ? formatValue(displayCurrentTotal) : !row.h && !row.sub ? formatValue(currentVal) : ''}
+                          {showTotal || showPLTotal ? formatValue(displayCurrentTotal) : !row.h && !row.sub ? formatValue(currentVal) : ''}
                         </td>
                         <td className={`text-right px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {showTotal ? formatValue(displayPreviousTotal) : !row.h && !row.sub ? formatValue(previousVal) : ''}
+                          {showTotal || showPLTotal ? formatValue(displayPreviousTotal) : !row.h && !row.sub ? formatValue(previousVal) : ''}
                         </td>
                       </tr>
                     );
@@ -458,7 +772,7 @@ const SRMPro = () => {
           </TabsTrigger>
           <TabsTrigger value="results" disabled={!data.length} className="flex items-center gap-2">
             <Search className="h-4 w-4" />
-            Results
+            Mapped TB
           </TabsTrigger>
           <TabsTrigger value="summary" disabled={!data.length} className="flex items-center gap-2">
             <FileText className="h-4 w-4" />
@@ -508,6 +822,23 @@ const SRMPro = () => {
                 </div>
 
                 <div className="space-y-1">
+                  <Label htmlFor="assessee-type" className="text-sm">
+                    Assessee Type
+                    {mappingLoaded && <span className="ml-2 text-xs text-green-600">✓ Mapping Loaded</span>}
+                  </Label>
+                  <Select value={assesseeType} onValueChange={(value: '3' | '4' | '5') => setAssesseeType(value)}>
+                    <SelectTrigger id="assessee-type" className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="3">Corporate</SelectItem>
+                      <SelectItem value="4">Non-Corporate</SelectItem>
+                      <SelectItem value="5">LLP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
                   <Label htmlFor="file-upload" className="text-sm">Select File</Label>
                   <Input
                     id="file-upload"
@@ -518,6 +849,17 @@ const SRMPro = () => {
                     className="h-9 text-sm"
                   />
                 </div>
+
+                {data.length > 0 && (
+                  <Button
+                    onClick={handleClearData}
+                    variant="destructive"
+                    className="w-full"
+                    disabled={loading}
+                  >
+                    Clear All Data
+                  </Button>
+                )}
 
                 {loading && (
                   <div className="flex items-center justify-center py-4">
@@ -559,27 +901,103 @@ const SRMPro = () => {
                       className="max-w-sm"
                     />
                     
+                    {/* Totals Summary - Opening Balance, Debit, Credit, Closing Balance */}
+                    {data.length > 0 && (
+                      <div className="flex gap-4 p-3 bg-slate-50 rounded-lg border justify-center flex-wrap">
+                        {Object.keys(data[0]).map((key) => {
+                          const keyLower = key.toLowerCase();
+                          const isTargetColumn = keyLower.includes('opening') || 
+                                               keyLower.includes('debit') || 
+                                               keyLower.includes('credit') || 
+                                               keyLower.includes('closing');
+                          if (isTargetColumn && trialBalanceTotals[key] !== undefined) {
+                            return (
+                              <div key={key} className="text-center px-3">
+                                <p className="text-xs text-muted-foreground font-medium mb-0.5">{key}</p>
+                                <p className="text-sm font-bold text-slate-800">
+                                  {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })}
+                      </div>
+                    )}
+                    
                     <div className="overflow-x-auto border rounded-lg max-h-96">
                       <table className="w-full text-sm">
                         <thead className="bg-slate-800 text-white sticky top-0">
                           <tr>
-                            {data[0] && Object.keys(data[0]).map((key) => (
+                            {data[0] && Object.keys(data[0]).filter(key => !key.toLowerCase().includes('amount')).map((key) => (
                               <th key={key} className="px-2 py-2 text-left font-medium whitespace-nowrap">
                                 <div className="space-y-1">
                                   <button
                                     onClick={() => handleSort(key)}
                                     className="flex items-center gap-1 hover:text-blue-300"
+                                    aria-label={`Sort by ${key}`}
                                   >
                                     {key}
                                     <ArrowUpDown className="h-3 w-3" />
                                   </button>
-                                  <Input
-                                    placeholder="Filter..."
-                                    value={columnFilters[key] || ''}
-                                    onChange={(e) => handleFilterChange(key, e.target.value)}
-                                    className="h-6 text-xs bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
+                                  <div className="relative">
+                                    <details className="group">
+                                      <summary className="h-6 text-xs bg-blue-600 text-white border border-blue-500 rounded px-2 py-1 cursor-pointer hover:bg-blue-700 list-none flex items-center justify-between">
+                                        <span className="truncate">
+                                          {columnFilters[key]?.length > 0 ? `${columnFilters[key].length} selected` : 'Filter...'}
+                                        </span>
+                                        <span className="ml-1">▾</span>
+                                      </summary>
+                                      <div className="absolute z-50 mt-1 w-64 bg-white border border-slate-300 rounded shadow-lg" onClick={(e) => e.stopPropagation()}>
+                                        <div className="sticky top-0 bg-white border-b p-2">
+                                          <Input
+                                            placeholder="Search..."
+                                            value={filterSearches[key] || ''}
+                                            onChange={(e) => setFilterSearches(prev => ({ ...prev, [key]: e.target.value }))}
+                                            className="h-7 text-xs"
+                                            autoFocus
+                                          />
+                                        </div>
+                                        <div className="max-h-60 overflow-y-auto">
+                                          {getUniqueColumnValues[key]
+                                            ?.filter(value => !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase()))
+                                            .slice(0, 200)
+                                            .map((value) => (
+                                            <label key={value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-100 cursor-pointer text-slate-900">
+                                              <input
+                                                type="checkbox"
+                                                checked={columnFilters[key]?.includes(value) || false}
+                                                onChange={() => handleFilterChange(key, value)}
+                                                className="rounded border-slate-300"
+                                              />
+                                              <span className="text-xs truncate">{value}</span>
+                                            </label>
+                                          ))}
+                                        </div>
+                                        <div className="sticky bottom-0 bg-white border-t flex">
+                                          {columnFilters[key]?.length > 0 && (
+                                            <button
+                                              onClick={() => setColumnFilters(prev => ({ ...prev, [key]: [] }))}
+                                              className="flex-1 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                                            >
+                                              Clear All
+                                            </button>
+                                          )}
+                                          <button
+                                            onClick={() => {
+                                              const allValues = getUniqueColumnValues[key]?.filter(value => 
+                                                !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase())
+                                              ) || [];
+                                              setColumnFilters(prev => ({ ...prev, [key]: allValues }));
+                                            }}
+                                            className="flex-1 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 border-l"
+                                          >
+                                            Select All
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </details>
+                                  </div>
                                 </div>
                               </th>
                             ))}
@@ -589,7 +1007,7 @@ const SRMPro = () => {
                           {filteredAndSortedData.slice(0, 100).map((row, i) => (
                             <tr key={i} className={`border-b hover:bg-slate-50`}>
                               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                              {Object.values(row).map((val: any, j) => (
+                              {Object.entries(row).filter(([key]) => !key.toLowerCase().includes('amount')).map(([key, val]: [string, any], j) => (
                                 <td key={j} className="px-2 py-1 whitespace-nowrap text-xs">
                                   {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                                 </td>
@@ -597,15 +1015,6 @@ const SRMPro = () => {
                             </tr>
                           ))}
                         </tbody>
-                        <tfoot className="bg-slate-100 font-bold sticky bottom-0">
-                          <tr>
-                            {data[0] && Object.keys(data[0]).map((key, idx) => (
-                              <td key={key} className="px-2 py-2 text-xs whitespace-nowrap">
-                                {idx === 0 ? 'TOTAL:' : typeof trialBalanceTotals[key] === 'number' ? trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}
-                              </td>
-                            ))}
-                          </tr>
-                        </tfoot>
                       </table>
                     </div>
                   </div>
@@ -620,7 +1029,7 @@ const SRMPro = () => {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Trial Balance Results</CardTitle>
+                  <CardTitle>Mapped Trial Balance</CardTitle>
                   <CardDescription>Processed ledger data with category mappings</CardDescription>
                 </div>
                 <div className="flex gap-4">
@@ -632,6 +1041,156 @@ const SRMPro = () => {
                     <XCircle className="h-5 w-5" />
                     <span className="font-semibold">{unmappedCount} Unmapped</span>
                   </div>
+                  <Button 
+                    onClick={() => handleExportToExcel('tb')} 
+                    variant="outline" 
+                    size="sm"
+                    className="gap-2"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export Excel
+                  </Button>
+                  <Dialog open={stockDetailsOpen} onOpenChange={setStockDetailsOpen}>
+                    <DialogTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        className="gap-2"
+                      >
+                        <Package className="h-4 w-4" />
+                        Stock Details
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-3xl">
+                      <DialogHeader>
+                        <DialogTitle>Stock Details</DialogTitle>
+                      </DialogHeader>
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-2 border-slate-800">
+                          <thead>
+                            <tr className="bg-slate-100">
+                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold">Category</th>
+                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold bg-amber-100">Opening Inventories</th>
+                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold bg-blue-100">Closing Inventories</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="px-4 py-3 border border-slate-800 font-medium">Raw Material</td>
+                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.rawMaterialOpening}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, rawMaterialOpening: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.rawMaterialClosing}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, rawMaterialClosing: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="px-4 py-3 border border-slate-800 font-medium">Finished Goods</td>
+                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.finishedGoodsOpening}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, finishedGoodsOpening: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.finishedGoodsClosing}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, finishedGoodsClosing: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="px-4 py-3 border border-slate-800 font-medium">Work-in-progress</td>
+                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.wipOpening}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, wipOpening: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.wipClosing}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, wipClosing: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="px-4 py-3 border border-slate-800 font-medium">Stock-in-trade</td>
+                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.stockInTradeOpening}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, stockInTradeOpening: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.stockInTradeClosing}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, stockInTradeClosing: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                            </tr>
+                            <tr className="bg-slate-100 font-bold">
+                              <td className="px-4 py-3 border border-slate-800">Total</td>
+                              <td className="px-4 py-3 border border-slate-800 bg-amber-50 text-right">
+                                {(
+                                  parseFloat(stockDetails.rawMaterialOpening || '0') +
+                                  parseFloat(stockDetails.finishedGoodsOpening || '0') +
+                                  parseFloat(stockDetails.wipOpening || '0') +
+                                  parseFloat(stockDetails.stockInTradeOpening || '0')
+                                ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td className="px-4 py-3 border border-slate-800 bg-blue-50 text-right">
+                                {(
+                                  parseFloat(stockDetails.rawMaterialClosing || '0') +
+                                  parseFloat(stockDetails.finishedGoodsClosing || '0') +
+                                  parseFloat(stockDetails.wipClosing || '0') +
+                                  parseFloat(stockDetails.stockInTradeClosing || '0')
+                                ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-4">
+                        <Button variant="outline" onClick={() => setStockDetailsOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button onClick={handleSaveStockDetails}>
+                          Save
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               </div>
             </CardHeader>
@@ -647,15 +1206,21 @@ const SRMPro = () => {
                   />
                 </div>
 
-                {/* Totals Summary */}
+                {/* Totals Summary - Opening Balance, Debit, Credit, Closing Balance */}
                 {data.length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-lg border">
+                  <div className="flex gap-6 p-4 bg-slate-50 rounded-lg border justify-center">
                     {Object.keys(data[0]).map((key) => {
-                      if (typeof data[0][key] === 'number' && trialBalanceTotals[key]) {
+                      const keyLower = key.toLowerCase();
+                      const isTargetColumn = keyLower.includes('opening') || 
+                                           keyLower.includes('debit') || 
+                                           keyLower.includes('credit') || 
+                                           keyLower.includes('closing');
+                      // Check if column has numeric total
+                      if (isTargetColumn && trialBalanceTotals[key] !== undefined) {
                         return (
-                          <div key={key} className="text-center">
-                            <p className="text-xs text-muted-foreground font-medium">{key}</p>
-                            <p className="text-lg font-bold text-slate-800">
+                          <div key={key} className="text-center px-4">
+                            <p className="text-xs text-muted-foreground font-medium mb-0.5">{key}</p>
+                            <p className="text-base font-bold text-slate-800">
                               {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </p>
                           </div>
@@ -670,23 +1235,75 @@ const SRMPro = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-800 text-white sticky top-0">
                       <tr>
-                        {data[0] && Object.keys(data[0]).map((key) => (
+                        {data[0] && Object.keys(data[0]).filter(key => !key.toLowerCase().includes('amount')).map((key) => (
                           <th key={key} className="px-3 py-2 text-left font-medium whitespace-nowrap">
                             <div className="space-y-1">
                               <button
                                 onClick={() => handleSort(key)}
                                 className="flex items-center gap-1 hover:text-blue-300 w-full"
+                                aria-label={`Sort by ${key}`}
                               >
                                 {key}
                                 <ArrowUpDown className="h-3 w-3" />
                               </button>
-                              <Input
-                                placeholder="Filter..."
-                                value={columnFilters[key] || ''}
-                                onChange={(e) => handleFilterChange(key, e.target.value)}
-                                className="h-7 text-xs bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
-                                onClick={(e) => e.stopPropagation()}
-                              />
+                              <div className="relative">
+                                <details className="group">
+                                  <summary className="h-7 text-xs bg-blue-600 text-white border border-blue-500 rounded px-2 py-1 cursor-pointer hover:bg-blue-700 list-none flex items-center justify-between">
+                                    <span className="truncate">
+                                      {columnFilters[key]?.length > 0 ? `${columnFilters[key].length} selected` : 'Filter...'}
+                                    </span>
+                                    <span className="ml-1">▾</span>
+                                  </summary>
+                                  <div className="absolute z-50 mt-1 w-64 bg-white border border-slate-300 rounded shadow-lg" onClick={(e) => e.stopPropagation()}>
+                                    <div className="sticky top-0 bg-white border-b p-2">
+                                      <Input
+                                        placeholder="Search..."
+                                        value={filterSearches[key] || ''}
+                                        onChange={(e) => setFilterSearches(prev => ({ ...prev, [key]: e.target.value }))}
+                                        className="h-7 text-xs"
+                                        autoFocus
+                                      />
+                                    </div>
+                                    <div className="max-h-60 overflow-y-auto">
+                                      {getUniqueColumnValues[key]
+                                        ?.filter(value => !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase()))
+                                        .slice(0, 200)
+                                        .map((value) => (
+                                        <label key={value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-100 cursor-pointer text-slate-900">
+                                          <input
+                                            type="checkbox"
+                                            checked={columnFilters[key]?.includes(value) || false}
+                                            onChange={() => handleFilterChange(key, value)}
+                                            className="rounded border-slate-300"
+                                          />
+                                          <span className="text-xs truncate">{value}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="sticky bottom-0 bg-white border-t flex">
+                                      {columnFilters[key]?.length > 0 && (
+                                        <button
+                                          onClick={() => setColumnFilters(prev => ({ ...prev, [key]: [] }))}
+                                          className="flex-1 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                                        >
+                                          Clear All
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={() => {
+                                          const allValues = getUniqueColumnValues[key]?.filter(value => 
+                                            !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase())
+                                          ) || [];
+                                          setColumnFilters(prev => ({ ...prev, [key]: allValues }));
+                                        }}
+                                        className="flex-1 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 border-l"
+                                      >
+                                        Select All
+                                      </button>
+                                    </div>
+                                  </div>
+                                </details>
+                              </div>
                             </div>
                           </th>
                         ))}
@@ -701,7 +1318,7 @@ const SRMPro = () => {
                             className={`border-b hover:bg-slate-50`}
                           >
                             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                            {Object.values(row).map((val: any, j) => (
+                            {Object.entries(row).filter(([key]) => !key.toLowerCase().includes('amount')).map(([key, val]: [string, any], j) => (
                               <td key={j} className="px-3 py-2 whitespace-nowrap">
                                 {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                               </td>
@@ -709,15 +1326,6 @@ const SRMPro = () => {
                           </tr>
                         ))}
                     </tbody>
-                    <tfoot className="bg-slate-100 font-bold sticky bottom-0">
-                      <tr>
-                        {data[0] && Object.keys(data[0]).map((key, idx) => (
-                          <td key={key} className="px-3 py-2 whitespace-nowrap">
-                            {idx === 0 ? 'TOTAL:' : typeof trialBalanceTotals[key] === 'number' ? trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}
-                          </td>
-                        ))}
-                      </tr>
-                    </tfoot>
                   </table>
                 </div>
               </div>
