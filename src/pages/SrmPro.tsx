@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle, Package } from 'lucide-react';
+import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle, Package, Upload, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { processAccountingData, summarizeData, deepClean } from '@/utils/srmProcessor';
 
@@ -51,6 +51,12 @@ const SRMPro = () => {
     stockInTradeOpening: '',
     stockInTradeClosing: '',
   });
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [editingRow, setEditingRow] = useState<any>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [rowToDelete, setRowToDelete] = useState<number | null>(null);
 
   // Load mapping file on mount
   useEffect(() => {
@@ -188,9 +194,121 @@ const SRMPro = () => {
     }
   };
 
+  const handleSelectRow = (rowIndex: number) => {
+    setSelectedRows(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(rowIndex)) {
+        newSet.delete(rowIndex);
+      } else {
+        newSet.add(rowIndex);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedRows.size === data.length) {
+      setSelectedRows(new Set());
+    } else {
+      setSelectedRows(new Set(data.map((_, i) => i)));
+    }
+  };
+
+  const handleEditRow = (rowIndex: number) => {
+    setEditingRow({ ...data[rowIndex], originalIndex: rowIndex });
+    setEditDialogOpen(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (editingRow && editingRow.originalIndex !== undefined) {
+      const newData = [...data];
+      const { originalIndex, ...rowData } = editingRow;
+      newData[originalIndex] = rowData;
+      setData(newData);
+      
+      // Recalculate summary from updated data
+      const summarized = summarizeData(newData);
+      setSummary(summarized);
+      if (uploadPeriod === 'current') {
+        setCurrentYearData(summarized);
+      } else {
+        setPreviousYearData(summarized);
+      }
+      
+      setEditDialogOpen(false);
+      setEditingRow(null);
+      setHasUnsavedChanges(true);
+      toast.success('Row updated successfully');
+    }
+  };
+
+  const handleDeleteConfirm = () => {
+    if (rowToDelete !== null) {
+      handleDeleteRow(rowToDelete);
+      setDeleteDialogOpen(false);
+      setRowToDelete(null);
+    }
+  };
+
+  const handleBulkAddNote = () => {
+    const note = prompt('Enter note to add to all selected rows:');
+    if (note) {
+      const newNotes = { ...rowNotes };
+      selectedRows.forEach(rowIndex => {
+        newNotes[rowIndex] = note;
+      });
+      setRowNotes(newNotes);
+      setHasUnsavedChanges(true);
+      toast.success(`Note added to ${selectedRows.size} row(s)`);
+    }
+  };
+
+  const handleBulkUploadEvidence = (files: FileList | null) => {
+    if (files && files.length > 0) {
+      const fileArray = Array.from(files);
+      const newEvidence = { ...rowEvidence };
+      selectedRows.forEach(rowIndex => {
+        newEvidence[rowIndex] = [...(newEvidence[rowIndex] || []), ...fileArray];
+      });
+      setRowEvidence(newEvidence);
+      setHasUnsavedChanges(true);
+      toast.success(`${files.length} file(s) uploaded to ${selectedRows.size} row(s)`);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    if (confirm(`Are you sure you want to delete ${selectedRows.size} row(s)?`)) {
+      const newData = data.filter((_, i) => !selectedRows.has(i));
+      setData(newData);
+      
+      // Recalculate summary from updated data
+      const summarized = summarizeData(newData);
+      setSummary(summarized);
+      if (uploadPeriod === 'current') {
+        setCurrentYearData(summarized);
+      } else {
+        setPreviousYearData(summarized);
+      }
+      
+      setSelectedRows(new Set());
+      setHasUnsavedChanges(true);
+      toast.success(`${selectedRows.size} row(s) deleted`);
+    }
+  };
+
   const handleDeleteRow = (rowIndex: number) => {
     const newData = data.filter((_, i) => i !== rowIndex);
     setData(newData);
+    
+    // Recalculate summary from updated data
+    const summarized = summarizeData(newData);
+    setSummary(summarized);
+    if (uploadPeriod === 'current') {
+      setCurrentYearData(summarized);
+    } else {
+      setPreviousYearData(summarized);
+    }
+    
     setHasUnsavedChanges(true);
     toast.success('Row deleted');
   };
@@ -209,9 +327,137 @@ const SRMPro = () => {
       return;
     }
     
-    // In a real application, this would save to a database
+    // Calculate totals
+    const totalOpeningInventories = 
+      parseFloat(stockDetails.rawMaterialOpening || '0') +
+      parseFloat(stockDetails.finishedGoodsOpening || '0') +
+      parseFloat(stockDetails.wipOpening || '0') +
+      parseFloat(stockDetails.stockInTradeOpening || '0');
+    
+    const totalClosingInventories = 
+      parseFloat(stockDetails.rawMaterialClosing || '0') +
+      parseFloat(stockDetails.finishedGoodsClosing || '0') +
+      parseFloat(stockDetails.wipClosing || '0') +
+      parseFloat(stockDetails.stockInTradeClosing || '0');
+    
+    // Remove any existing inventory adjustment entries
+    const filteredData = data.filter(row => 
+      row.Name !== 'Opening Inventories' && 
+      row.Name !== 'Closing Inventories' && 
+      row.Name !== 'Closing Inventories (PL)'
+    );
+    
+    // Add inventory adjustment line items
+    const inventoryAdjustments = [];
+    
+    // Create a template row from existing data to get all column structure
+    const templateRow = data[0] || {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const createInventoryRow = (overrides: any) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const newRow: any = {};
+      // Copy all columns from template and set to empty/zero
+      Object.keys(templateRow).forEach(key => {
+        if (key.includes('Group') && key.includes('Parent')) {
+          newRow[key] = ''; // Clear all Group.$Parent columns
+        } else {
+          newRow[key] = '';
+        }
+      });
+      // Apply specific values
+      Object.assign(newRow, overrides);
+      return newRow;
+    };
+    
+    // 1. Opening Inventories (negative value, mapped to Uncategorised Purchase Accounts)
+    if (totalOpeningInventories > 0) {
+      inventoryAdjustments.push(createInventoryRow({
+        Period: data[0]?.Period || '',
+        Branch: data[0]?.Branch || '',
+        'Ledger Code': '',
+        Name: 'Opening Inventories',
+        OpeningBalance: -totalOpeningInventories,
+        Debit: 0,
+        Credit: 0,
+        ClosingBalance: -totalOpeningInventories,
+        IsRevenue: false,
+        IsDeemedPositive: false,
+        TrailBalance: -totalOpeningInventories,
+        Ledger: 'Opening Inventories',
+        'Ledger Parent': '',
+        Group: '',
+        Parent: '',
+        'Mapped Category': 'Uncategorised Purchase Accounts',
+        AmountValue: -totalOpeningInventories,
+        '2nd Parent After Primary': '',
+        'Logic Trace': 'Stock Details - Opening Inventories'
+      }));
+    }
+    
+    // 2. Closing Inventories (negative value, for Balance Sheet)
+    if (totalClosingInventories > 0) {
+      inventoryAdjustments.push(createInventoryRow({
+        Period: data[0]?.Period || '',
+        Branch: data[0]?.Branch || '',
+        'Ledger Code': '',
+        Name: 'Closing Inventories',
+        OpeningBalance: 0,
+        Debit: 0,
+        Credit: 0,
+        ClosingBalance: -totalClosingInventories,
+        IsRevenue: false,
+        IsDeemedPositive: false,
+        TrailBalance: -totalClosingInventories,
+        Ledger: 'Closing Inventories',
+        'Ledger Parent': '',
+        Group: '',
+        Parent: '',
+        'Mapped Category': 'Inventories',
+        AmountValue: -totalClosingInventories,
+        '2nd Parent After Primary': '',
+        'Logic Trace': 'Stock Details - Closing Inventories (BS)'
+      }));
+      
+      // 3. Closing Inventories (PL) (positive value, mapped to Uncategorised Purchase Accounts)
+      inventoryAdjustments.push(createInventoryRow({
+        Period: data[0]?.Period || '',
+        Branch: data[0]?.Branch || '',
+        'Ledger Code': '',
+        Name: 'Closing Inventories (PL)',
+        OpeningBalance: 0,
+        Debit: 0,
+        Credit: 0,
+        ClosingBalance: totalClosingInventories,
+        IsRevenue: false,
+        IsDeemedPositive: false,
+        TrailBalance: totalClosingInventories,
+        Ledger: 'Closing Inventories (PL)',
+        'Ledger Parent': '',
+        Group: '',
+        Parent: '',
+        'Mapped Category': 'Uncategorised Purchase Accounts',
+        AmountValue: totalClosingInventories,
+        '2nd Parent After Primary': '',
+        'Logic Trace': 'Stock Details - Closing Inventories (PL)'
+      }));
+    }
+    
+    // Update data with inventory adjustments
+    const updatedData = [...filteredData, ...inventoryAdjustments];
+    setData(updatedData);
+    
+    // Recalculate summary from updated data
+    const summarized = summarizeData(updatedData);
+    setSummary(summarized);
+    if (uploadPeriod === 'current') {
+      setCurrentYearData(summarized);
+    } else {
+      setPreviousYearData(summarized);
+    }
+    
+    setHasUnsavedChanges(true);
     setStockDetailsOpen(false);
-    toast.success('Stock details saved successfully');
+    toast.success('Stock details saved and trial balance adjusted');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -561,6 +807,47 @@ const SRMPro = () => {
 
     // Pre-calculate totals for Balance Sheet
     if (!isPL) {
+      // First calculate P&L profit to add to Reserves & Surplus
+      let currentPLRevenueTotal = 0;
+      let previousPLRevenueTotal = 0;
+      let currentPLExpensesTotal = 0;
+      let previousPLExpensesTotal = 0;
+      let currentPLTaxExpense = 0;
+      let previousPLTaxExpense = 0;
+      let isInPLExpensesSection = false;
+      let isInPLTaxSection = false;
+      
+      plStructure.forEach((row) => {
+        if (row.label === 'EXPENSES') {
+          isInPLExpensesSection = true;
+        }
+        if (row.label === '(11) Tax expense') {
+          isInPLTaxSection = true;
+        }
+        if (row.label === 'Profit/(Loss) for the period') {
+          isInPLTaxSection = false;
+        }
+        
+        if (!row.h && !row.sub && row.key) {
+          const currentVal = currentYearData[deepClean(row.key)] || 0;
+          const previousVal = previousYearData[deepClean(row.key)] || 0;
+          
+          if (isInPLTaxSection) {
+            currentPLTaxExpense += currentVal;
+            previousPLTaxExpense += previousVal;
+          } else if (isInPLExpensesSection) {
+            currentPLExpensesTotal += currentVal;
+            previousPLExpensesTotal += previousVal;
+          } else {
+            currentPLRevenueTotal += currentVal;
+            previousPLRevenueTotal += previousVal;
+          }
+        }
+      });
+      
+      const currentProfit = currentPLRevenueTotal - currentPLExpensesTotal - currentPLTaxExpense;
+      const previousProfit = previousPLRevenueTotal - previousPLExpensesTotal - previousPLTaxExpense;
+      
       structure.forEach((row) => {
         if (row.label === 'ASSETS') {
           isInAssetsSection = true;
@@ -571,8 +858,14 @@ const SRMPro = () => {
         }
         
         if (!row.h && !row.sub && row.key) {
-          const currentVal = currentYearData[deepClean(row.key)] || 0;
-          const previousVal = previousYearData[deepClean(row.key)] || 0;
+          let currentVal = currentYearData[deepClean(row.key)] || 0;
+          let previousVal = previousYearData[deepClean(row.key)] || 0;
+          
+          // Add profit to Reserves & Surplus
+          if (deepClean(row.key) === deepClean('Uncategorised Reserves and Surplus')) {
+            currentVal += currentProfit;
+            previousVal += previousProfit;
+          }
           
           if (isInAssetsSection) {
             currentAssetsTotal += currentVal;
@@ -625,8 +918,56 @@ const SRMPro = () => {
                 </thead>
                 <tbody>
                   {structure.map((row, i) => {
-                    const currentVal = currentYearData[deepClean(row.key)] || 0;
-                    const previousVal = previousYearData[deepClean(row.key)] || 0;
+                    let currentVal = currentYearData[deepClean(row.key)] || 0;
+                    let previousVal = previousYearData[deepClean(row.key)] || 0;
+                    
+                    // Add profit to Reserves & Surplus for Balance Sheet
+                    if (!isPL && deepClean(row.key) === deepClean('Uncategorised Reserves and Surplus')) {
+                      // Calculate profit from P&L
+                      let currentPLRevenueTotal = 0;
+                      let previousPLRevenueTotal = 0;
+                      let currentPLExpensesTotal = 0;
+                      let previousPLExpensesTotal = 0;
+                      let currentPLTaxExpense = 0;
+                      let previousPLTaxExpense = 0;
+                      let isInPLExpensesSection = false;
+                      let isInPLTaxSection = false;
+                      
+                      plStructure.forEach((plRow) => {
+                        if (plRow.label === 'EXPENSES') {
+                          isInPLExpensesSection = true;
+                        }
+                        if (plRow.label === '(11) Tax expense') {
+                          isInPLTaxSection = true;
+                        }
+                        if (plRow.label === 'Profit/(Loss) for the period') {
+                          isInPLTaxSection = false;
+                        }
+                        
+                        if (!plRow.h && !plRow.sub && plRow.key) {
+                          const cVal = currentYearData[deepClean(plRow.key)] || 0;
+                          const pVal = previousYearData[deepClean(plRow.key)] || 0;
+                          
+                          if (isInPLTaxSection) {
+                            currentPLTaxExpense += cVal;
+                            previousPLTaxExpense += pVal;
+                          } else if (isInPLExpensesSection) {
+                            currentPLExpensesTotal += cVal;
+                            previousPLExpensesTotal += pVal;
+                          } else {
+                            currentPLRevenueTotal += cVal;
+                            previousPLRevenueTotal += pVal;
+                          }
+                        }
+                      });
+                      
+                      const currentProfit = currentPLRevenueTotal - currentPLExpensesTotal - currentPLTaxExpense;
+                      const previousProfit = previousPLRevenueTotal - previousPLExpensesTotal - previousPLTaxExpense;
+                      
+                      currentVal += currentProfit;
+                      previousVal += previousProfit;
+                    }
+                    
                     const isAlert = row.un && (Math.abs(currentVal) > 0 || Math.abs(previousVal) > 0);
 
                     let indent = '45px';
@@ -765,24 +1106,43 @@ const SRMPro = () => {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="upload" className="flex items-center gap-2">
+        <TabsList className="grid w-full grid-cols-5 bg-white border-b-2 border-gray-200 shadow-sm">
+          <TabsTrigger 
+            value="upload" 
+            className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 transition-all duration-200"
+          >
             <FileUp className="h-4 w-4" />
             Import
           </TabsTrigger>
-          <TabsTrigger value="results" disabled={!data.length} className="flex items-center gap-2">
+          <TabsTrigger 
+            value="results" 
+            disabled={!data.length} 
+            className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-all duration-200"
+          >
             <Search className="h-4 w-4" />
             Mapped TB
           </TabsTrigger>
-          <TabsTrigger value="summary" disabled={!data.length} className="flex items-center gap-2">
+          <TabsTrigger 
+            value="summary" 
+            disabled={!data.length} 
+            className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-all duration-200"
+          >
             <FileText className="h-4 w-4" />
             Summary
           </TabsTrigger>
-          <TabsTrigger value="balance-sheet" disabled={!data.length} className="flex items-center gap-2">
+          <TabsTrigger 
+            value="balance-sheet" 
+            disabled={!data.length} 
+            className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-all duration-200"
+          >
             <FileText className="h-4 w-4" />
             Balance Sheet
           </TabsTrigger>
-          <TabsTrigger value="profit-loss" disabled={!data.length} className="flex items-center gap-2">
+          <TabsTrigger 
+            value="profit-loss" 
+            disabled={!data.length} 
+            className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-all duration-200"
+          >
             <TrendingUp className="h-4 w-4" />
             P & L Account
           </TabsTrigger>
@@ -913,7 +1273,7 @@ const SRMPro = () => {
                           if (isTargetColumn && trialBalanceTotals[key] !== undefined) {
                             return (
                               <div key={key} className="text-center px-3">
-                                <p className="text-xs text-muted-foreground font-medium mb-0.5">{key}</p>
+                                <p className="text-xs text-muted-foreground font-medium mb-0.5">{key === 'TrailBalance' ? 'AILE' : key}</p>
                                 <p className="text-sm font-bold text-slate-800">
                                   {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                 </p>
@@ -929,7 +1289,10 @@ const SRMPro = () => {
                       <table className="w-full text-sm">
                         <thead className="bg-slate-800 text-white sticky top-0">
                           <tr>
-                            {data[0] && Object.keys(data[0]).filter(key => !key.toLowerCase().includes('amount')).map((key) => (
+                            {data[0] && Object.keys(data[0]).filter(key => {
+                              const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
+                              return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
+                            }).map((key) => (
                               <th key={key} className="px-2 py-2 text-left font-medium whitespace-nowrap">
                                 <div className="space-y-1">
                                   <button
@@ -937,7 +1300,7 @@ const SRMPro = () => {
                                     className="flex items-center gap-1 hover:text-blue-300"
                                     aria-label={`Sort by ${key}`}
                                   >
-                                    {key}
+                                    {key === 'TrailBalance' ? 'AILE' : key}
                                     <ArrowUpDown className="h-3 w-3" />
                                   </button>
                                   <div className="relative">
@@ -1006,8 +1369,10 @@ const SRMPro = () => {
                         <tbody>
                           {filteredAndSortedData.slice(0, 100).map((row, i) => (
                             <tr key={i} className={`border-b hover:bg-slate-50`}>
-                              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                              {Object.entries(row).filter(([key]) => !key.toLowerCase().includes('amount')).map(([key, val]: [string, any], j) => (
+                              {Object.entries(row).filter(([key]) => {
+                                const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
+                                return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
+                              }).map(([key, val]: [string, any], j) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
                                 <td key={j} className="px-2 py-1 whitespace-nowrap text-xs">
                                   {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                                 </td>
@@ -1080,6 +1445,7 @@ const SRMPro = () => {
                               <td className="px-2 py-2 border border-slate-800 bg-amber-50">
                                 <Input
                                   type="number"
+                                  step="any"
                                   value={stockDetails.rawMaterialOpening}
                                   onChange={(e) => setStockDetails(prev => ({ ...prev, rawMaterialOpening: e.target.value }))}
                                   className="w-full"
@@ -1089,6 +1455,7 @@ const SRMPro = () => {
                               <td className="px-2 py-2 border border-slate-800 bg-blue-50">
                                 <Input
                                   type="number"
+                                  step="any"
                                   value={stockDetails.rawMaterialClosing}
                                   onChange={(e) => setStockDetails(prev => ({ ...prev, rawMaterialClosing: e.target.value }))}
                                   className="w-full"
@@ -1101,6 +1468,7 @@ const SRMPro = () => {
                               <td className="px-2 py-2 border border-slate-800 bg-amber-50">
                                 <Input
                                   type="number"
+                                  step="any"
                                   value={stockDetails.finishedGoodsOpening}
                                   onChange={(e) => setStockDetails(prev => ({ ...prev, finishedGoodsOpening: e.target.value }))}
                                   className="w-full"
@@ -1110,6 +1478,7 @@ const SRMPro = () => {
                               <td className="px-2 py-2 border border-slate-800 bg-blue-50">
                                 <Input
                                   type="number"
+                                  step="any"
                                   value={stockDetails.finishedGoodsClosing}
                                   onChange={(e) => setStockDetails(prev => ({ ...prev, finishedGoodsClosing: e.target.value }))}
                                   className="w-full"
@@ -1122,6 +1491,7 @@ const SRMPro = () => {
                               <td className="px-2 py-2 border border-slate-800 bg-amber-50">
                                 <Input
                                   type="number"
+                                  step="any"
                                   value={stockDetails.wipOpening}
                                   onChange={(e) => setStockDetails(prev => ({ ...prev, wipOpening: e.target.value }))}
                                   className="w-full"
@@ -1131,6 +1501,7 @@ const SRMPro = () => {
                               <td className="px-2 py-2 border border-slate-800 bg-blue-50">
                                 <Input
                                   type="number"
+                                  step="any"
                                   value={stockDetails.wipClosing}
                                   onChange={(e) => setStockDetails(prev => ({ ...prev, wipClosing: e.target.value }))}
                                   className="w-full"
@@ -1143,6 +1514,7 @@ const SRMPro = () => {
                               <td className="px-2 py-2 border border-slate-800 bg-amber-50">
                                 <Input
                                   type="number"
+                                  step="any"
                                   value={stockDetails.stockInTradeOpening}
                                   onChange={(e) => setStockDetails(prev => ({ ...prev, stockInTradeOpening: e.target.value }))}
                                   className="w-full"
@@ -1152,6 +1524,7 @@ const SRMPro = () => {
                               <td className="px-2 py-2 border border-slate-800 bg-blue-50">
                                 <Input
                                   type="number"
+                                  step="any"
                                   value={stockDetails.stockInTradeClosing}
                                   onChange={(e) => setStockDetails(prev => ({ ...prev, stockInTradeClosing: e.target.value }))}
                                   className="w-full"
@@ -1219,7 +1592,7 @@ const SRMPro = () => {
                       if (isTargetColumn && trialBalanceTotals[key] !== undefined) {
                         return (
                           <div key={key} className="text-center px-4">
-                            <p className="text-xs text-muted-foreground font-medium mb-0.5">{key}</p>
+                            <p className="text-xs text-muted-foreground font-medium mb-0.5">{key === 'TrailBalance' ? 'AILE' : key}</p>
                             <p className="text-base font-bold text-slate-800">
                               {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </p>
@@ -1231,11 +1604,47 @@ const SRMPro = () => {
                   </div>
                 )}
 
+                {/* Bulk Actions Bar */}
+                {selectedRows.size > 0 && (
+                  <div className="p-4 bg-blue-50 rounded-lg flex items-center gap-4 border border-blue-200 mb-4">
+                    <span className="text-sm font-medium text-blue-900">{selectedRows.size} row(s) selected</span>
+                    <Button size="sm" variant="outline" onClick={handleBulkAddNote} className="bg-white">
+                      Add Note to Selected
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.multiple = true;
+                      input.onchange = (e) => handleBulkUploadEvidence((e.target as HTMLInputElement).files);
+                      input.click();
+                    }} className="bg-white">
+                      Upload Evidence to Selected
+                    </Button>
+                    <Button size="sm" variant="destructive" onClick={handleBulkDelete}>
+                      Delete Selected
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedRows(new Set())}>
+                      Clear Selection
+                    </Button>
+                  </div>
+                )}
+
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-800 text-white sticky top-0">
                       <tr>
-                        {data[0] && Object.keys(data[0]).filter(key => !key.toLowerCase().includes('amount')).map((key) => (
+                        <th className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedRows.size === filteredAndSortedData.length && filteredAndSortedData.length > 0}
+                            onChange={handleSelectAll}
+                            className="w-4 h-4 cursor-pointer"
+                          />
+                        </th>
+                        {data[0] && Object.keys(data[0]).filter(key => {
+                          const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
+                          return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
+                        }).map((key) => (
                           <th key={key} className="px-3 py-2 text-left font-medium whitespace-nowrap">
                             <div className="space-y-1">
                               <button
@@ -1243,7 +1652,7 @@ const SRMPro = () => {
                                 className="flex items-center gap-1 hover:text-blue-300 w-full"
                                 aria-label={`Sort by ${key}`}
                               >
-                                {key}
+                                {key === 'TrailBalance' ? 'AILE' : key}
                                 <ArrowUpDown className="h-3 w-3" />
                               </button>
                               <div className="relative">
@@ -1307,24 +1716,104 @@ const SRMPro = () => {
                             </div>
                           </th>
                         ))}
+                        <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Notes</th>
+                        <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Evidence</th>
+                        <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredAndSortedData
                         .slice(0, 100)
-                        .map((row, i) => (
-                          <tr
-                            key={i}
-                            className={`border-b hover:bg-slate-50`}
-                          >
-                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                            {Object.entries(row).filter(([key]) => !key.toLowerCase().includes('amount')).map(([key, val]: [string, any], j) => (
+                        .map((row, i) => {
+                          const originalIndex = data.findIndex(dataRow => dataRow === row);
+                          return (
+                            <tr
+                              key={i}
+                              className={`border-b hover:bg-slate-50 ${selectedRows.has(originalIndex) ? 'bg-blue-50' : ''}`}
+                            >
+                              <td className="px-3 py-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedRows.has(originalIndex)}
+                                  onChange={() => handleSelectRow(originalIndex)}
+                                  className="w-4 h-4 cursor-pointer"
+                                />
+                              </td>
+                            {Object.entries(row).filter(([key]) => {
+                              const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
+                              return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
+                            }).map(([key, val]: [string, any], j) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
                               <td key={j} className="px-3 py-2 whitespace-nowrap">
                                 {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                               </td>
                             ))}
+                              <td className="px-3 py-2">
+                                <Input
+                                  type="text"
+                                  placeholder="Add note..."
+                                  value={rowNotes[originalIndex] || ''}
+                                  onChange={(e) => handleAddNote(originalIndex, e.target.value)}
+                                  className="min-w-[150px] h-8 text-xs"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="file"
+                                    multiple
+                                    onChange={(e) => handleUploadEvidence(originalIndex, e.target.files)}
+                                    className="hidden"
+                                    id={`evidence-${originalIndex}`}
+                                  />
+                                  <label htmlFor={`evidence-${originalIndex}`}>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="gap-1 h-8 text-xs cursor-pointer"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        document.getElementById(`evidence-${originalIndex}`)?.click();
+                                      }}
+                                    >
+                                      <Upload className="h-3 w-3" />
+                                      Upload
+                                    </Button>
+                                  </label>
+                                  {rowEvidence[originalIndex] && rowEvidence[originalIndex].length > 0 && (
+                                    <span className="text-xs text-green-600">
+                                      {rowEvidence[originalIndex].length} file(s)
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-1 h-8 text-xs"
+                                    onClick={() => handleEditRow(originalIndex)}
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    className="gap-1 h-8 text-xs"
+                                    onClick={() => {
+                                      setRowToDelete(originalIndex);
+                                      setDeleteDialogOpen(true);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    Delete
+                                  </Button>
+                                </div>
+                              </td>
                           </tr>
-                        ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1424,6 +1913,68 @@ const SRMPro = () => {
         <TabsContent value="balance-sheet">{renderStatement(bsStructure, false)}</TabsContent>
         <TabsContent value="profit-loss">{renderStatement(plStructure, true)}</TabsContent>
       </Tabs>
+
+      {/* Edit Row Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Row</DialogTitle>
+          </DialogHeader>
+          {editingRow && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                {Object.keys(editingRow)
+                  .filter(key => key !== 'originalIndex')
+                  .map(key => (
+                    <div key={key} className="space-y-2">
+                      <Label htmlFor={key}>{key}</Label>
+                      <Input
+                        id={key}
+                        type={typeof editingRow[key] === 'number' ? 'number' : 'text'}
+                        step="any"
+                        value={editingRow[key] ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          setEditingRow((prev: any) => ({
+                            ...prev,
+                            [key]: typeof prev[key] === 'number' ? (value === '' ? 0 : parseFloat(value)) : value
+                          }));
+                        }}
+                      />
+                    </div>
+                  ))}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveEdit}>
+                  Save Changes
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Delete</DialogTitle>
+          </DialogHeader>
+          <p>Are you sure you want to delete this row? This action cannot be undone.</p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteConfirm}>
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
