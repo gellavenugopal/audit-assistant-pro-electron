@@ -34,6 +34,11 @@ const SRMPro = () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [mappingData, setMappingData] = useState<any[]>([]);
   const [mappingLoaded, setMappingLoaded] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rowNotes, setRowNotes] = useState<Record<number, string>>({});
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rowEvidence, setRowEvidence] = useState<Record<number, File[]>>({});
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Load mapping file on mount
   useEffect(() => {
@@ -155,6 +160,33 @@ const SRMPro = () => {
       console.error('Export error:', error);
       toast.error('Failed to export to Excel');
     }
+  };
+
+  const handleAddNote = (rowIndex: number, note: string) => {
+    setRowNotes(prev => ({ ...prev, [rowIndex]: note }));
+    setHasUnsavedChanges(true);
+  };
+
+  const handleUploadEvidence = (rowIndex: number, files: FileList | null) => {
+    if (files && files.length > 0) {
+      const fileArray = Array.from(files);
+      setRowEvidence(prev => ({ ...prev, [rowIndex]: [...(prev[rowIndex] || []), ...fileArray] }));
+      setHasUnsavedChanges(true);
+      toast.success(`${files.length} file(s) uploaded for row ${rowIndex + 1}`);
+    }
+  };
+
+  const handleDeleteRow = (rowIndex: number) => {
+    const newData = data.filter((_, i) => i !== rowIndex);
+    setData(newData);
+    setHasUnsavedChanges(true);
+    toast.success('Row deleted');
+  };
+
+  const handleSaveChanges = () => {
+    // In a real application, this would save to a database
+    setHasUnsavedChanges(false);
+    toast.success('Changes saved successfully');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
