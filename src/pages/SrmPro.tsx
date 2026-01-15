@@ -112,6 +112,51 @@ const SRMPro = () => {
     if (fileInput) fileInput.value = '';
   };
 
+  const handleExportToExcel = (type: 'tb' | 'bs' | 'pl') => {
+    try {
+      let wb: XLSX.WorkBook;
+      let fileName = '';
+
+      if (type === 'tb') {
+        // Export Mapped Trial Balance
+        fileName = `Mapped_TB_${companyName}_${periodYear}.xlsx`;
+        wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, 'Mapped TB');
+      } else if (type === 'bs') {
+        // Export Balance Sheet
+        fileName = `Balance_Sheet_${companyName}_${periodYear}.xlsx`;
+        wb = XLSX.utils.book_new();
+        const bsData = bsStructure.map(row => ({
+          'Particulars': row.label,
+          'Note No.': (!row.h && !row.sub && !row.un) ? (('note' in row) ? row.note || '' : '') : '',
+          [`${periodYear}`]: row.key ? formatValue(currentYearData[deepClean(row.key)] || 0) : (row.label === 'TOTAL' ? formatValue(0) : ''),
+          [`${parseInt(periodYear) - 1}`]: row.key ? formatValue(previousYearData[deepClean(row.key)] || 0) : (row.label === 'TOTAL' ? formatValue(0) : '')
+        }));
+        const ws = XLSX.utils.json_to_sheet(bsData);
+        XLSX.utils.book_append_sheet(wb, ws, 'Balance Sheet');
+      } else {
+        // Export P&L
+        fileName = `Profit_Loss_${companyName}_${periodYear}.xlsx`;
+        wb = XLSX.utils.book_new();
+        const plData = plStructure.map(row => ({
+          'Particulars': row.label,
+          'Note No.': (!row.h && !row.sub && !row.un) ? (('note' in row) ? row.note || '' : '') : '',
+          [`${periodYear}`]: row.key ? formatValue(currentYearData[deepClean(row.key)] || 0) : '',
+          [`${parseInt(periodYear) - 1}`]: row.key ? formatValue(previousYearData[deepClean(row.key)] || 0) : ''
+        }));
+        const ws = XLSX.utils.json_to_sheet(plData);
+        XLSX.utils.book_append_sheet(wb, ws, 'P&L Statement');
+      }
+
+      XLSX.writeFile(wb, fileName);
+      toast.success(`${type.toUpperCase()} exported to Excel successfully`);
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export to Excel');
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -490,14 +535,23 @@ const SRMPro = () => {
     return (
       <div className="space-y-4">
         <Card>
-          <CardHeader className="text-center">
+          <CardHeader className="text-center relative">
+            <Button 
+              onClick={() => handleExportToExcel(isPL ? 'pl' : 'bs')} 
+              variant="outline" 
+              size="sm"
+              className="absolute top-4 right-4 gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Export Excel
+            </Button>
             <CardTitle className="text-2xl">{companyName}</CardTitle>
             <p className="text-sm text-muted-foreground">CIN: {cin}</p>
             <CardTitle className="text-xl mt-2">{isPL ? 'Statement of Profit & Loss' : 'Balance Sheet as at 31 March ' + periodYear}</CardTitle>
             <p className="text-sm font-medium">(Amount in ₹ {scaleLabels[scale]})</p>
             {hasDifference && (
               <p className="text-red-600 font-bold mt-2">
-                ⚠️ Balance Sheet does not balance! Difference: Current Year: {formatValue(currentDifference)}, Previous Year: {formatValue(previousDifference)}
+                ⚠️ Balance Sheet does not match! Difference: Current Year: {formatValue(currentDifference)}, Previous Year: {formatValue(previousDifference)}
               </p>
             )}
           </CardHeader>
@@ -930,6 +984,15 @@ const SRMPro = () => {
                     <XCircle className="h-5 w-5" />
                     <span className="font-semibold">{unmappedCount} Unmapped</span>
                   </div>
+                  <Button 
+                    onClick={() => handleExportToExcel('tb')} 
+                    variant="outline" 
+                    size="sm"
+                    className="gap-2"
+                  >
+                    <Download className="h-4 w-4" />
+                    Export Excel
+                  </Button>
                 </div>
               </div>
             </CardHeader>
