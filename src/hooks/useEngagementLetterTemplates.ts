@@ -46,6 +46,12 @@ export function useEngagementLetterTemplates() {
     fileName: string
   ): Promise<boolean> => {
     try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      if (!userData.user) {
+        throw new Error('You must be signed in to upload templates');
+      }
+
       // Check if template already exists
       const existing = templates.find(t => t.template_type === templateType);
 
@@ -71,6 +77,7 @@ export function useEngagementLetterTemplates() {
             template_name: templateName,
             file_content: fileContent,
             file_name: fileName,
+            uploaded_by: userData.user.id,
           });
 
         if (error) throw error;

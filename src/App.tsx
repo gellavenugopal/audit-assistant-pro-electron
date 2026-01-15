@@ -14,11 +14,12 @@ import Dashboard from "./pages/Dashboard";
 import SelectEngagement from "./pages/SelectEngagement";
 import Engagements from "./pages/Engagements";
 // import TrialBalance from "./pages/TrialBalance"; // DEPRECATED - Migrated to TrialBalanceNew
-import TrialBalanceNew from "./pages/TrialBalanceNew";
+import FinancialReview from "./pages/FinancialReview";
 import Appointment from "./pages/Appointment";
 import Materiality from "./pages/Materiality";
 import RiskRegister from "./pages/RiskRegister";
 import AuditExecution from "./pages/AuditExecution";
+import ProcedureWorkpaper from "./pages/ProcedureWorkpaper";
 import EvidenceVault from "./pages/EvidenceVault";
 import ReviewNotes from "./pages/ReviewNotes";
 import Misstatements from "./pages/Misstatements";
@@ -26,6 +27,7 @@ import AuditTrail from "./pages/AuditTrail";
 import Completion from "./pages/Completion";
 import Settings from "./pages/Settings";
 import Feedback from "./pages/Feedback";
+import SrmPro from "./pages/SrmPro";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
@@ -91,17 +93,17 @@ const App = () => (
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <TrialBalanceNew />
+                        <FinancialReview />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
                 />
                 <Route
-                  path="/trial-balance-new"
+                  path="/financial-review"
                   element={
                     <ProtectedEngagementRoute>
                       <MainLayout>
-                        <TrialBalanceNew />
+                        <FinancialReview />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -162,6 +164,16 @@ const App = () => (
                     <ProtectedEngagementRoute>
                       <MainLayout>
                         <AuditExecution />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/procedures/:procedureId/workpaper"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <ProcedureWorkpaper />
                       </MainLayout>
                     </ProtectedEngagementRoute>
                   }
@@ -322,6 +334,16 @@ const App = () => (
                         <ComplianceApplicability />
                       </MainLayout>
                     </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/srm-pro"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <SrmPro />
+                      </MainLayout>
+                    </ProtectedRoute>
                   }
                 />
                 <Route path="*" element={<NotFound />} />

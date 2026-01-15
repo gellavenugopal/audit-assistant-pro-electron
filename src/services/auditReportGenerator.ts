@@ -14,6 +14,8 @@ import type { KeyAuditMatter } from '@/hooks/useKeyAuditMatters';
 import type { FirmSettings } from '@/hooks/useFirmSettings';
 import type { Partner } from '@/hooks/usePartners';
 
+const KAM_ENABLED = false;
+
 export type ReportBlock =
   | { kind: 'title'; text: string }
   | { kind: 'subtitle'; text: string }
@@ -54,7 +56,7 @@ export class AuditReportGenerator {
     const blocks: ReportBlock[] = [
       { kind: 'title', text: 'Independent Auditor’s Report' },
       { kind: 'subtitle', text: addressee },
-      { kind: 'heading', text: 'Report on the Audit of the Financial Statements' },
+      { kind: 'heading', text: 'Report on the Audit of the Standalone Financial Statements' },
       {
         kind: 'subheading',
         text: buildOpinionHeading(content.opinion_type),
@@ -135,7 +137,7 @@ export class AuditReportGenerator {
     }
 
     // Key Audit Matters
-    const includeKams = Boolean(content.include_kam ?? setup.is_listed_company);
+    const includeKams = KAM_ENABLED && Boolean(content.include_kam ?? setup.is_listed_company);
     if (includeKams && kams.length > 0) {
       blocks.push({ kind: 'subheading', text: 'Key Audit Matters' });
       blocks.push({ kind: 'paragraph', text: buildKAMIntro() });
@@ -161,7 +163,7 @@ export class AuditReportGenerator {
     blocks.push({ kind: 'paragraph', text: buildManagementResponsibilitiesParagraph(includeCashFlow) });
 
     blocks.push({ kind: 'subheading', text: "Auditor's Responsibilities for the Audit of the Standalone Financial Statements" });
-    blocks.push({ kind: 'paragraph', text: buildAuditorResponsibilitiesParagraph(Boolean(setup.ifc_applicable)) });
+    blocks.push({ kind: 'paragraph', text: buildAuditorResponsibilitiesParagraph(Boolean(setup.ifc_applicable), includeKams) });
 
     // Other Matter
     const hasBranchAuditorsMatter = setup.has_branch_auditors;

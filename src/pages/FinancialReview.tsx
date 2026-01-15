@@ -75,6 +75,7 @@ import { FilterModal } from '@/components/trial-balance-new/FilterModal';
 import { ClassificationResult } from '@/services/trialBalanceNewClassification';
 import { DEFAULT_GROUP_RULES, DEFAULT_KEYWORD_RULES, DEFAULT_OVERRIDE_RULES } from '@/data/scheduleIIIDefaultRules';
 import { H1_OPTIONS, getH2Options, getH3Options, getH4Options } from '@/data/classificationOptions';
+import { getActualBalanceSign } from '@/utils/naturalBalance';
 
 // Entity Types
 const ENTITY_TYPES = [
@@ -100,6 +101,17 @@ const BUSINESS_TYPES = [
 
 // Disabled entity types (not supported in this phase)
 const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
+
+const getConstitutionFromEntityType = (et: string) => {
+  const lower = et.toLowerCase();
+  if (lower.includes('company') || lower.includes('opc')) return 'company';
+  if (lower.includes('llp') || lower.includes('limited liability')) return 'llp';
+  if (lower.includes('partnership')) return 'partnership';
+  if (lower.includes('proprietorship') || lower.includes('sole') || lower.includes('individual')) return 'proprietorship';
+  if (lower.includes('trust')) return 'trust';
+  if (lower.includes('society')) return 'society';
+  return 'company';
+};
 
 // Helper function to automatically classify H1 and H2 based on Is Revenue and Closing Balance
 function applyAutoH1H2Classification(rows: LedgerRow[]): LedgerRow[] {
@@ -135,7 +147,7 @@ function applyAutoH1H2Classification(rows: LedgerRow[]): LedgerRow[] {
   });
 }
 
-export default function TrialBalanceNew() {
+export default function FinancialReview() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
   const odbcConnection = useTallyODBC();
@@ -143,6 +155,7 @@ export default function TrialBalanceNew() {
   
   // Entity and Business Info
   const [entityType, setEntityType] = useState<string>('');
+  const [entityTypeDraft, setEntityTypeDraft] = useState<string>('');
   const [entityName, setEntityName] = useState<string>('');
   const [businessType, setBusinessType] = useState<string>('');
   const [includeStockItems, setIncludeStockItems] = useState<boolean>(false);
@@ -150,19 +163,10 @@ export default function TrialBalanceNew() {
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   
   // Derive constitution from entity type
-  const constitution = useMemo(() => {
-    const et = entityType.toLowerCase();
-    if (et.includes('company') || et.includes('opc')) return 'company';
-    if (et.includes('llp') || et.includes('limited liability')) return 'llp';
-    if (et.includes('partnership')) return 'partnership';
-    if (et.includes('proprietorship') || et.includes('sole') || et.includes('individual')) return 'proprietorship';
-    if (et.includes('trust')) return 'trust';
-    if (et.includes('society')) return 'society';
-    return 'company'; // default
-  }, [entityType]);
+  const constitution = useMemo(() => getConstitutionFromEntityType(entityType), [entityType]);
   
   // Data State
-  const [actualData, setActualData] = useState<LedgerRow[]>([]); // NEW: Unclassified actual data
+  const [actualData, setActualData] = useState<LedgerRow[]>([]); // Unclassified actual data
   const [currentData, setCurrentData] = useState<LedgerRow[]>([]); // Classified data
   const [previousData, setPreviousData] = useState<LedgerRow[]>([]);
   const [currentStockData, setCurrentStockData] = useState<any[]>([]);
@@ -191,7 +195,7 @@ export default function TrialBalanceNew() {
   
   // UI State
   const [activeTab, setActiveTab] = useState('actual-tb'); // Start with Actual TB tab
-  
+
   // Column widths for resizable columns - Actual TB
   const {
     columnWidths: actualTbColumnWidths,
@@ -230,12 +234,21 @@ export default function TrialBalanceNew() {
     'H5': 180,
     'Status': 120
   });
+
+  const actualStickyOffsets = useMemo(() => {
+    const selection = 0;
+    const ledger = 32; // slimmer selection column
+    return { selection, ledger };
+  }, []);
+
+  const classifiedStickyOffsets = useMemo(() => {
+    const selection = 0;
+    const ledger = 32;
+    return { selection, ledger };
+  }, []);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [h1Filter, setH1Filter] = useState<string>('all');
-  const [h2Filter, setH2Filter] = useState<string>('all');
-  const [h3Filter, setH3Filter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [balanceFilter, setBalanceFilter] = useState<string>('all'); // all, positive, negative, zero
   const [fromDate, setFromDate] = useState<string>('2024-04-01');
@@ -244,6 +257,7 @@ export default function TrialBalanceNew() {
   const [isFetching, setIsFetching] = useState(false);
   const [isEntityDialogOpen, setIsEntityDialogOpen] = useState(false);
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number>(-1); // For shift+click range selection
   const [isBulkUpdateDialogOpen, setIsBulkUpdateDialogOpen] = useState(false);
   const [isSingleEditDialogOpen, setIsSingleEditDialogOpen] = useState(false);
   const [editingLedger, setEditingLedger] = useState<LedgerRow | null>(null);
@@ -254,6 +268,13 @@ export default function TrialBalanceNew() {
   const [isRuleTemplateDialogOpen, setIsRuleTemplateDialogOpen] = useState(false);
   const [isResetConfirmDialogOpen, setIsResetConfirmDialogOpen] = useState(false);
   const [ruleTemplateName, setRuleTemplateName] = useState<string>('');
+  
+  // Keep draft entity type in sync when dialog opens
+  useEffect(() => {
+    if (isEntityDialogOpen) {
+      setEntityTypeDraft(entityType);
+    }
+  }, [isEntityDialogOpen, entityType]);
   
   // Compute stock item counts and totals directly via useMemo (avoids infinite loop from callbacks)
   const { stockItemCount, stockTotals } = useMemo(() => {
@@ -273,14 +294,16 @@ export default function TrialBalanceNew() {
       return !(opening === 0 && closing === 0);
     });
     
+    const stockSearchTerm = activeTab === 'stock-items' ? searchTerm : '';
+
     // Apply search filter with null safety
-    const filtered = searchTerm
+    const filtered = stockSearchTerm
       ? nonZeroItems.filter(item => {
           if (!item) return false;
           const itemName = (item['Item Name'] || '').toLowerCase();
           const stockGroup = (item['Stock Group'] || '').toLowerCase();
           const primaryGroup = (item['Primary Group'] || '').toLowerCase();
-          const search = searchTerm.toLowerCase();
+          const search = stockSearchTerm.toLowerCase();
           return itemName.includes(search) || stockGroup.includes(search) || primaryGroup.includes(search);
         })
       : nonZeroItems;
@@ -295,7 +318,7 @@ export default function TrialBalanceNew() {
       stockItemCount: { filtered: filtered.length, total: nonZeroItems.length },
       stockTotals: totals
     };
-  }, [currentStockData, searchTerm]);
+  }, [currentStockData, searchTerm, activeTab]);
   
   // Column filters and sorting state for Actual TB
   const [actualTbColumnFilters, setActualTbColumnFilters] = useState<Record<string, Set<string | number>>>({});
@@ -321,28 +344,41 @@ export default function TrialBalanceNew() {
   const filteredActualData = useMemo(() => {
     let filtered = actualData;
     
-    // Search filter
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(row => 
-        (row['Ledger Name'] || '').toLowerCase().includes(searchLower) ||
-        (row['Primary Group'] || '').toLowerCase().includes(searchLower) ||
-        (row['Parent Group'] || '').toLowerCase().includes(searchLower)
-      );
+    // UNIVERSAL SEARCH FILTER - Works on ALL columns including numeric
+    const actualSearch = activeTab === 'actual-tb' ? searchTerm : '';
+    if (actualSearch) {
+      const searchLower = actualSearch.toLowerCase();
+      filtered = filtered.filter(row => {
+        // Build searchable string including ALL text and numeric columns
+        const searchableString = [
+          row['Ledger Name'] || '',
+          row['Primary Group'] || '',
+          row['Parent Group'] || '',
+          // Include numeric columns as formatted strings
+          (row['Opening Balance'] || 0).toString(),
+          (row['Debit'] || 0).toString(),
+          (row['Credit'] || 0).toString(),
+          (row['Closing Balance'] || 0).toString()
+        ].join('|').toLowerCase();
+        
+        return searchableString.includes(searchLower);
+      });
     }
     
     // Group filter
-    if (groupFilter !== 'all') {
-      filtered = filtered.filter(row => (row['Primary Group'] || '') === groupFilter);
+    const appliedGroupFilter = activeTab === 'actual-tb' ? groupFilter : 'all';
+    if (appliedGroupFilter !== 'all') {
+      filtered = filtered.filter(row => (row['Primary Group'] || '') === appliedGroupFilter);
     }
     
     // Balance filter
-    if (balanceFilter !== 'all') {
+    const appliedBalanceFilter = activeTab === 'actual-tb' ? balanceFilter : 'all';
+    if (appliedBalanceFilter !== 'all') {
       filtered = filtered.filter(row => {
         const balance = row['Closing Balance'] || 0;
-        if (balanceFilter === 'positive') return balance > 0;
-        if (balanceFilter === 'negative') return balance < 0;
-        if (balanceFilter === 'zero') return balance === 0;
+        if (appliedBalanceFilter === 'positive') return balance > 0;
+        if (appliedBalanceFilter === 'negative') return balance < 0;
+        if (appliedBalanceFilter === 'zero') return balance === 0;
         return true;
       });
     }
@@ -376,41 +412,43 @@ export default function TrialBalanceNew() {
     }
     
     return filtered;
-  }, [actualData, searchTerm, groupFilter, balanceFilter, actualTbColumnFilters, actualTbSortColumn, actualTbSortDirection]);
+  }, [actualData, searchTerm, groupFilter, balanceFilter, actualTbColumnFilters, actualTbSortColumn, actualTbSortDirection, activeTab]);
   
   // Filtered data for Classified TB
   const filteredData = useMemo(() => {
     let filtered = currentData;
     
-    // Search filter
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
-      filtered = filtered.filter(row => 
-        (row['Ledger Name'] || '').toLowerCase().includes(searchLower) ||
-        (row['Primary Group'] || '').toLowerCase().includes(searchLower) ||
-        (row['H1'] || '').toLowerCase().includes(searchLower) ||
-        (row['H2'] || '').toLowerCase().includes(searchLower)
-      );
+    // UNIVERSAL SEARCH FILTER - Works on ALL columns including numeric
+    const classifiedSearch = activeTab === 'classified-tb' ? searchTerm : '';
+    if (classifiedSearch) {
+      const searchLower = classifiedSearch.toLowerCase();
+      filtered = filtered.filter(row => {
+        // Build searchable string including ALL text and numeric columns
+        const searchableString = [
+          row['Ledger Name'] || '',
+          row['Primary Group'] || '',
+          row['Parent Group'] || '',
+          row['H1'] || '',
+          row['H2'] || '',
+          row['H3'] || '',
+          row['H4'] || '',
+          row['H5'] || '',
+          row['Status'] || '',
+          // Include numeric columns as formatted strings
+          (row['Opening Balance'] || 0).toString(),
+          (row['Debit'] || 0).toString(),
+          (row['Credit'] || 0).toString(),
+          (row['Closing Balance'] || 0).toString()
+        ].join('|').toLowerCase();
+        
+        return searchableString.includes(searchLower);
+      });
     }
     
     // Status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(row => (row['Status'] || 'Unmapped') === statusFilter);
-    }
-    
-    // H1 filter
-    if (h1Filter !== 'all') {
-      filtered = filtered.filter(row => (row['H1'] || '') === h1Filter);
-    }
-    
-    // H2 filter
-    if (h2Filter !== 'all') {
-      filtered = filtered.filter(row => (row['H2'] || '') === h2Filter);
-    }
-    
-    // H3 filter
-    if (h3Filter !== 'all') {
-      filtered = filtered.filter(row => (row['H3'] || '') === h3Filter);
+    const appliedStatusFilter = activeTab === 'classified-tb' ? statusFilter : 'all';
+    if (appliedStatusFilter !== 'all') {
+      filtered = filtered.filter(row => (row['Status'] || 'Unmapped') === appliedStatusFilter);
     }
     
     // Apply column filters
@@ -442,7 +480,34 @@ export default function TrialBalanceNew() {
     }
     
     return filtered;
-  }, [currentData, searchTerm, statusFilter, h1Filter, h2Filter, h3Filter, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection]);
+  }, [currentData, searchTerm, statusFilter, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection, activeTab]);
+  
+  // Classification status counter
+  const classificationStatus = useMemo(() => {
+    const total = actualData.length; // Total rows in Actual TB
+    const classified = currentData.filter(row => row.H1 && row.H1.trim() !== '').length; // Rows with H1 filled
+    return {
+      total,
+      classified,
+      unclassified: total - classified,
+      percentageComplete: total > 0 ? Math.round((classified / total) * 100) : 0
+    };
+  }, [actualData, currentData]);
+  
+  // Selected rows that are in filtered view (for accurate bulk action count)
+  const selectedFilteredCount = useMemo(() => {
+    // Get indices of filtered rows
+    const filteredIndices = new Set(
+      filteredData.map(row => 
+        currentData.findIndex(r => r['Composite Key'] === row['Composite Key'])
+      ).filter(idx => idx !== -1)
+    );
+    
+    // Count how many selected indices are in filtered set
+    return Array.from(selectedRowIndices).filter(idx => filteredIndices.has(idx)).length;
+  }, [selectedRowIndices, filteredData, currentData]);
+  
+
   
   // Totals calculation - based on active tab
   const totals = useMemo(() => {
@@ -533,8 +598,11 @@ export default function TrialBalanceNew() {
   }, [odbcConnection, entityType, businessType]);
   
   // Fetch data from Tally after entity selection
-  const handleFetchFromTally = useCallback(async () => {
-    if (!entityType || !businessType) {
+  const handleFetchFromTally = useCallback(async (overrideEntityType?: string) => {
+    const effectiveEntityType = overrideEntityType || entityType;
+    const effectiveConstitution = getConstitutionFromEntityType(effectiveEntityType);
+
+    if (!effectiveEntityType || !businessType) {
       toast({
         title: 'Setup Required',
         description: 'Please complete entity type and business type selection',
@@ -562,18 +630,8 @@ export default function TrialBalanceNew() {
         return;
       }
       
-      // Convert to LedgerRow format - NEW LOGIC: show row only if NOT all 5 columns are zero
+      // Convert to LedgerRow format and apply hard filter for Actual TB
       const processedData: LedgerRow[] = lines
-        .filter(line => {
-          // Show row ONLY IF at least one column is non-zero
-          const opening = line.openingBalance || 0;
-          const debit = Math.abs(line.totalDebit || 0);
-          const credit = Math.abs(line.totalCredit || 0);
-          const closing = line.closingBalance || 0;
-          
-          // Hide only if ALL are zero
-          return !(opening === 0 && debit === 0 && credit === 0 && closing === 0);
-        })
         .map(line => ({
           'Ledger Name': line.accountHead,
           'Primary Group': line.primaryGroup || '',
@@ -585,24 +643,31 @@ export default function TrialBalanceNew() {
           'Closing Balance': line.closingBalance || 0,
           'Is Revenue': line.isRevenue ? 'Yes' : 'No',
           'Sheet Name': 'TB CY'
-        }));
+        }))
+        .filter(row => {
+          // HARD FILTER: Hide completely inactive ledgers (Opening=0 AND Debit=0 AND Credit=0 AND Closing=0)
+          const opening = row['Opening Balance'] || 0;
+          const debit = row['Debit'] || 0;
+          const credit = row['Credit'] || 0;
+          const closing = row['Closing Balance'] || 0;
+          return !(opening === 0 && debit === 0 && credit === 0 && closing === 0);
+        });
       
-      // Store actual data (unclassified)
+      // Store actual data (unclassified) - FILTERED DATA (no completely inactive ledgers)
       setActualData(processedData);
       
-      // For classification: Exclude rows where BOTH Opening=0 AND Closing=0
-      const dataToClassify = processedData.filter(row => {
-        const opening = row['Opening Balance'] || 0;
-        const closing = row['Closing Balance'] || 0;
-        // Include if either opening or closing is non-zero
-        return !(opening === 0 && closing === 0);
-      });
+      // Classify ALL data (no filtering before classification)
+      const classified = classifyDataframeBatch(processedData, savedMappings, businessType, effectiveConstitution);
       
-      // Auto-classify the filtered data (now handles IsRevenue internally)
-      const classified = classifyDataframeBatch(dataToClassify, savedMappings, businessType, constitution);
+      // VALIDATION: Log data integrity
+      console.log(`[DATA INTEGRITY] Ingested: ${lines.length}, Processed: ${processedData.length}, Classified: ${classified.length}`);
+      if (processedData.length !== classified.length) {
+        console.error(`[CRITICAL] Data loss detected: ${processedData.length - classified.length} rows lost during classification`);
+      }
       
       // Import directly based on selected period type
       if (importPeriodType === 'current') {
+        setActualData(processedData);
         setCurrentData(classified);
       } else {
         setPreviousData(classified);
@@ -671,7 +736,45 @@ export default function TrialBalanceNew() {
       setIsFetching(false);
       setIsEntityDialogOpen(false);
     }
-  }, [entityType, businessType, fromDate, toDate, odbcConnection, savedMappings, constitution, importPeriodType, currentEngagement, trialBalanceDB, toast]);
+  }, [entityType, businessType, fromDate, toDate, odbcConnection, savedMappings, importPeriodType, currentEngagement, trialBalanceDB, toast]);
+
+  // Save only entity type override and optionally re-run classification
+  const handleSaveEntityType = useCallback(async () => {
+    if (!entityTypeDraft) {
+      toast({
+        title: 'Entity type required',
+        description: 'Please select an entity type to continue',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const newConstitution = getConstitutionFromEntityType(entityTypeDraft);
+    const hasData = currentData.length > 0 || previousData.length > 0;
+    let proceed = true;
+
+    if (hasData) {
+      proceed = window.confirm('Update entity type and re-run classification on the loaded trial balance? This may change note visibility.');
+    }
+
+    setEntityType(entityTypeDraft);
+
+    if (proceed && currentData.length > 0 && actualData.length > 0) {
+      const reclassified = classifyDataframeBatch(actualData, savedMappings, businessType, newConstitution);
+      setCurrentData(reclassified);
+      toast({
+        title: 'Entity updated',
+        description: 'Entity type overridden and classifications refreshed.',
+      });
+    } else {
+      toast({
+        title: 'Entity updated',
+        description: 'Entity type overridden. Re-run classification when ready.',
+      });
+    }
+
+    setIsEntityDialogOpen(false);
+  }, [entityTypeDraft, currentData.length, previousData.length, actualData, savedMappings, businessType, toast]);
   
   // Handle period selection confirmation
   const handlePeriodConfirm = useCallback(async () => {
@@ -694,7 +797,7 @@ export default function TrialBalanceNew() {
         debit: row['Debit'] || 0,
         credit: row['Credit'] || 0,
         closing_balance: row['Closing Balance'] || 0,
-        balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+        balance_type: getActualBalanceSign(row),
         period_type: importPeriodType,
         period_ending: toDate || null,
         face_group: row.H1 || null,
@@ -884,30 +987,29 @@ export default function TrialBalanceNew() {
   const toggleRowSelection = useCallback((index: number, event?: React.MouseEvent) => {
     setSelectedRowIndices(prev => {
       const newSet = new Set(prev);
-      if (event?.ctrlKey || event?.metaKey) {
-        // Toggle selection
+      
+      if (event?.shiftKey && lastSelectedIndex !== -1) {
+        // SHIFT+CLICK: Range selection from last selected to current
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        for (let i = start; i <= end; i++) {
+          newSet.add(i);
+        }
+      } else {
+        // REGULAR CLICK: Toggle single row selection
         if (newSet.has(index)) {
           newSet.delete(index);
         } else {
           newSet.add(index);
         }
-      } else if (event?.shiftKey && prev.size > 0) {
-        // Range selection
-        const indices = Array.from(prev);
-        const lastIndex = indices[indices.length - 1];
-        const start = Math.min(lastIndex, index);
-        const end = Math.max(lastIndex, index);
-        for (let i = start; i <= end; i++) {
-          newSet.add(i);
-        }
-      } else {
-        // Single selection
-        newSet.clear();
-        newSet.add(index);
       }
+      
       return newSet;
     });
-  }, []);
+    
+    // Update last selected index for shift+click
+    setLastSelectedIndex(index);
+  }, [lastSelectedIndex]);
 
   // Excel-like keyboard navigation
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
@@ -951,8 +1053,15 @@ export default function TrialBalanceNew() {
       setSavedMappings(defaultMappings);
     }
   }, [currentEngagement?.id]);
+
+  // Reset local state buckets when engagement switches to prevent bleed across clients
+  useEffect(() => {
+    setActualData([]);
+    setCurrentData([]);
+    setCurrentStockData([]);
+  }, [currentEngagement?.id]);
   
-  // Load data from database when engagement changes or database lines are loaded
+  // Load data from cache/database when engagement changes
   useEffect(() => {
     if (!currentEngagement?.id) return;
     
@@ -981,9 +1090,38 @@ export default function TrialBalanceNew() {
         console.error('Failed to load stock data:', e);
       }
     }
+
+    // Load Actual TB from localStorage
+    const savedActual = localStorage.getItem(`tb_actual_${currentEngagement.id}`);
+    let hydrated = false;
+    if (savedActual) {
+      try {
+        const parsedActual = JSON.parse(savedActual);
+        if (Array.isArray(parsedActual) && parsedActual.length > 0) {
+          setActualData(parsedActual);
+          hydrated = true;
+        }
+      } catch (e) {
+        console.error('Failed to load actual TB:', e);
+      }
+    }
+
+    // Load Classified TB from localStorage
+    const savedClassified = localStorage.getItem(`tb_classified_${currentEngagement.id}`);
+    if (savedClassified) {
+      try {
+        const parsedClassified = JSON.parse(savedClassified);
+        if (Array.isArray(parsedClassified) && parsedClassified.length > 0) {
+          setCurrentData(parsedClassified);
+          hydrated = true;
+        }
+      } catch (e) {
+        console.error('Failed to load classified TB:', e);
+      }
+    }
     
-    // Convert database lines to LedgerRow format
-    if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0 && currentData.length === 0) {
+    // Fallback to database if nothing in local cache
+    if (!hydrated && trialBalanceDB.lines && trialBalanceDB.lines.length > 0) {
       const loadedData: LedgerRow[] = trialBalanceDB.lines.map(line => ({
         'Ledger Name': line.account_name,
         'Primary Group': line.ledger_primary_group || '',
@@ -1003,7 +1141,6 @@ export default function TrialBalanceNew() {
         'Status': (line.face_group || line.note_group) ? 'Mapped' : 'Unmapped'
       }));
       
-      // Set both actualData and currentData
       setActualData(loadedData);
       setCurrentData(loadedData);
       
@@ -1025,6 +1162,18 @@ export default function TrialBalanceNew() {
       }));
     }
   }, [currentEngagement?.id, entityType, entityName, businessType]);
+
+  // Persist Actual TB per engagement
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    localStorage.setItem(`tb_actual_${currentEngagement.id}`, JSON.stringify(actualData));
+  }, [actualData, currentEngagement?.id]);
+
+  // Persist Classified TB per engagement
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    localStorage.setItem(`tb_classified_${currentEngagement.id}`, JSON.stringify(currentData));
+  }, [currentData, currentEngagement?.id]);
   
   // Save stock data to localStorage when it changes
   useEffect(() => {
@@ -1042,7 +1191,9 @@ export default function TrialBalanceNew() {
     if (trialBalanceDB.loading) return;
     
     // Debounce the save operation
+    let cancelled = false;
     const saveTimeout = setTimeout(async () => {
+      if (cancelled) return;
       try {
         const dbLines: TrialBalanceLineInput[] = currentData.map(row => ({
           account_code: row['Composite Key'] || '',
@@ -1053,7 +1204,7 @@ export default function TrialBalanceNew() {
           debit: row['Debit'] || 0,
           credit: row['Credit'] || 0,
           closing_balance: row['Closing Balance'] || 0,
-          balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+          balance_type: getActualBalanceSign(row),
           period_type: 'current',
           period_ending: toDate || null,
           face_group: row['H1'] || null,
@@ -1064,14 +1215,17 @@ export default function TrialBalanceNew() {
         }));
         
         // Use upsert mode to avoid duplicates
-        await trialBalanceDB.importLines(dbLines, true);
+        await trialBalanceDB.importLines(dbLines, true, false);
         console.log('Auto-saved trial balance data');
       } catch (error) {
         console.error('Failed to auto-save trial balance:', error);
       }
     }, 2000); // 2 second debounce
     
-    return () => clearTimeout(saveTimeout);
+    return () => {
+      cancelled = true;
+      clearTimeout(saveTimeout);
+    };
   }, [currentData, currentEngagement?.id, toDate]);
   
   useEffect(() => {
@@ -1370,7 +1524,7 @@ export default function TrialBalanceNew() {
             debit: row['Debit'] || 0,
             credit: row['Credit'] || 0,
             closing_balance: row['Closing Balance'] || 0,
-            balance_type: (row['Closing Balance'] || 0) >= 0 ? 'Dr' : 'Cr',
+            balance_type: getActualBalanceSign(row),
             period_type: 'current',
             period_ending: toDate || null,
             face_group: row.H1 || null,
@@ -1551,12 +1705,37 @@ export default function TrialBalanceNew() {
   // Reset all filters
   const handleResetFilters = useCallback(() => {
     setStatusFilter('all');
-    setH1Filter('all');
-    setH2Filter('all');
-    setH3Filter('all');
     setGroupFilter('all');
     setBalanceFilter('all');
   }, []);
+
+  // Delete selected rows from the active grid (Actual or Classified)
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedRowIndices.size === 0) {
+      toast({ title: 'No selection', description: 'Select ledger rows to delete first.' });
+      return;
+    }
+
+    const buildKey = (row: LedgerRow) => row['Composite Key'] || generateLedgerKey(row['Ledger Name'] || '', row['Parent Group'] || row['Primary Group'] || '');
+    const source = activeTab === 'actual-tb' ? actualData : currentData;
+
+    const selectedKeys = new Set(
+      source
+        .map((row, idx) => (selectedRowIndices.has(idx) ? buildKey(row) : null))
+        .filter((key): key is string => Boolean(key))
+    );
+
+    if (selectedKeys.size === 0) {
+      toast({ title: 'Nothing to delete', description: 'Could not resolve selected rows.' });
+      return;
+    }
+
+    setActualData(prev => prev.filter(row => !selectedKeys.has(buildKey(row))));
+    setCurrentData(prev => prev.filter(row => !selectedKeys.has(buildKey(row))));
+    setSelectedRowIndices(new Set());
+
+    toast({ title: 'Deleted', description: `${selectedKeys.size} row(s) removed from this engagement.` });
+  }, [activeTab, actualData, currentData, selectedRowIndices, toast]);
 
   // Clear Data - clears both Actual TB and Classified TB
   const handleClear = useCallback(async () => {
@@ -1577,13 +1756,15 @@ export default function TrialBalanceNew() {
         // Reset filters
         setSearchTerm('');
         setStatusFilter('all');
-        setH1Filter('all');
-        setH2Filter('all');
-        setH3Filter('all');
         setGroupFilter('all');
         setBalanceFilter('all');
         setActualTbColumnFilters({});
         setClassifiedTbColumnFilters({});
+
+        // Clear engagement-scoped caches
+        localStorage.removeItem(`tb_actual_${currentEngagement?.id}`);
+        localStorage.removeItem(`tb_classified_${currentEngagement?.id}`);
+        localStorage.removeItem(`tb_stock_${currentEngagement?.id}`);
         
         toast({
           title: 'Data Cleared',
@@ -1882,21 +2063,21 @@ export default function TrialBalanceNew() {
             variant="outline"
             size="sm"
             onClick={() => {
-              if (selectedRowIndices.size === 0) {
+              if (selectedFilteredCount === 0) {
                 toast({
                   title: 'No Selection',
-                  description: 'Please select rows to update',
+                  description: 'Please select visible filtered rows to update',
                   variant: 'destructive'
                 });
                 return;
               }
               setIsBulkUpdateDialogOpen(true);
             }}
-            disabled={currentData.length === 0 || selectedRowIndices.size === 0}
+            disabled={currentData.length === 0 || selectedFilteredCount === 0}
             className="h-8"
           >
             <Settings className="w-3 h-3 mr-1.5" />
-            Update {selectedRowIndices.size > 0 && `(${selectedRowIndices.size})`}
+            Update {selectedFilteredCount > 0 && `(${selectedFilteredCount})`}
           </Button>
 
           {/* Export Dropdown */}
@@ -2047,9 +2228,6 @@ export default function TrialBalanceNew() {
             {(() => {
               const activeCount = [
                 statusFilter !== 'all',
-                h1Filter !== 'all',
-                h2Filter !== 'all',
-                h3Filter !== 'all',
                 groupFilter !== 'all',
                 balanceFilter !== 'all',
               ].filter(Boolean).length;
@@ -2074,46 +2252,13 @@ export default function TrialBalanceNew() {
                 </button>
               </Badge>
             )}
-            {h1Filter !== 'all' && (
-              <Badge variant="secondary" className="gap-1">
-                {h1Filter}
-                <button
-                  onClick={() => setH1Filter('all')}
-                  className="hover:bg-gray-300 rounded-full p-0.5"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </Badge>
-            )}
-            {h2Filter !== 'all' && (
-              <Badge variant="secondary" className="gap-1">
-                {h2Filter}
-                <button
-                  onClick={() => setH2Filter('all')}
-                  className="hover:bg-gray-300 rounded-full p-0.5"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </Badge>
-            )}
-            {h3Filter !== 'all' && (
-              <Badge variant="secondary" className="gap-1">
-                {h3Filter}
-                <button
-                  onClick={() => setH3Filter('all')}
-                  className="hover:bg-gray-300 rounded-full p-0.5"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </Badge>
-            )}
           </div>
 
           {/* Selection Info & Add Line */}
           <div className="flex items-center gap-2">
-            {selectedRowIndices.size > 0 && (
+            {selectedFilteredCount > 0 && (
               <Badge variant="default" className="h-9 px-3">
-                {selectedRowIndices.size} selected
+                {selectedFilteredCount} of {filteredData.length} selected
               </Badge>
             )}
             <Button 
@@ -2123,7 +2268,17 @@ export default function TrialBalanceNew() {
               className="h-9"
             >
               <Plus className="w-4 h-4 mr-1" />
-              Add Line
+              {activeTab === 'stock-items' ? 'Add Item' : 'Add Ledger'}
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleDeleteSelected}
+              className="h-9"
+              disabled={selectedRowIndices.size === 0}
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              Delete Selected
             </Button>
           </div>
         </div>
@@ -2137,26 +2292,26 @@ export default function TrialBalanceNew() {
         </div>
       
         {/* Modern Tabs Navigation */}
-        <div className="bg-white border-b">
+        <div className="bg-white border-b py-0.5">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="h-7 bg-transparent border-b-0 px-2 gap-0 rounded-none justify-start">
+            <TabsList className="h-6 bg-transparent border-b-0 px-2 gap-0 rounded-none justify-start">
               <TabsTrigger 
                 value="actual-tb"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 px-2 py-0"
               >
                 <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Actual TB
               </TabsTrigger>
               <TabsTrigger 
                 value="classified-tb"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
               >
                 <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Classified TB
               </TabsTrigger>
               <TabsTrigger 
                 value="stock-items"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
               >
                 <Package className="w-3 h-3 mr-1" />
                 Stock Items
@@ -2168,14 +2323,23 @@ export default function TrialBalanceNew() {
               </TabsTrigger>
               <TabsTrigger 
                 value="reports"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
               >
                 <FileText className="w-3 h-3 mr-1" />
                 Financial Statements
               </TabsTrigger>
               <TabsTrigger 
+                value="exceptions"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
+              >
+                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Exception Report
+              </TabsTrigger>
+              <TabsTrigger 
                 value="notes"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-7 px-2"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
               >
                 <FileText className="w-3 h-3 mr-1" />
                 Notes
@@ -2190,11 +2354,11 @@ export default function TrialBalanceNew() {
             
             {/* ACTUAL TRIAL BALANCE TAB */}
             <TabsContent value="actual-tb" className="mt-0 p-1">
-              <div className="border rounded overflow-hidden" style={{ height: 'calc(100vh - 180px)' }}>
+              <div className="border rounded overflow-y-auto" style={{ height: 'calc(100vh - 180px)' }}>
             <Table>
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
-                  <TableHead className="w-12 sticky top-0 bg-white">
+                  <TableHead className="w-8 sticky top-0 bg-white" style={{ left: actualStickyOffsets.selection, zIndex: 20 }}>
                     <input
                       type="checkbox"
                       checked={selectedRowIndices.size === actualData.length && actualData.length > 0}
@@ -2208,7 +2372,7 @@ export default function TrialBalanceNew() {
                       title="Select All / Deselect All"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Ledger Name'] }}>
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: 200, left: actualStickyOffsets.ledger, zIndex: 19 }}>
                     <div className="flex items-center gap-1">
                       Ledger Name
                       <ColumnFilter
@@ -2227,7 +2391,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Parent Group'] }}>
+                  <TableHead className="top-0 bg-white relative" style={{ width: actualTbColumnWidths['Parent Group'] }}>
                     <div className="flex items-center gap-1">
                       Parent Group
                       <ColumnFilter
@@ -2246,7 +2410,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Primary Group'] }}>
+                  <TableHead className="top-0 bg-white relative" style={{ width: actualTbColumnWidths['Primary Group'] }}>
                     <div className="flex items-center gap-1">
                       Primary Group
                       <ColumnFilter
@@ -2265,7 +2429,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Opening Balance'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Opening Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Opening
                       <ColumnFilter
@@ -2285,7 +2449,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Debit'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Debit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Debit
                       <ColumnFilter
@@ -2305,7 +2469,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Credit'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Credit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Credit
                       <ColumnFilter
@@ -2325,7 +2489,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Closing Balance'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Closing Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Closing
                       <ColumnFilter
@@ -2387,44 +2551,28 @@ export default function TrialBalanceNew() {
                           isSelected && "bg-blue-100/50",
                           "cursor-pointer hover:bg-gray-50"
                         )}
-                        onClick={(e) => {
-                          if (e.ctrlKey || e.metaKey) {
-                            // Ctrl+Click: Toggle selection
-                            const newSelection = new Set(selectedRowIndices);
-                            if (isSelected) {
-                              newSelection.delete(originalIndex);
-                            } else {
-                              newSelection.add(originalIndex);
-                            }
-                            setSelectedRowIndices(newSelection);
-                          } else if (e.shiftKey && selectedRowIndices.size > 0) {
-                            // Shift+Click: Range selection
-                            const indices = Array.from(selectedRowIndices);
-                            const lastSelected = Math.max(...indices);
-                            const start = Math.min(lastSelected, originalIndex);
-                            const end = Math.max(lastSelected, originalIndex);
-                            const newSelection = new Set(selectedRowIndices);
-                            for (let i = start; i <= end; i++) {
-                              newSelection.add(i);
-                            }
-                            setSelectedRowIndices(newSelection);
-                          } else {
-                            // Regular click: Single selection
-                            setSelectedRowIndices(new Set([originalIndex]));
-                          }
-                        }}
+                        onClick={(e) => toggleRowSelection(originalIndex, e)}
                       >
-                        <TableCell>
+                        <TableCell className="sticky left-0 bg-white z-10" style={{ left: actualStickyOffsets.selection, width: 32 }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => {}}
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRowSelection(originalIndex, e as unknown as React.MouseEvent);
+                            }}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{row['Ledger Name']}</TableCell>
-                        <TableCell className="text-sm text-gray-600">{row['Parent Group']}</TableCell>
-                        <TableCell className="text-sm">{row['Primary Group']}</TableCell>
+                        <TableCell
+                          className="font-medium sticky bg-white z-10 max-w-[180px] truncate"
+                          style={{ left: actualStickyOffsets.ledger }}
+                          title={row['Ledger Name']}
+                        >
+                          {row['Ledger Name']}
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-600 max-w-[180px] truncate" title={row['Parent Group']}>{row['Parent Group']}</TableCell>
+                        <TableCell className="text-sm max-w-[180px] truncate" title={row['Primary Group']}>{row['Primary Group']}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Opening Balance'])}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Debit'])}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Credit'])}</TableCell>
@@ -2441,26 +2589,44 @@ export default function TrialBalanceNew() {
 
             {/* CLASSIFIED TRIAL BALANCE TAB */}
             <TabsContent value="classified-tb" className="mt-0 p-4">
+              {/* Classification Status Banner */}
+              {classificationStatus.unclassified > 0 && (
+                <div className="flex items-center justify-between mb-2 p-2 bg-blue-50 border border-blue-200 rounded">
+                  <div className="flex items-center gap-2 text-sm text-blue-800">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Some ledgers are not yet classified</span>
+                  </div>
+                  <Badge variant="outline" className="text-xs bg-white">
+                    Classified: {classificationStatus.classified} / Total: {classificationStatus.total} ({classificationStatus.percentageComplete}%)
+                  </Badge>
+                </div>
+              )}
+              
               <div className="border rounded-lg overflow-hidden">
             <Table>
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
-                  <TableHead className="w-12 sticky top-0 bg-white">
+                  <TableHead className="w-8 sticky top-0 bg-white" style={{ left: classifiedStickyOffsets.selection, zIndex: 20 }}>
                     <input
                       type="checkbox"
-                      checked={selectedRowIndices.size === currentData.length && currentData.length > 0}
+                      checked={selectedFilteredCount === filteredData.length && filteredData.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          // Select all original indices
-                          setSelectedRowIndices(new Set(currentData.map((_, i) => i)));
+                          // Select all VISIBLE FILTERED rows
+                          const visibleIndices = filteredData.map(row => 
+                            currentData.findIndex(r => r['Composite Key'] === row['Composite Key'])
+                          ).filter(idx => idx !== -1);
+                          setSelectedRowIndices(new Set(visibleIndices));
                         } else {
                           setSelectedRowIndices(new Set());
                         }
                       }}
-                      title="Select All / Deselect All"
+                      title="Select All Visible / Deselect All"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Ledger Name'] }}>
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: 200, left: classifiedStickyOffsets.ledger, zIndex: 19 }}>
                     <div className="flex items-center gap-1">
                       Ledger Name
                       <ColumnFilter
@@ -2479,7 +2645,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Parent Group'] }}>
+                  <TableHead className="top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Parent Group'] }}>
                     <div className="flex items-center gap-1">
                       Parent Group
                       <ColumnFilter
@@ -2498,7 +2664,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Primary Group'] }}>
+                  <TableHead className="top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Primary Group'] }}>
                     <div className="flex items-center gap-1">
                       Primary Group
                       <ColumnFilter
@@ -2517,7 +2683,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Opening Balance'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Opening Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Opening
                       <ColumnFilter
@@ -2537,7 +2703,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Debit'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Debit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Debit
                       <ColumnFilter
@@ -2557,7 +2723,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Credit'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Credit'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Credit
                       <ColumnFilter
@@ -2577,7 +2743,7 @@ export default function TrialBalanceNew() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Closing Balance'] }}>
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Closing Balance'] }}>
                     <div className="flex items-center justify-end gap-1">
                       Closing
                       <ColumnFilter
@@ -2751,17 +2917,26 @@ export default function TrialBalanceNew() {
                         tabIndex={0}
                         onFocus={() => setFocusedClassifiedRowIndex(originalIndex)}
                       >
-                        <TableCell onClick={(e) => e.stopPropagation()}>
+                        <TableCell onClick={(e) => e.stopPropagation()} className="sticky left-0 bg-white z-10" style={{ left: classifiedStickyOffsets.selection, width: 32 }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => toggleRowSelection(originalIndex)}
-                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => {}}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRowSelection(originalIndex, e as unknown as React.MouseEvent);
+                            }}
                           />
                         </TableCell>
-                        <TableCell className="font-medium text-sm">{row['Ledger Name']}</TableCell>
-                        <TableCell className="text-xs text-gray-600">{row['Parent Group'] || row['Primary Group'] || '-'}</TableCell>
-                        <TableCell className="text-xs">{row['Primary Group']}</TableCell>
+                        <TableCell
+                          className="font-medium text-sm sticky bg-white z-10 max-w-[180px] truncate"
+                          style={{ left: classifiedStickyOffsets.ledger }}
+                          title={row['Ledger Name']}
+                        >
+                          {row['Ledger Name']}
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-600 max-w-[180px] truncate" title={row['Parent Group'] || row['Primary Group'] || '-'}>{row['Parent Group'] || row['Primary Group'] || '-'}</TableCell>
+                        <TableCell className="text-xs max-w-[180px] truncate" title={row['Primary Group']}>{row['Primary Group']}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Opening Balance'])}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Debit'])}</TableCell>
                         <TableCell className="text-right text-sm">{formatNumber(row['Credit'])}</TableCell>
@@ -3180,12 +3355,22 @@ export default function TrialBalanceNew() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
-            {/* Entity Type - Read Only Display */}
+            {/* Entity Type - Override allowed */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Entity Type *</label>
-              <div className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm">
-                {entityType || 'Not configured'}
-              </div>
+              <Select value={entityTypeDraft} onValueChange={setEntityTypeDraft}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select entity type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ENTITY_TYPES.map(type => (
+                    <SelectItem key={type} value={type} disabled={DISABLED_ENTITY_TYPES.includes(type)}>
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Pulled from master client by default. You can override for this import and re-classify without reimporting.</p>
             </div>
 
             {/* Business Type */}
@@ -3257,9 +3442,12 @@ export default function TrialBalanceNew() {
               <Button variant="outline" onClick={() => setIsEntityDialogOpen(false)}>
                 Cancel
               </Button>
+              <Button variant="secondary" onClick={handleSaveEntityType} disabled={!entityTypeDraft}>
+                Save Entity Type
+              </Button>
               <Button 
-                onClick={handleFetchFromTally} 
-                disabled={!entityType || !businessType || isFetching}
+                onClick={() => handleFetchFromTally(entityTypeDraft || entityType)} 
+                disabled={(!entityTypeDraft && !entityType) || !businessType || isFetching}
               >
                 {isFetching ? 'Importing...' : 'Confirm & Import'}
               </Button>
@@ -3418,15 +3606,9 @@ export default function TrialBalanceNew() {
         open={isFilterModalOpen}
         onOpenChange={setIsFilterModalOpen}
         statusFilter={statusFilter}
-        h1Filter={h1Filter}
-        h2Filter={h2Filter}
-        h3Filter={h3Filter}
         groupFilter={groupFilter}
         balanceFilter={balanceFilter}
         onStatusFilterChange={setStatusFilter}
-        onH1FilterChange={setH1Filter}
-        onH2FilterChange={setH2Filter}
-        onH3FilterChange={setH3Filter}
         onGroupFilterChange={setGroupFilter}
         onBalanceFilterChange={setBalanceFilter}
         onResetFilters={handleResetFilters}

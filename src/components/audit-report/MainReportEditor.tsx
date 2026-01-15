@@ -34,6 +34,7 @@ interface MainReportEditorProps {
 }
 
 const statusItems = STATUS_OPTIONS;
+const KAM_ENABLED = false;
 
 function coerceNumber(value: string) {
   if (value.trim() === '') return null;
@@ -69,6 +70,10 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const [previewMode, setPreviewMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [ifcManualOverride, setIfcManualOverride] = useState(false);
+  const optionalTabLabel = KAM_ENABLED ? 'KAM/EoM/Other Matter' : 'EoM/Other Matter';
+  const standardsReference = KAM_ENABLED
+    ? 'SA 701 - KAM; SA 706 - EoM/Other Matter'
+    : 'SA 706 - EoM/Other Matter';
 
   const { setup, saveSetup } = useAuditReportSetup(engagementId);
   const { content, loading: contentLoading, saveContent } = useAuditReportContent(engagementId);
@@ -78,6 +83,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
   // Get signing partner details from partners table
   const signingPartner = setup?.signing_partner_id ? getPartnerById(setup.signing_partner_id) : null;
+  const isPublicCompanyType = setup?.company_type === 'public_company';
 
   const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
   const [editorBasis, setEditorBasis] = useState<string>('');
@@ -107,6 +113,31 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     setup?.is_subsidiary,
     setup?.is_holding_company,
     ifcManualOverride,
+  ]);
+
+  useEffect(() => {
+    if (!setup || !isPublicCompanyType) return;
+
+    const patch: Record<string, any> = {};
+
+    if (!setup.is_public_company) patch.is_public_company = true;
+    if (!setup.cash_flow_required) patch.cash_flow_required = true;
+    if (!setup.ifc_applicable) patch.ifc_applicable = true;
+    if (setup.is_private_exceeding_threshold) patch.is_private_exceeding_threshold = false;
+    if (setup.is_private_non_exceeding_threshold) patch.is_private_non_exceeding_threshold = false;
+
+    if (Object.keys(patch).length === 0) return;
+
+    setIfcManualOverride(false);
+    saveSetupPatch(patch);
+  }, [
+    setup?.company_type,
+    setup?.is_public_company,
+    setup?.cash_flow_required,
+    setup?.ifc_applicable,
+    setup?.is_private_exceeding_threshold,
+    setup?.is_private_non_exceeding_threshold,
+    isPublicCompanyType,
   ]);
 
   useEffect(() => {
@@ -350,7 +381,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           <TabsList className="grid w-full grid-cols-4 lg:grid-cols-7">
             <TabsTrigger value="configuration">Config</TabsTrigger>
             <TabsTrigger value="opinion">Opinion</TabsTrigger>
-            <TabsTrigger value="optional" className="text-[11px] px-1">KAM/EoM/Other Matter</TabsTrigger>
+            <TabsTrigger value="optional" className="text-[11px] px-1">{optionalTabLabel}</TabsTrigger>
             <TabsTrigger value="sa720" className="text-[11px] px-1">Other Info-SA 720</TabsTrigger>
             <TabsTrigger value="s143" className="text-[11px] px-1">143(3)-Co Act</TabsTrigger>
             <TabsTrigger value="rule11" className="text-[11px] px-1">Rule 11-Co Audit Rule</TabsTrigger>
@@ -372,22 +403,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      checked={Boolean(setup.is_small_company)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_small_company: !!v })}
-                    />
-                    <Label className="font-normal">Small Company</Label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_opc)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_opc: !!v })}
-                    />
-                    <Label className="font-normal">One Person Company (OPC)</Label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
                       checked={Boolean(setup.is_public_company)}
                       onCheckedChange={(v) => updateIfcCriteria({ is_public_company: !!v })}
                     />
@@ -397,17 +412,23 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.is_private_exceeding_threshold)}
+                      disabled={isPublicCompanyType}
                       onCheckedChange={(v) => updateIfcCriteria({ is_private_exceeding_threshold: !!v })}
                     />
-                    <Label className="font-normal">Private limited company with Previous year turnover is  Rs 50 Crores or more</Label>
+                    <Label className={`font-normal ${isPublicCompanyType ? 'text-muted-foreground' : ''}`}>
+                      Private limited company with Previous year turnover is  Rs 50 Crores or more
+                    </Label>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={Boolean(setup.is_private_non_exceeding_threshold)}
+                      disabled={isPublicCompanyType}
                       onCheckedChange={(v) => updateIfcCriteria({ is_private_non_exceeding_threshold: !!v })}
                     />
-                    <Label className="font-normal">Private limited company with Current year during at any point of time exceeding Rs 25Crores</Label>
+                    <Label className={`font-normal ${isPublicCompanyType ? 'text-muted-foreground' : ''}`}>
+                      Private limited company with Current year during at any point of time exceeding Rs 25Crores
+                    </Label>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -449,13 +470,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_listed_company)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_listed_company: !!v })}
-                    />
-                    <Label className="font-normal">Listed company (KAMs typically required)</Label>
-                  </div>
+                  {/* Listed company (KAMs typically required) checkbox hidden as per requirements */}
 
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -532,7 +547,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>CARO annexure letter</Label>
+                    <Label>CARO Report Annexure Number</Label>
                     <Input
                       value={setup.caro_annexure_letter || ''}
                       onChange={(e) => saveSetupPatch({ caro_annexure_letter: e.target.value })}
@@ -540,7 +555,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>IFC annexure letter</Label>
+                    <Label>IFC Report Annexure Number</Label>
                     <Input
                       value={setup.ifc_annexure_letter || ''}
                       onChange={(e) => saveSetupPatch({ ifc_annexure_letter: e.target.value })}
@@ -626,26 +641,30 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           <TabsContent value="optional" className="space-y-6">
             <div className="bg-muted/50 p-3 rounded-md border">
               <p className="text-sm font-medium">
-                <span className="font-semibold">Standards Reference:</span> SA 701 - KAM; SA 706 - EoM/Other Matter
+                <span className="font-semibold">Standards Reference:</span> {standardsReference}
               </p>
             </div>
             
-            <div className="flex items-center justify-between gap-2">
-              <div className="space-y-1">
-                <Label>Key Audit Matters</Label>
-                <p className="text-sm text-muted-foreground">Toggle inclusion and manage KAMs</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(draft.include_kam)}
-                  onCheckedChange={(v) => updateDraft({ include_kam: !!v })}
-                />
-                <Label className="font-normal">Include KAM section</Label>
-              </div>
-            </div>
-            {draft.include_kam && <KeyAuditMattersEditor engagementId={engagementId} />}
+            {KAM_ENABLED && (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="space-y-1">
+                    <Label>Key Audit Matters</Label>
+                    <p className="text-sm text-muted-foreground">Toggle inclusion and manage KAMs</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={Boolean(draft.include_kam)}
+                      onCheckedChange={(v) => updateDraft({ include_kam: !!v })}
+                    />
+                    <Label className="font-normal">Include KAM section</Label>
+                  </div>
+                </div>
+                {draft.include_kam && <KeyAuditMattersEditor engagementId={engagementId} />}
 
-            <Separator />
+                <Separator />
+              </>
+            )}
 
             <div className="flex items-center justify-between">
               <div>
@@ -805,31 +824,9 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
           {/* 5) Section 143(3) */}
           <TabsContent value="s143" className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>143(3)(a) Information and explanations obtained</Label>
-                <Select
-                  value={draft.clause_143_3_a_information_status || 'standard'}
-                  onValueChange={(v) => updateDraft({ clause_143_3_a_information_status: v as StatusValue })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="standard">Standard (auto-adapts to opinion type)</SelectItem>
-                    <SelectItem value="qualified">Qualified / Other remarks (user-defined)</SelectItem>
-                  </SelectContent>
-                </Select>
-                {draft.clause_143_3_a_information_status === 'qualified' && (
-                  <Textarea
-                    rows={2}
-                    value={draft.clause_143_3_a_information_details || ''}
-                    onChange={(e) => updateDraft({ clause_143_3_a_information_details: e.target.value })}
-                    placeholder="Provide custom paragraph for qualified/modified response"
-                    className={!draft.clause_143_3_a_information_details?.trim() ? 'bg-yellow-50' : ''}
-                  />
-                )}
+              <div className="md:col-span-2">
+                <Label className="text-foreground font-semibold">143(3)(a) Details sought and obtained</Label>
               </div>
-
               <div className="space-y-2">
                 <Label>143(3)(b) Proper books of account</Label>
                 <StatusSelect

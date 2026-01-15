@@ -32,6 +32,12 @@ export interface EngagementPeriod {
   assessment_year?: string; // For tax audits, e.g., "2024-25"
   balance_sheet_date: string; // ISO format: "2025-03-31"
   appointment_date: string; // ISO format
+  appointment_letter_date?: string; // Date on engagement letter
+  agm_date?: string; // AGM date (statutory audit)
+  financial_year_start?: string; // ISO format
+  financial_year_end?: string; // ISO format
+  meeting_number?: number;
+  appointment_type?: string; // appointment / reappointment
 }
 
 // C. AUDITOR / FIRM DETAILS
@@ -119,6 +125,21 @@ export interface LetterContext {
   assessment_year?: string;
   balance_sheet_date: string;
   appointment_date: string;
+  appointment_letter_date?: string;
+  appointment_letter_date_long?: string;
+  appointment_letter_date_short?: string;
+  agm_date?: string;
+  agm_date_long?: string;
+  agm_date_short?: string;
+  financial_year_start?: string;
+  financial_year_end?: string;
+  financial_year_start_long?: string;
+  financial_year_end_long?: string;
+  financial_year_start_short?: string;
+  financial_year_end_short?: string;
+  meeting_number?: number | null;
+  meeting_number_plus_5?: number;
+  appointment_type?: string;
 
   firm_name: string;
   firm_reg_no: string;
@@ -127,8 +148,14 @@ export interface LetterContext {
   partner_pan: string;
   place: string;
   letter_date: string;
+  partner_signature_date?: string;
+  partner_signature_date_long?: string;
+  partner_signature_date_short?: string;
+  salutation?: string;
+  letterhead_note?: string;
 
   professional_fees: string; // formatted
+  professional_fees_amount?: string;
   taxes_extra: boolean;
   payment_terms: string;
   out_of_pocket_exp: boolean;

@@ -37,8 +37,7 @@ const alwaysActiveItems = [
 
 // Items that require an engagement to be selected
 const engagementDependentItems = [
-  { name: 'Trial Balance', href: '/trial-balance', icon: FileSpreadsheet },
-  { name: 'Trial Balance New', href: '/trial-balance-new', icon: FileSpreadsheet },
+  { name: 'Financial Review', href: '/financial-review', icon: FileSpreadsheet },
   { name: 'Appointment & Eng Letter', href: '/appointment', icon: FileSignature },
   { name: 'Materiality & Risk Assessment', href: '/materiality', icon: Calculator },
   { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
@@ -49,6 +48,7 @@ const engagementDependentItems = [
   { name: 'Audit Report', href: '/audit-report', icon: FileText },
   { name: 'VERA Tools', href: '/audit-tools', icon: Wrench },
   { name: 'Feedback', href: '/feedback', icon: MessageSquare },
+  { name: 'SRM Pro', href: '/srm-pro', icon: FileSpreadsheet },
 ];
 
 const secondaryNavItems = [

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,8 +33,9 @@ const companyTypes = [
   { value: 'section_8', label: 'Section 8 Company' },
   { value: 'banking', label: 'Banking Company' },
   { value: 'insurance', label: 'Insurance Company' },
-  { value: 'nbfc', label: 'NBFC' },
 ];
+
+const CARO_EXCLUDED_TYPES = ['banking', 'insurance', 'section_8', 'opc', 'small_company'] as const;
 
 const TB_CROSSCHECK_AREAS = ['Equity', 'Reserves', 'Borrowings', 'Short Term Borrowings'] as const;
 
@@ -54,6 +55,8 @@ export function AuditReportSetup({
   onSetupComplete,
 }: AuditReportSetupProps) {
   const [currentStep, setCurrentStep] = useState(1);
+  const [isEditingSetup, setIsEditingSetup] = useState(false);
+  const hasInitialized = useRef(false);
   const { partners, loading: partnersLoading } = usePartners();
   const [formData, setFormData] = useState({
     company_cin: '',
@@ -121,39 +124,61 @@ export function AuditReportSetup({
 
 
   useEffect(() => {
-    if (setup) {
-      setFormData({
-        company_cin: setup.company_cin || '',
-        registered_office: setup.registered_office || '',
-        nature_of_business: setup.nature_of_business || '',
-        is_standalone: setup.is_standalone ?? true,
-        accounting_framework: setup.accounting_framework || 'AS',
-        company_type: setup.company_type || '',
-        is_private_company: setup.is_private_company ?? false,
-        paid_up_capital: setup.paid_up_capital || 0,
-        reserves_surplus: setup.reserves_surplus || 0,
-        borrowings_amount: setup.borrowings_amount || 0,
-        caro_applicable_status: setup.caro_applicable_status || 'pending',
-        caro_exclusion_reason: setup.caro_exclusion_reason || '',
-        signing_partner_id: (setup as any).signing_partner_id || '',
-        report_date: (setup as any).report_date || '',
-        report_city: (setup as any).report_city || '',
-        udin: (setup as any).udin || '',
-      });
+    if (!setup) return;
+
+    setFormData({
+      company_cin: setup.company_cin || '',
+      registered_office: setup.registered_office || '',
+      nature_of_business: setup.nature_of_business || '',
+      is_standalone: setup.is_standalone ?? true,
+      accounting_framework: setup.accounting_framework || 'AS',
+      company_type: setup.company_type || '',
+      is_private_company: setup.is_private_company ?? false,
+      paid_up_capital: setup.paid_up_capital || 0,
+      reserves_surplus: setup.reserves_surplus || 0,
+      borrowings_amount: setup.borrowings_amount || 0,
+      caro_applicable_status: setup.caro_applicable_status || 'pending',
+      caro_exclusion_reason: setup.caro_exclusion_reason || '',
+      signing_partner_id: (setup as any).signing_partner_id || '',
+      report_date: (setup as any).report_date || '',
+      report_city: (setup as any).report_city || '',
+      udin: (setup as any).udin || '',
+    });
+
+    if (!hasInitialized.current) {
       if (setup.setup_completed) {
         setCurrentStep(3);
       }
+      hasInitialized.current = true;
+      return;
     }
-  }, [setup]);
+
+    if (!isEditingSetup && setup.setup_completed) {
+      setCurrentStep(3);
+    }
+  }, [setup, isEditingSetup]);
+
+  const isCaroExcludedType = CARO_EXCLUDED_TYPES.includes(formData.company_type as any);
+  const isPublicCompanyType = formData.company_type === 'public_company';
+  const isPrivateThresholdDisabled = isCaroExcludedType || isPublicCompanyType;
+
+  useEffect(() => {
+    if (!isPrivateThresholdDisabled || !formData.is_private_company) return;
+    setFormData((prev) => ({ ...prev, is_private_company: false }));
+  }, [isPrivateThresholdDisabled, formData.is_private_company]);
 
   const updateField = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const startEditing = (step: number) => {
+    setIsEditingSetup(true);
+    setCurrentStep(step);
+  };
+
   const calculateCAROApplicability = () => {
     // CARO exclusions based on company type
-    const excludedTypes = ['banking', 'insurance', 'section_8', 'opc'];
-    if (excludedTypes.includes(formData.company_type)) {
+    if (CARO_EXCLUDED_TYPES.includes(formData.company_type as any)) {
       return 'not_applicable';
     }
 
@@ -205,6 +230,7 @@ export function AuditReportSetup({
         report_status: 'in_progress',
       });
       await refetchSetup();
+      setIsEditingSetup(false);
       setCurrentStep(3);
     }
   };
@@ -381,7 +407,7 @@ export function AuditReportSetup({
               <Info className="h-4 w-4" />
               <AlertDescription>
                 CARO 2020 does not apply to: Banking companies, Insurance companies, Section 8 companies, 
-                One Person Companies, and Small Companies meeting certain thresholds.
+                One Person Companies, and Small Companies.
               </AlertDescription>
             </Alert>
 
@@ -389,14 +415,18 @@ export function AuditReportSetup({
               <Checkbox
                 id="is_private"
                 checked={formData.is_private_company}
+                disabled={isPrivateThresholdDisabled}
                 onCheckedChange={(v) => updateField('is_private_company', !!v)}
               />
-              <Label htmlFor="is_private" className="font-normal">
+              <Label
+                htmlFor="is_private"
+                className={`font-normal ${isPrivateThresholdDisabled ? 'text-muted-foreground' : ''}`}
+              >
                 This is a Private Company (for threshold test)
               </Label>
             </div>
 
-            {formData.is_private_company && (
+            {formData.is_private_company && !isPrivateThresholdDisabled && (
               <div className="space-y-3">
                 <div className="grid grid-cols-3 gap-4 p-4 bg-muted rounded-lg">
                   <div className="space-y-2">
@@ -614,10 +644,15 @@ export function AuditReportSetup({
               </div>
             </div>
 
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setCurrentStep(1)}>
-                Edit Setup
-              </Button>
+            <div className="flex flex-wrap gap-2 justify-between">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => startEditing(1)}>
+                  Edit Client Profile
+                </Button>
+                <Button variant="outline" onClick={() => startEditing(2)}>
+                  Edit CARO Applicability
+                </Button>
+              </div>
               <div className="flex gap-2">
                 <Button 
                   variant="outline"

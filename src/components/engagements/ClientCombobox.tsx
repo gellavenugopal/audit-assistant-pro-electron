@@ -118,8 +118,23 @@ export function ClientCombobox({
 
           <CommandList>
             <CommandEmpty>
-              <div className="py-2 text-center text-sm text-muted-foreground">
-                No client found.
+              <div className="py-3 text-center text-sm text-muted-foreground">
+                <div>No client found.</div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => {
+                    onCreateNew();
+                    setOpen(false);
+                    setSearchValue('');
+                    setIndustryFilter(null);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add new client
+                </Button>
               </div>
             </CommandEmpty>
             

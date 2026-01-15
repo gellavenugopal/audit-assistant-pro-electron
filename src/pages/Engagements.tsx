@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useEngagements } from '@/hooks/useEngagements';
+﻿import { useState, useEffect, useMemo } from 'react';
+import { useEngagements, type Engagement } from '@/hooks/useEngagements';
 import { useClients } from '@/hooks/useClients';
 import { useFinancialYears } from '@/hooks/useFinancialYears';
-import { useAuth } from '@/contexts/AuthContext';
+import { useEngagement } from '@/contexts/EngagementContext';
 import { StatusBadge, getStatusVariant } from '@/components/ui/status-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -60,19 +60,20 @@ export default function Engagements() {
   const [engagementType, setEngagementType] = useState('statutory');
   const [financialYear, setFinancialYear] = useState('');
   const [newEngagementId, setNewEngagementId] = useState<string | null>(null);
+  const [newEngagementName, setNewEngagementName] = useState<string | null>(null);
   const [showTeamDialog, setShowTeamDialog] = useState(false);
 
   const { engagements, loading, createEngagement } = useEngagements();
   const { clients, refetch: refetchClients } = useClients();
   const { financialYears } = useFinancialYears();
-  const { profile } = useAuth();
+  const { currentEngagement, setCurrentEngagement } = useEngagement();
   const navigate = useNavigate();
   
   // Build a set of client IDs for detecting orphan engagements
   const clientIdsSet = useMemo(() => new Set(clients.map(c => c.id)), [clients]);
   
   // Helper to check engagement status
-  const getEngagementIssue = (engagement: typeof engagements[0]) => {
+  const getEngagementIssue = (engagement: Engagement) => {
     if (!engagement.client_id) {
       return { type: 'unlinked' as const, label: 'Unlinked', tooltip: 'Not linked to a client. Fix in Admin Settings → Clients → Data Integrity.' };
     }
@@ -82,12 +83,12 @@ export default function Engagements() {
     return null;
   };
   
-  const isPartner = profile?.user_id && clients.length >= 0; // Will check role below
 
   // When client name changes, find matching client ID
   useEffect(() => {
     if (clientName) {
-      const matchingClient = clients.find(c => c.name === clientName);
+      const normalizedName = clientName.trim().toLowerCase();
+      const matchingClient = clients.find(c => c.name.trim().toLowerCase() === normalizedName);
       if (matchingClient) {
         setSelectedClientId(matchingClient.id);
       } else {
@@ -113,6 +114,7 @@ export default function Engagements() {
       return;
     }
     
+    const pendingEngagementName = engagementName.trim();
     setCreating(true);
     try {
       const newEngagement = await createEngagement({
@@ -143,6 +145,7 @@ export default function Engagements() {
       // Open team assignment dialog for the new engagement
       if (newEngagement?.id) {
         setNewEngagementId(newEngagement.id);
+        setNewEngagementName(newEngagement.name || pendingEngagementName || 'New Engagement');
         setShowTeamDialog(true);
       }
     } finally {
@@ -167,6 +170,11 @@ export default function Engagements() {
     setClientName(newClientName);
     setSelectedClientId(newClientId);
     refetchClients();
+  };
+
+  const handleSelectEngagement = (engagement: Engagement) => {
+    setCurrentEngagement(engagement);
+    toast.success(`Switched to ${engagement.client_name} - ${engagement.financial_year}`);
   };
 
   return (
@@ -201,9 +209,19 @@ export default function Engagements() {
                   onCreateNew={() => setCreateClientOpen(true)}
                 />
                 {clientName && !selectedClientId && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
-                    ⚠️ This client doesn't exist. Please create a new client first.
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      This client doesn't exist. Please create a new client first.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-xs"
+                      onClick={() => setCreateClientOpen(true)}
+                    >
+                      Create client
+                    </Button>
+                  </div>
                 )}
               </div>
               <div className="space-y-2">
@@ -314,7 +332,16 @@ export default function Engagements() {
             return (
             <div
               key={engagement.id}
-              className={`audit-card hover:border-primary/50 transition-all ${issue ? 'border-destructive/50' : ''}`}
+              className={`audit-card hover:border-primary/50 transition-all ${issue ? 'border-destructive/50' : ''} ${currentEngagement?.id === engagement.id ? 'border-primary/60 ring-1 ring-primary/20' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => handleSelectEngagement(engagement)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleSelectEngagement(engagement);
+                }
+              }}
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
@@ -351,9 +378,19 @@ export default function Engagements() {
                   <StatusBadge variant={getStatusVariant(engagement.status)}>
                     {engagement.status}
                   </StatusBadge>
+                  {currentEngagement?.id === engagement.id && (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                      Active
+                    </span>
+                  )}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         {exportingId === engagement.id ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
@@ -390,7 +427,12 @@ export default function Engagements() {
                             engagementId={engagement.id}
                             engagementName={engagement.name}
                             trigger={
-                              <Button variant="outline" size="sm" className="h-8 gap-1.5">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-1.5"
+                                onClick={(event) => event.stopPropagation()}
+                              >
                                 <UserPlus className="h-4 w-4" />
                                 <span className="text-xs">Team</span>
                               </Button>
@@ -449,15 +491,19 @@ export default function Engagements() {
       {newEngagementId && (
         <TeamAssignmentDialog
           engagementId={newEngagementId}
-          engagementName={engagementName || 'New Engagement'}
+          engagementName={newEngagementName || 'New Engagement'}
           trigger={<span />}
           open={showTeamDialog}
           onOpenChange={(open) => {
             setShowTeamDialog(open);
-            if (!open) setNewEngagementId(null);
+            if (!open) {
+              setNewEngagementId(null);
+              setNewEngagementName(null);
+            }
           }}
         />
       )}
     </div>
   );
 }
+
