@@ -27,6 +27,7 @@ import AuditTrail from "./pages/AuditTrail";
 import Completion from "./pages/Completion";
 import Settings from "./pages/Settings";
 import Feedback from "./pages/Feedback";
+import SrmPro from "./pages/SrmPro";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
@@ -333,6 +334,16 @@ const App = () => (
                         <ComplianceApplicability />
                       </MainLayout>
                     </ProtectedEngagementRoute>
+                  }
+                />
+                <Route
+                  path="/srm-pro"
+                  element={
+                    <ProtectedRoute>
+                      <MainLayout>
+                        <SrmPro />
+                      </MainLayout>
+                    </ProtectedRoute>
                   }
                 />
                 <Route path="*" element={<NotFound />} />
