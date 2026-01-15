@@ -125,7 +125,7 @@ export class EngagementLetterTemplateEngine {
       const falseBlock = parts.length > 1 ? parts.slice(1).join('') : '';
       result = result.replace(fullBlock, shouldInclude ? trueBlock : falseBlock);
 
-      iterations.push(`Condition '${condition}' → ${shouldInclude}`);
+      iterations.push(`Condition '${condition}' G�� ${shouldInclude}`);
 
       // Safety check for infinite loops
       if (iterations.length > 50) {

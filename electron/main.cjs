@@ -114,12 +114,12 @@ function registerIpcHandlers() {
       if (!odbcConnection) {
         return { success: false, error: 'Not connected to Tally ODBC' };
       }
-
+      
       // Note: Tally ODBC doesn't directly support date filtering in SELECT queries
       // The balances returned are as of the current Tally date setting
       // To get period-specific balances, Tally's date should be set before querying
       // For now, we fetch all ledgers - the balances reflect Tally's current date context
-
+      
       // Convert dates to Tally format (DD-MMM-YYYY) for potential future use
       const formatDateForTally = (dateStr) => {
         if (!dateStr) return null;
@@ -130,11 +130,11 @@ function registerIpcHandlers() {
         const year = d.getFullYear();
         return `${day}-${month}-${year}`;
       };
-
+      
       const toDateFormatted = formatDateForTally(toDate);
       safeLog(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
       safeLog('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
-
+      
       // First, get company name
       let companyName = '';
       try {
@@ -208,7 +208,7 @@ function registerIpcHandlers() {
 
       // Add opening stock as a separate line item if stock items exist
       // Check if there's already a Stock-in-Hand ledger
-      const hasStockLedger = processedData.some(line =>
+      const hasStockLedger = processedData.some(line => 
         line.primaryGroup?.toLowerCase().includes('stock') ||
         line.accountHead?.toLowerCase().includes('stock-in-hand')
       );
@@ -234,9 +234,9 @@ function registerIpcHandlers() {
 
       safeLog(`Trial Balance: Processed ${processedData.length} ledgers (including stock if applicable)`);
 
-      return {
-        success: true,
-        data: processedData,
+      return { 
+        success: true, 
+        data: processedData, 
         companyName,
         stockInfo: {
           itemCount: stockItems.length,

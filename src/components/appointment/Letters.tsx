@@ -756,6 +756,26 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-2">
+                      <Label>Appointment Letter Date</Label>
+                      <Input
+                        type="date"
+                        value={appointmentLetterDate}
+                        onChange={(e) => setAppointmentLetterDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Appointment / Reappointment</Label>
+                      <Select value={appointmentType} onValueChange={setAppointmentType}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="appointment">Appointment</SelectItem>
+                          <SelectItem value="reappointment">Reappointment</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
 
@@ -839,7 +859,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                     placeholder="e.g., XYZ Chartered Accountants"
                     disabled={!firmName ? false : true}
                   />
-                  <p className="text-xs text-muted-foreground">Edit from Admin Settings → Firm</p>
+                  <p className="text-xs text-muted-foreground">Edit from Admin Settings G�� Firm</p>
                 </div>
 
                 <div className="space-y-2">
@@ -861,7 +881,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                       )}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">From Admin Settings → Partners</p>
+                  <p className="text-xs text-muted-foreground">From Admin Settings G�� Partners</p>
                 </div>
 
                 <div className="space-y-2">
@@ -888,7 +908,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                 <AlertCircle className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
                 <div className="text-xs text-blue-800">
                   <p><strong>Firm information is prefilled from Admin Settings.</strong></p>
-                  <p className="mt-1">To change firm name or address, go to Admin Settings → Firm tab.</p>
+                  <p className="mt-1">To change firm name or address, go to Admin Settings G�� Firm tab.</p>
                 </div>
               </div>
 
