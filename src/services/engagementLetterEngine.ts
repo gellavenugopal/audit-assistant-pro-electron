@@ -95,6 +95,8 @@ export class EngagementLetterTemplateEngine {
 
     // Step 3: Clean up any remaining unprocessed tags
     result = this.cleanupUnprocessedTags(result);
+    result = this.replaceEngagementPeriodClause(result, context);
+    result = this.collapseDuplicateDates(result);
 
     return result;
   }
@@ -123,7 +125,7 @@ export class EngagementLetterTemplateEngine {
       const falseBlock = parts.length > 1 ? parts.slice(1).join('') : '';
       result = result.replace(fullBlock, shouldInclude ? trueBlock : falseBlock);
 
-      iterations.push(`Condition '${condition}' → ${shouldInclude}`);
+      iterations.push(`Condition '${condition}' G�� ${shouldInclude}`);
 
       // Safety check for infinite loops
       if (iterations.length > 50) {
@@ -217,6 +219,20 @@ export class EngagementLetterTemplateEngine {
    */
   private static cleanupUnprocessedTags(template: string): string {
     return template.replace(/\{\{[^}]+\}\}/g, '');
+  }
+
+  private static replaceEngagementPeriodClause(template: string, context: LetterContext): string {
+    if (!context.agm_date || !context.financial_year_start || !context.financial_year_end) {
+      return template;
+    }
+
+    const replacement = `in the AGM held on ${context.agm_date} for the engagement period beginning ${context.financial_year_start} to engagement period ending ${context.financial_year_end}`;
+    const pattern = /from the conclusion of the\s+Annual General Meeting[^.]*?covering the financial years beginning[^.]*?ending on[^.]*?/gi;
+    return template.replace(pattern, replacement);
+  }
+
+  private static collapseDuplicateDates(template: string): string {
+    return template.replace(/\b(\d{2}-\d{2}-\d{4})\b(?:\s+\1\b)+/g, '$1');
   }
 
   /**

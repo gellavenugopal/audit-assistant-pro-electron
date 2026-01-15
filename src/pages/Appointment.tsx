@@ -116,7 +116,7 @@ export default function Appointment() {
 <div>
           <h1 className="text-2xl font-semibold tracking-tight">Appointment</h1>
           <p className="text-sm text-muted-foreground">
-            Manage appointment and independence artifacts for this engagement.
+            Manage appointment and independence aspects for this engagement.
           </p>
           {currentEngagement && (
             <p className="text-xs text-muted-foreground mt-2">
@@ -251,7 +251,7 @@ export default function Appointment() {
             </Button>
             <LettersPage engagementId={currentEngagement?.id || ''} />
           </div>
-        )}
+        </TabsContent>
 
         <Card>
           <CardHeader>
@@ -285,6 +285,7 @@ export default function Appointment() {
               >
                 View submissions
               </Button>
+              <LettersPage engagementId={currentEngagement?.id || ''} />
             </div>
             <Separator />
             {renderFileList(independenceFiles)}
