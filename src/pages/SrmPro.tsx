@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { processAccountingData, summarizeData, deepClean } from '@/utils/srmProcessor';
 
@@ -39,6 +40,17 @@ const SRMPro = () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [rowEvidence, setRowEvidence] = useState<Record<number, File[]>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [stockDetailsOpen, setStockDetailsOpen] = useState(false);
+  const [stockDetails, setStockDetails] = useState({
+    rawMaterialOpening: '',
+    rawMaterialClosing: '',
+    finishedGoodsOpening: '',
+    finishedGoodsClosing: '',
+    wipOpening: '',
+    wipClosing: '',
+    stockInTradeOpening: '',
+    stockInTradeClosing: '',
+  });
 
   // Load mapping file on mount
   useEffect(() => {
@@ -187,6 +199,19 @@ const SRMPro = () => {
     // In a real application, this would save to a database
     setHasUnsavedChanges(false);
     toast.success('Changes saved successfully');
+  };
+
+  const handleSaveStockDetails = () => {
+    // Validate that at least some data is entered
+    const hasData = Object.values(stockDetails).some(val => val !== '');
+    if (!hasData) {
+      toast.error('Please enter at least one value');
+      return;
+    }
+    
+    // In a real application, this would save to a database
+    setStockDetailsOpen(false);
+    toast.success('Stock details saved successfully');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1025,6 +1050,147 @@ const SRMPro = () => {
                     <Download className="h-4 w-4" />
                     Export Excel
                   </Button>
+                  <Dialog open={stockDetailsOpen} onOpenChange={setStockDetailsOpen}>
+                    <DialogTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        className="gap-2"
+                      >
+                        <Package className="h-4 w-4" />
+                        Stock Details
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-3xl">
+                      <DialogHeader>
+                        <DialogTitle>Stock Details</DialogTitle>
+                      </DialogHeader>
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-2 border-slate-800">
+                          <thead>
+                            <tr className="bg-slate-100">
+                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold">Category</th>
+                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold bg-amber-100">Opening Inventories</th>
+                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold bg-blue-100">Closing Inventories</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="px-4 py-3 border border-slate-800 font-medium">Raw Material</td>
+                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.rawMaterialOpening}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, rawMaterialOpening: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.rawMaterialClosing}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, rawMaterialClosing: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="px-4 py-3 border border-slate-800 font-medium">Finished Goods</td>
+                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.finishedGoodsOpening}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, finishedGoodsOpening: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.finishedGoodsClosing}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, finishedGoodsClosing: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="px-4 py-3 border border-slate-800 font-medium">Work-in-progress</td>
+                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.wipOpening}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, wipOpening: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.wipClosing}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, wipClosing: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="px-4 py-3 border border-slate-800 font-medium">Stock-in-trade</td>
+                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.stockInTradeOpening}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, stockInTradeOpening: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
+                                <Input
+                                  type="number"
+                                  value={stockDetails.stockInTradeClosing}
+                                  onChange={(e) => setStockDetails(prev => ({ ...prev, stockInTradeClosing: e.target.value }))}
+                                  className="w-full"
+                                  placeholder="0.00"
+                                />
+                              </td>
+                            </tr>
+                            <tr className="bg-slate-100 font-bold">
+                              <td className="px-4 py-3 border border-slate-800">Total</td>
+                              <td className="px-4 py-3 border border-slate-800 bg-amber-50 text-right">
+                                {(
+                                  parseFloat(stockDetails.rawMaterialOpening || '0') +
+                                  parseFloat(stockDetails.finishedGoodsOpening || '0') +
+                                  parseFloat(stockDetails.wipOpening || '0') +
+                                  parseFloat(stockDetails.stockInTradeOpening || '0')
+                                ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td className="px-4 py-3 border border-slate-800 bg-blue-50 text-right">
+                                {(
+                                  parseFloat(stockDetails.rawMaterialClosing || '0') +
+                                  parseFloat(stockDetails.finishedGoodsClosing || '0') +
+                                  parseFloat(stockDetails.wipClosing || '0') +
+                                  parseFloat(stockDetails.stockInTradeClosing || '0')
+                                ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-4">
+                        <Button variant="outline" onClick={() => setStockDetailsOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button onClick={handleSaveStockDetails}>
+                          Save
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               </div>
             </CardHeader>
