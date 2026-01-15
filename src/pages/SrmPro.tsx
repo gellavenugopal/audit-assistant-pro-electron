@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,56 @@ const SRMPro = () => {
   const [selectedYear, setSelectedYear] = useState('');
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [filterSearches, setFilterSearches] = useState<Record<string, string>>({});
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + K to focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[placeholder="Search ledgers..."]') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+      }
+      // Ctrl/Cmd + 1-5 for tab navigation
+      if ((e.ctrlKey || e.metaKey) && ['1', '2', '3', '4', '5'].includes(e.key)) {
+        e.preventDefault();
+        const tabs = ['upload', 'results', 'summary', 'balance-sheet', 'profit-loss'];
+        const tabIndex = parseInt(e.key) - 1;
+        if (tabIndex === 0 || data.length > 0) {
+          setActiveTab(tabs[tabIndex]);
+        }
+      }
+      // Ctrl/Cmd + Shift + C to clear data
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C' && data.length > 0) {
+        e.preventDefault();
+        handleClearData();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [data, activeTab]);
+
+  const handleClearData = () => {
+    setData([]);
+    setCurrentYearData({});
+    setPreviousYearData({});
+    setSummary({});
+    setSearch('');
+    setSortColumn('');
+    setSortDirection('asc');
+    setColumnFilters({});
+    setSelectedPeriod('current');
+    setSelectedYear('');
+    setPeriodYear('');
+    setActiveTab('upload');
+    toast.success('All data cleared successfully');
+    // Reset file input
+    const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+    if (fileInput) fileInput.value = '';
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -47,8 +96,14 @@ const SRMPro = () => {
     reader.onload = (evt) => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        const processed = processAccountingData(wb);
-        if (processed.length === 0) throw new Error('No ledgers found. Check Sheet 2 column headers.');
+        
+        // NEW: Single sheet format - process without mapping for now
+        // Mapping will be provided separately by user
+        const processed = processAccountingData(wb, undefined);
+        
+        console.log('Processed data:', processed.length, 'rows');
+        
+        if (processed.length === 0) throw new Error('No ledgers found. Check column headers.');
 
         setData(processed);
         const summarized = summarizeData(processed);
@@ -154,7 +209,7 @@ const SRMPro = () => {
     { label: '(j) Bad debts written off', key: 'Bad debts written off' },
     { label: '(k) Provision for doubtful debts', key: 'Provision for doubtful debts' },
     { label: '(l) Miscellaneous expenses', key: 'Miscellaneous expenses' },
-    { label: 'Uncategorised Other expenses', key: 'Uncategorised Other expenses', un: true },
+    { label: 'Uncategorised expenses', key: 'Uncategorised expenses', un: true },
     { label: 'Total Expenses', sub: true },
     { label: '(10) Prior period items', key: 'Prior period items' },
     { label: 'Profit/(Loss) before tax', sub: true },
@@ -190,21 +245,45 @@ const SRMPro = () => {
   };
 
   const handleFilterChange = (column: string, value: string) => {
-    setColumnFilters((prev) => ({
-      ...prev,
-      [column]: value,
-    }));
+    setColumnFilters((prev) => {
+      const currentFilters = prev[column] || [];
+      if (currentFilters.includes(value)) {
+        // Remove if already selected
+        const newFilters = currentFilters.filter(v => v !== value);
+        return newFilters.length > 0 ? { ...prev, [column]: newFilters } : { ...prev, [column]: [] };
+      } else {
+        // Add to selected
+        return { ...prev, [column]: [...currentFilters, value] };
+      }
+    });
   };
+
+  // Get unique values for each column for dropdown filters
+  const getUniqueColumnValues = useMemo(() => {
+    const uniqueValues: Record<string, string[]> = {};
+    if (data.length > 0) {
+      Object.keys(data[0]).forEach((key) => {
+        const values = new Set<string>();
+        data.forEach((row) => {
+          const val = String(row[key] || '').trim();
+          if (val) values.add(val);
+        });
+        uniqueValues[key] = Array.from(values).sort();
+      });
+    }
+    return uniqueValues;
+  }, [data]);
 
   const filteredAndSortedData = useMemo(() => {
     let result = [...data];
 
-    // Apply column filters
-    Object.entries(columnFilters).forEach(([column, filterValue]) => {
-      if (filterValue) {
+    // Apply column filters (array-based multi-selection)
+    Object.entries(columnFilters).forEach(([column, selectedValues]) => {
+      if (selectedValues && selectedValues.length > 0) {
         result = result.filter((row) => {
-          const cellValue = String(row[column] || '').toLowerCase();
-          return cellValue.includes(filterValue.toLowerCase());
+          const cellValue = String(row[column] || '');
+          // Match if cell value is in the selected values
+          return selectedValues.includes(cellValue);
         });
       }
     });
@@ -239,8 +318,15 @@ const SRMPro = () => {
     
     if (data.length > 0) {
       Object.keys(data[0]).forEach((key) => {
-        if (typeof data[0][key] === 'number') {
-          totals[key] = data.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+        // Try to parse as number for any column that might contain numeric values
+        const firstVal = data[0][key];
+        const testNum = typeof firstVal === 'number' ? firstVal : parseFloat(String(firstVal || '').replace(/,/g, ''));
+        
+        if (!isNaN(testNum)) {
+          totals[key] = data.reduce((sum, row) => {
+            const val = typeof row[key] === 'number' ? row[key] : parseFloat(String(row[key] || '').replace(/,/g, ''));
+            return sum + (isNaN(val) ? 0 : val);
+          }, 0);
         }
       });
     }
@@ -519,6 +605,17 @@ const SRMPro = () => {
                   />
                 </div>
 
+                {data.length > 0 && (
+                  <Button
+                    onClick={handleClearData}
+                    variant="destructive"
+                    className="w-full"
+                    disabled={loading}
+                  >
+                    Clear All Data
+                  </Button>
+                )}
+
                 {loading && (
                   <div className="flex items-center justify-center py-4">
                     <div className="text-center">
@@ -559,27 +656,103 @@ const SRMPro = () => {
                       className="max-w-sm"
                     />
                     
+                    {/* Totals Summary - Opening Balance, Debit, Credit, Closing Balance */}
+                    {data.length > 0 && (
+                      <div className="flex gap-4 p-3 bg-slate-50 rounded-lg border justify-center flex-wrap">
+                        {Object.keys(data[0]).map((key) => {
+                          const keyLower = key.toLowerCase();
+                          const isTargetColumn = keyLower.includes('opening') || 
+                                               keyLower.includes('debit') || 
+                                               keyLower.includes('credit') || 
+                                               keyLower.includes('closing');
+                          if (isTargetColumn && trialBalanceTotals[key] !== undefined) {
+                            return (
+                              <div key={key} className="text-center px-3">
+                                <p className="text-xs text-muted-foreground font-medium mb-0.5">{key}</p>
+                                <p className="text-sm font-bold text-slate-800">
+                                  {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })}
+                      </div>
+                    )}
+                    
                     <div className="overflow-x-auto border rounded-lg max-h-96">
                       <table className="w-full text-sm">
                         <thead className="bg-slate-800 text-white sticky top-0">
                           <tr>
-                            {data[0] && Object.keys(data[0]).map((key) => (
+                            {data[0] && Object.keys(data[0]).filter(key => !key.toLowerCase().includes('amount')).map((key) => (
                               <th key={key} className="px-2 py-2 text-left font-medium whitespace-nowrap">
                                 <div className="space-y-1">
                                   <button
                                     onClick={() => handleSort(key)}
                                     className="flex items-center gap-1 hover:text-blue-300"
+                                    aria-label={`Sort by ${key}`}
                                   >
                                     {key}
                                     <ArrowUpDown className="h-3 w-3" />
                                   </button>
-                                  <Input
-                                    placeholder="Filter..."
-                                    value={columnFilters[key] || ''}
-                                    onChange={(e) => handleFilterChange(key, e.target.value)}
-                                    className="h-6 text-xs bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
+                                  <div className="relative">
+                                    <details className="group">
+                                      <summary className="h-6 text-xs bg-blue-600 text-white border border-blue-500 rounded px-2 py-1 cursor-pointer hover:bg-blue-700 list-none flex items-center justify-between">
+                                        <span className="truncate">
+                                          {columnFilters[key]?.length > 0 ? `${columnFilters[key].length} selected` : 'Filter...'}
+                                        </span>
+                                        <span className="ml-1">▾</span>
+                                      </summary>
+                                      <div className="absolute z-50 mt-1 w-64 bg-white border border-slate-300 rounded shadow-lg" onClick={(e) => e.stopPropagation()}>
+                                        <div className="sticky top-0 bg-white border-b p-2">
+                                          <Input
+                                            placeholder="Search..."
+                                            value={filterSearches[key] || ''}
+                                            onChange={(e) => setFilterSearches(prev => ({ ...prev, [key]: e.target.value }))}
+                                            className="h-7 text-xs"
+                                            autoFocus
+                                          />
+                                        </div>
+                                        <div className="max-h-60 overflow-y-auto">
+                                          {getUniqueColumnValues[key]
+                                            ?.filter(value => !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase()))
+                                            .slice(0, 200)
+                                            .map((value) => (
+                                            <label key={value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-100 cursor-pointer text-slate-900">
+                                              <input
+                                                type="checkbox"
+                                                checked={columnFilters[key]?.includes(value) || false}
+                                                onChange={() => handleFilterChange(key, value)}
+                                                className="rounded border-slate-300"
+                                              />
+                                              <span className="text-xs truncate">{value}</span>
+                                            </label>
+                                          ))}
+                                        </div>
+                                        <div className="sticky bottom-0 bg-white border-t flex">
+                                          {columnFilters[key]?.length > 0 && (
+                                            <button
+                                              onClick={() => setColumnFilters(prev => ({ ...prev, [key]: [] }))}
+                                              className="flex-1 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                                            >
+                                              Clear All
+                                            </button>
+                                          )}
+                                          <button
+                                            onClick={() => {
+                                              const allValues = getUniqueColumnValues[key]?.filter(value => 
+                                                !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase())
+                                              ) || [];
+                                              setColumnFilters(prev => ({ ...prev, [key]: allValues }));
+                                            }}
+                                            className="flex-1 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 border-l"
+                                          >
+                                            Select All
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </details>
+                                  </div>
                                 </div>
                               </th>
                             ))}
@@ -589,7 +762,7 @@ const SRMPro = () => {
                           {filteredAndSortedData.slice(0, 100).map((row, i) => (
                             <tr key={i} className={`border-b hover:bg-slate-50`}>
                               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                              {Object.values(row).map((val: any, j) => (
+                              {Object.entries(row).filter(([key]) => !key.toLowerCase().includes('amount')).map(([key, val]: [string, any], j) => (
                                 <td key={j} className="px-2 py-1 whitespace-nowrap text-xs">
                                   {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                                 </td>
@@ -597,15 +770,6 @@ const SRMPro = () => {
                             </tr>
                           ))}
                         </tbody>
-                        <tfoot className="bg-slate-100 font-bold sticky bottom-0">
-                          <tr>
-                            {data[0] && Object.keys(data[0]).map((key, idx) => (
-                              <td key={key} className="px-2 py-2 text-xs whitespace-nowrap">
-                                {idx === 0 ? 'TOTAL:' : typeof trialBalanceTotals[key] === 'number' ? trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}
-                              </td>
-                            ))}
-                          </tr>
-                        </tfoot>
                       </table>
                     </div>
                   </div>
@@ -647,15 +811,21 @@ const SRMPro = () => {
                   />
                 </div>
 
-                {/* Totals Summary */}
+                {/* Totals Summary - Opening Balance, Debit, Credit, Closing Balance */}
                 {data.length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-lg border">
+                  <div className="flex gap-6 p-4 bg-slate-50 rounded-lg border justify-center">
                     {Object.keys(data[0]).map((key) => {
-                      if (typeof data[0][key] === 'number' && trialBalanceTotals[key]) {
+                      const keyLower = key.toLowerCase();
+                      const isTargetColumn = keyLower.includes('opening') || 
+                                           keyLower.includes('debit') || 
+                                           keyLower.includes('credit') || 
+                                           keyLower.includes('closing');
+                      // Check if column has numeric total
+                      if (isTargetColumn && trialBalanceTotals[key] !== undefined) {
                         return (
-                          <div key={key} className="text-center">
-                            <p className="text-xs text-muted-foreground font-medium">{key}</p>
-                            <p className="text-lg font-bold text-slate-800">
+                          <div key={key} className="text-center px-4">
+                            <p className="text-xs text-muted-foreground font-medium mb-0.5">{key}</p>
+                            <p className="text-base font-bold text-slate-800">
                               {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </p>
                           </div>
@@ -670,23 +840,75 @@ const SRMPro = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-800 text-white sticky top-0">
                       <tr>
-                        {data[0] && Object.keys(data[0]).map((key) => (
+                        {data[0] && Object.keys(data[0]).filter(key => !key.toLowerCase().includes('amount')).map((key) => (
                           <th key={key} className="px-3 py-2 text-left font-medium whitespace-nowrap">
                             <div className="space-y-1">
                               <button
                                 onClick={() => handleSort(key)}
                                 className="flex items-center gap-1 hover:text-blue-300 w-full"
+                                aria-label={`Sort by ${key}`}
                               >
                                 {key}
                                 <ArrowUpDown className="h-3 w-3" />
                               </button>
-                              <Input
-                                placeholder="Filter..."
-                                value={columnFilters[key] || ''}
-                                onChange={(e) => handleFilterChange(key, e.target.value)}
-                                className="h-7 text-xs bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
-                                onClick={(e) => e.stopPropagation()}
-                              />
+                              <div className="relative">
+                                <details className="group">
+                                  <summary className="h-7 text-xs bg-blue-600 text-white border border-blue-500 rounded px-2 py-1 cursor-pointer hover:bg-blue-700 list-none flex items-center justify-between">
+                                    <span className="truncate">
+                                      {columnFilters[key]?.length > 0 ? `${columnFilters[key].length} selected` : 'Filter...'}
+                                    </span>
+                                    <span className="ml-1">▾</span>
+                                  </summary>
+                                  <div className="absolute z-50 mt-1 w-64 bg-white border border-slate-300 rounded shadow-lg" onClick={(e) => e.stopPropagation()}>
+                                    <div className="sticky top-0 bg-white border-b p-2">
+                                      <Input
+                                        placeholder="Search..."
+                                        value={filterSearches[key] || ''}
+                                        onChange={(e) => setFilterSearches(prev => ({ ...prev, [key]: e.target.value }))}
+                                        className="h-7 text-xs"
+                                        autoFocus
+                                      />
+                                    </div>
+                                    <div className="max-h-60 overflow-y-auto">
+                                      {getUniqueColumnValues[key]
+                                        ?.filter(value => !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase()))
+                                        .slice(0, 200)
+                                        .map((value) => (
+                                        <label key={value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-100 cursor-pointer text-slate-900">
+                                          <input
+                                            type="checkbox"
+                                            checked={columnFilters[key]?.includes(value) || false}
+                                            onChange={() => handleFilterChange(key, value)}
+                                            className="rounded border-slate-300"
+                                          />
+                                          <span className="text-xs truncate">{value}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                    <div className="sticky bottom-0 bg-white border-t flex">
+                                      {columnFilters[key]?.length > 0 && (
+                                        <button
+                                          onClick={() => setColumnFilters(prev => ({ ...prev, [key]: [] }))}
+                                          className="flex-1 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                                        >
+                                          Clear All
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={() => {
+                                          const allValues = getUniqueColumnValues[key]?.filter(value => 
+                                            !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase())
+                                          ) || [];
+                                          setColumnFilters(prev => ({ ...prev, [key]: allValues }));
+                                        }}
+                                        className="flex-1 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 border-l"
+                                      >
+                                        Select All
+                                      </button>
+                                    </div>
+                                  </div>
+                                </details>
+                              </div>
                             </div>
                           </th>
                         ))}
@@ -701,7 +923,7 @@ const SRMPro = () => {
                             className={`border-b hover:bg-slate-50`}
                           >
                             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                            {Object.values(row).map((val: any, j) => (
+                            {Object.entries(row).filter(([key]) => !key.toLowerCase().includes('amount')).map(([key, val]: [string, any], j) => (
                               <td key={j} className="px-3 py-2 whitespace-nowrap">
                                 {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                               </td>
@@ -709,15 +931,6 @@ const SRMPro = () => {
                           </tr>
                         ))}
                     </tbody>
-                    <tfoot className="bg-slate-100 font-bold sticky bottom-0">
-                      <tr>
-                        {data[0] && Object.keys(data[0]).map((key, idx) => (
-                          <td key={key} className="px-3 py-2 whitespace-nowrap">
-                            {idx === 0 ? 'TOTAL:' : typeof trialBalanceTotals[key] === 'number' ? trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}
-                          </td>
-                        ))}
-                      </tr>
-                    </tfoot>
                   </table>
                 </div>
               </div>
