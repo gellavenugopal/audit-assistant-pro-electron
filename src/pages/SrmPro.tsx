@@ -30,6 +30,39 @@ const SRMPro = () => {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
   const [filterSearches, setFilterSearches] = useState<Record<string, string>>({});
+  const [assesseeType, setAssesseeType] = useState<'3' | '4' | '5'>('3'); // 3=Corporate, 4=Non-Corporate, 5=LLP
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [mappingData, setMappingData] = useState<any[]>([]);
+  const [mappingLoaded, setMappingLoaded] = useState(false);
+
+  // Load mapping file on mount
+  useEffect(() => {
+    const loadMappingFile = async () => {
+      try {
+        const response = await fetch('/SRM_Pro/Mapping.xlsx');
+        if (!response.ok) {
+          console.warn('Mapping file not found, will use default mapping');
+          return;
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+        
+        // Skip header row
+        const dataRows = jsonData.slice(1);
+        setMappingData(dataRows);
+        setMappingLoaded(true);
+        console.log('Mapping file loaded successfully:', dataRows.length, 'mapping rules');
+      } catch (error) {
+        console.error('Error loading mapping file:', error);
+        toast.error('Could not load mapping file. Using default mapping.');
+      }
+    };
+    
+    loadMappingFile();
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -97,13 +130,22 @@ const SRMPro = () => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
         
-        // NEW: Single sheet format - process without mapping for now
-        // Mapping will be provided separately by user
-        const processed = processAccountingData(wb, undefined);
+        console.log('Workbook loaded. Sheet names:', wb.SheetNames);
+        console.log('Number of sheets:', wb.SheetNames.length);
+        
+        // Process with mapping data and assessee type
+        const processed = processAccountingData(wb, mappingData, assesseeType);
         
         console.log('Processed data:', processed.length, 'rows');
+        console.log('Using assessee type:', assesseeType === '3' ? 'Corporate' : assesseeType === '4' ? 'Non-Corporate' : 'LLP');
+        console.log('Mapping loaded:', mappingLoaded ? 'Yes' : 'No');
+        if (processed.length > 0) {
+          console.log('Sample row:', processed[0]);
+        }
         
-        if (processed.length === 0) throw new Error('No ledgers found. Check column headers.');
+        if (processed.length === 0) {
+          throw new Error('No ledgers found. Please check that your Excel file has the correct column headers (Name, Parent, OpeningBalance, Debit, Credit, ClosingBalance, IsDeemedPositive).');
+        }
 
         setData(processed);
         const summarized = summarizeData(processed);
@@ -115,10 +157,17 @@ const SRMPro = () => {
           setPreviousYearData(summarized);
         }
 
+        const mappedCount = processed.filter(r => r['Mapped Category'] !== 'NOT MAPPED').length;
+        const unmappedCount = processed.length - mappedCount;
+        
         setActiveTab('results');
-        toast.success(`${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully`);
+        toast.success(
+          `${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully. ` +
+          `${processed.length} ledgers imported (${mappedCount} mapped, ${unmappedCount} unmapped).`
+        );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
+        console.error('File processing error:', err);
         toast.error(err.message || 'Error processing file');
       }
       setLoading(false);
@@ -591,6 +640,23 @@ const SRMPro = () => {
                     onChange={(e) => setSelectedYear(e.target.value)}
                     className="h-9"
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="assessee-type" className="text-sm">
+                    Assessee Type
+                    {mappingLoaded && <span className="ml-2 text-xs text-green-600">✓ Mapping Loaded</span>}
+                  </Label>
+                  <Select value={assesseeType} onValueChange={(value: '3' | '4' | '5') => setAssesseeType(value)}>
+                    <SelectTrigger id="assessee-type" className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="3">Corporate</SelectItem>
+                      <SelectItem value="4">Non-Corporate</SelectItem>
+                      <SelectItem value="5">LLP</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-1">

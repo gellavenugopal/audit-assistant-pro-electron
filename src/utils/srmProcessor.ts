@@ -14,8 +14,50 @@ export const deepClean = (val: any): string => {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
 };
 
+// Helper function to extract 2nd highest parent after "Primary"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const processAccountingData = (workbook: XLSX.WorkBook, mappingMap?: Record<string, string>): any[] => {
+const extract2ndParentAfterPrimary = (row: any[], parentIdx: number, groupColIndices: number[]): string => {
+  // The hierarchy goes: Ledger -> Parent -> Group.$Parent -> Group.$Parent.1 -> ... -> Primary
+  // We need to find the 2nd level after Primary
+  
+  // Check Group.$Parent columns from right to left (highest to lowest hierarchy)
+  for (let i = groupColIndices.length - 1; i >= 0; i--) {
+    const colIdx = groupColIndices[i];
+    if (colIdx >= 0 && row[colIdx]) {
+      const value = String(row[colIdx]).trim();
+      // Skip if it contains "Primary" marker
+      if (value.includes('\x04') || value.toLowerCase().includes('primary')) {
+        // The next column to the left should be the 2nd parent after Primary
+        if (i > 0) {
+          const nextIdx = groupColIndices[i - 1];
+          if (nextIdx >= 0 && row[nextIdx]) {
+            return String(row[nextIdx]).trim();
+          }
+        }
+        // If no more group columns, use Parent column
+        if (parentIdx >= 0 && row[parentIdx]) {
+          return String(row[parentIdx]).trim();
+        }
+      }
+    }
+  }
+  
+  // Fallback: use Parent column
+  if (parentIdx >= 0 && row[parentIdx]) {
+    return String(row[parentIdx]).trim();
+  }
+  
+  return '';
+};
+
+
+export const processAccountingData = (
+  workbook: XLSX.WorkBook, 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mappingData?: any[][], 
+  assesseeType?: '3' | '4' | '5'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any[] => {
   // NEW FORMAT: Single sheet with all data
   // Columns: Period, Branch, Ledger Code, Name, OpeningBalance, Debit, Credit, ClosingBalance,
   //          IsRevenue, IsDeemedPositive, TrailBalance, PrimaryGroup, Parent, Groups.$Parent.1-8
@@ -59,37 +101,93 @@ export const processAccountingData = (workbook: XLSX.WorkBook, mappingMap?: Reco
   // Find key column indices
   const nameIdx = findCol('name', 'ledger', 'particulars');
   const parentIdx = findCol('parent');
-  const primaryGroupIdx = findCol('primarygroup', 'primary group');
+  const primaryGroupIdx = findCol('primarygroup', 'primary group', 'group');
   const openingBalIdx = findCol('openingbalance', 'opening balance', 'opening');
   const debitIdx = findCol('debit');
   const creditIdx = findCol('credit');
   const closingBalIdx = findCol('closingbalance', 'closing balance', 'closing');
   const isDeemedPositiveIdx = findCol('isdeemedpositive', 'is deemed positive', 'deemedpositive');
+  
+  // Find all Group.$Parent columns for hierarchy extraction
+  const groupColIndices: number[] = [];
+  Object.keys(colMap).forEach(key => {
+    if (key.includes('group') && key.includes('parent')) {
+      groupColIndices.push(colMap[key]);
+    }
+  });
+  groupColIndices.sort((a, b) => a - b); // Sort by column index
 
   console.log('Column mapping:', {
     nameIdx, parentIdx, primaryGroupIdx, openingBalIdx, 
-    debitIdx, creditIdx, closingBalIdx, isDeemedPositiveIdx
+    debitIdx, creditIdx, closingBalIdx, isDeemedPositiveIdx,
+    groupColIndices,
+    headers: headers.slice(0, 15) // Show first 15 headers
   });
+  
+  // Build mapping lookup from mapping data
+  // Mapping structure: [Constitution, Level 1, Level 2, Level 3, Level 4, Level 5, Level 6, ...]
+  // We match on Level 2 (column index 2) and use Level 3 (column index 3) as mapped category
+  const mappingLookup: Record<string, string> = {};
+  if (mappingData && mappingData.length > 0 && assesseeType) {
+    mappingData.forEach(row => {
+      const constitution = String(row[0] || '').trim();
+      if (constitution === assesseeType) {
+        const level2 = String(row[2] || '').trim(); // 2nd parent to match
+        const level3 = String(row[3] || '').trim(); // Mapped category
+        if (level2 && level3) {
+          mappingLookup[deepClean(level2)] = level3;
+        }
+      }
+    });
+    console.log('Mapping lookup built:', Object.keys(mappingLookup).length, 'rules for assessee type', assesseeType);
+  }
+  
+  // Validate critical columns
+  if (nameIdx === -1) {
+    console.error('Available columns:', headers);
+    throw new Error('Could not find Name/Ledger column. Available columns: ' + headers.join(', '));
+  }
+  if (closingBalIdx === -1) {
+    console.warn('Could not find ClosingBalance column. Will try to calculate from Opening + Debit - Credit');
+  }
 
   // Transform Data
   const results = dataRows
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((row: any[]) => {
+    .map((row: any[], rowIndex: number) => {
       if (!row || row.length === 0 || !row[nameIdx]) return null;
 
       const name = row[nameIdx];
+      
+      // Skip empty rows or summary rows
+      if (!name || String(name).trim() === '' || String(name).toLowerCase().includes('total')) {
+        return null;
+      }
+      
       const parent = parentIdx >= 0 ? row[parentIdx] : '';
       const primaryGroup = primaryGroupIdx >= 0 ? row[primaryGroupIdx] : '';
-      const isDeemedPositive = isDeemedPositiveIdx >= 0 ? (row[isDeemedPositiveIdx] === 1 || row[isDeemedPositiveIdx] === '1') : false;
+      const isDeemedPositive = isDeemedPositiveIdx >= 0 ? (row[isDeemedPositiveIdx] === 1 || row[isDeemedPositiveIdx] === '1' || row[isDeemedPositiveIdx] === true) : false;
       
-      // Get mapped category from provided mapping or default to 'NOT MAPPED'
-      const cleanParent = deepClean(parent || '');
-      const category = (mappingMap && cleanParent) ? (mappingMap[cleanParent] || 'NOT MAPPED') : 'NOT MAPPED';
+      // Extract 2nd highest parent after Primary for mapping
+      const secondParentAfterPrimary = extract2ndParentAfterPrimary(row, parentIdx, groupColIndices);
+      const cleanSecondParent = deepClean(secondParentAfterPrimary);
+      
+      // Get mapped category using the mapping lookup
+      let category = 'NOT MAPPED';
+      if (mappingLookup && cleanSecondParent && mappingLookup[cleanSecondParent]) {
+        category = mappingLookup[cleanSecondParent];
+      }
 
       // Get closing balance (primary amount to use)
       let closingBalance = 0;
-      if (closingBalIdx >= 0 && row[closingBalIdx] !== undefined) {
+      if (closingBalIdx >= 0 && row[closingBalIdx] !== undefined && row[closingBalIdx] !== null && row[closingBalIdx] !== '') {
         closingBalance = parseFloat(String(row[closingBalIdx]).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0;
+      } else {
+        // Calculate from Opening + Debit - Credit if ClosingBalance not available
+        const opening = openingBalIdx >= 0 ? (parseFloat(String(row[openingBalIdx] || 0).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0) : 0;
+        const debit = debitIdx >= 0 ? (parseFloat(String(row[debitIdx] || 0).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0) : 0;
+        const credit = creditIdx >= 0 ? (parseFloat(String(row[creditIdx] || 0).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0) : 0;
+        closingBalance = opening + debit - credit;
       }
 
       // Apply sign correction using IsDeemedPositive flag
@@ -111,13 +209,17 @@ export const processAccountingData = (workbook: XLSX.WorkBook, mappingMap?: Reco
       obj['Group'] = primaryGroup;
       obj['Mapped Category'] = category;
       obj['AmountValue'] = correctedAmount;
-      obj['Logic Trace'] = parent ? `Parent: ${parent}` : 'No Parent Found';
+      obj['2nd Parent After Primary'] = secondParentAfterPrimary; // For debugging
+      obj['Logic Trace'] = `Parent: ${parent} | 2nd: ${secondParentAfterPrimary} | Mapped: ${category}${isDeemedPositive ? ' (Sign flipped)' : ''}`;
 
       return obj;
     })
     .filter((r) => r !== null);
 
   console.log('Processed Rows:', results.length);
+  if (results.length > 0) {
+    console.log('Sample processed row:', results[0]);
+  }
   return results;
 };
 
