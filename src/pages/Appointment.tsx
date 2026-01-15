@@ -251,7 +251,7 @@ export default function Appointment() {
             </Button>
             <LettersPage engagementId={currentEngagement?.id || ''} />
           </div>
-        </TabsContent>
+        )}
 
         <Card>
           <CardHeader>
