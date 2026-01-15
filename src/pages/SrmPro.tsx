@@ -414,6 +414,47 @@ const SRMPro = () => {
     let isInAssetsSection = false;
     let totalCount = 0;
 
+    // Pre-calculate totals for P&L
+    let currentRevenueTotal = 0;
+    let previousRevenueTotal = 0;
+    let currentExpensesTotal = 0;
+    let previousExpensesTotal = 0;
+    let currentTaxExpense = 0;
+    let previousTaxExpense = 0;
+    let isInExpensesSection = false;
+    let isInTaxSection = false;
+
+    if (isPL) {
+      structure.forEach((row) => {
+        if (row.label === 'EXPENSES') {
+          isInExpensesSection = true;
+        }
+        if (row.label === '(11) Tax expense') {
+          isInTaxSection = true;
+        }
+        if (row.label === 'Profit/(Loss) for the period') {
+          isInTaxSection = false;
+        }
+        
+        if (!row.h && !row.sub && row.key) {
+          const currentVal = currentYearData[deepClean(row.key)] || 0;
+          const previousVal = previousYearData[deepClean(row.key)] || 0;
+          
+          if (isInTaxSection) {
+            currentTaxExpense += currentVal;
+            previousTaxExpense += previousVal;
+          } else if (isInExpensesSection) {
+            currentExpensesTotal += currentVal;
+            previousExpensesTotal += previousVal;
+          } else {
+            // Income section
+            currentRevenueTotal += currentVal;
+            previousRevenueTotal += previousVal;
+          }
+        }
+      });
+    }
+
     // Pre-calculate totals for Balance Sheet
     if (!isPL) {
       structure.forEach((row) => {
@@ -486,6 +527,30 @@ const SRMPro = () => {
                     let displayCurrentTotal = 0;
                     let displayPreviousTotal = 0;
                     let isAssetTotal = false;
+                    
+                    // Handle P&L totals
+                    let showPLTotal = false;
+                    if (isPL) {
+                      if (row.label === 'Total Revenue') {
+                        showPLTotal = true;
+                        displayCurrentTotal = currentRevenueTotal;
+                        displayPreviousTotal = previousRevenueTotal;
+                      } else if (row.label === 'Total Expenses') {
+                        showPLTotal = true;
+                        displayCurrentTotal = currentExpensesTotal;
+                        displayPreviousTotal = previousExpensesTotal;
+                      } else if (row.label === 'Profit/(Loss) before tax') {
+                        showPLTotal = true;
+                        displayCurrentTotal = currentRevenueTotal - currentExpensesTotal;
+                        displayPreviousTotal = previousRevenueTotal - previousExpensesTotal;
+                      } else if (row.label === 'Profit/(Loss) for the period') {
+                        showPLTotal = true;
+                        const currentPBT = currentRevenueTotal - currentExpensesTotal;
+                        const previousPBT = previousRevenueTotal - previousExpensesTotal;
+                        displayCurrentTotal = currentPBT - currentTaxExpense;
+                        displayPreviousTotal = previousPBT - previousTaxExpense;
+                      }
+                    }
 
                     if (showTotal && !isPL) {
                       // Check if this is Assets total (second TOTAL) or Liabilities total (first TOTAL)
@@ -509,19 +574,20 @@ const SRMPro = () => {
                           ${row.h ? 'bg-slate-100 font-bold text-lg' : ''}
                           ${row.sub ? 'font-semibold bg-slate-50' : ''}
                           ${showTotal ? 'bg-blue-50 font-bold text-lg' : ''}
+                          ${showPLTotal ? 'bg-blue-50 font-bold text-lg' : ''}
                         `}
                       >
                         <td style={{ paddingLeft: indent }} className={`px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
                           {row.label}
                         </td>
                         <td className={`text-center px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {!row.h && !row.sub && !row.un ? row.note || '' : ''}
+                          {!row.h && !row.sub && !row.un && !showPLTotal ? row.note || '' : ''}
                         </td>
                         <td className={`text-right px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {showTotal ? formatValue(displayCurrentTotal) : !row.h && !row.sub ? formatValue(currentVal) : ''}
+                          {showTotal || showPLTotal ? formatValue(displayCurrentTotal) : !row.h && !row.sub ? formatValue(currentVal) : ''}
                         </td>
                         <td className={`text-right px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {showTotal ? formatValue(displayPreviousTotal) : !row.h && !row.sub ? formatValue(previousVal) : ''}
+                          {showTotal || showPLTotal ? formatValue(displayPreviousTotal) : !row.h && !row.sub ? formatValue(previousVal) : ''}
                         </td>
                       </tr>
                     );
