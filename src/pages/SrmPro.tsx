@@ -230,6 +230,7 @@ const SRMPro = () => {
     { label: '(c) Other operating revenues', key: 'Other operating revenues' },
     { label: 'Uncategorised Revenue from operations', key: 'Uncategorised Revenue from operations', un: true },
     { label: '(2) Other Income', key: 'Other income' },
+    { label: 'Uncategorised Income', key: 'Uncategorised Income', un: true },
     { label: 'Total Revenue', sub: true },
     { label: 'EXPENSES', h: true },
     { label: '(3) Cost of materials consumed', key: 'Cost of materials consumed' },
