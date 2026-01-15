@@ -27,7 +27,7 @@ import AuditTrail from "./pages/AuditTrail";
 import Completion from "./pages/Completion";
 import Settings from "./pages/Settings";
 import Feedback from "./pages/Feedback";
-import SrmPro from "./pages/SrmPro";
+import SRMPro from "./pages/SrmPro";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
@@ -39,7 +39,6 @@ import Gstr1Dashboard from "./pages/Gstr1Dashboard";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
-
 
 const queryClient = new QueryClient();
 
@@ -341,7 +340,7 @@ const App = () => (
                   element={
                     <ProtectedRoute>
                       <MainLayout>
-                        <SrmPro />
+                        <SRMPro />
                       </MainLayout>
                     </ProtectedRoute>
                   }
