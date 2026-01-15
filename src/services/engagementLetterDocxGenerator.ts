@@ -16,6 +16,7 @@ import {
   PageBreak,
 } from 'docx';
 import type { EngagementLetterMasterData, GeneratedLetterResult } from '@/types/engagementLetter';
+import { EngagementLetterTemplateEngine } from './engagementLetterEngine';
 
 /**
  * Generate professionally formatted DOCX from rendered text
@@ -100,6 +101,8 @@ export class EngagementLetterDocxGenerator {
     masterData: EngagementLetterMasterData
   ): Paragraph[] {
     const paragraphs: Paragraph[] = [];
+    const context = EngagementLetterTemplateEngine.buildContext(masterData);
+    const appointmentDateLabel = context.appointment_date || masterData.period.appointment_date;
 
     // Split by double line breaks (paragraph breaks)
     const textBlocks = renderedText.split(/\n\s*\n+/);
@@ -127,7 +130,7 @@ export class EngagementLetterDocxGenerator {
     paragraphs.push(new Paragraph({ text: '' }));
     paragraphs.push(
       new Paragraph({
-        children: [new TextRun(`Date: ${masterData.period.appointment_date}`)],
+        children: [new TextRun(`Date: ${appointmentDateLabel}`)],
         alignment: AlignmentType.LEFT,
       })
     );
