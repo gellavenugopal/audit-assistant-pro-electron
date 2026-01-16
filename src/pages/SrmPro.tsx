@@ -785,8 +785,8 @@ const SRMPro = () => {
                       <p className="mt-2 text-xs text-muted-foreground">Processing...</p>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -981,12 +981,13 @@ const SRMPro = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredAndSortedData
-                        .slice(0, 100)
-                        .map((row, i) => (
+                      {filteredAndSortedData.slice(0, 100).map((row, i) => {
+                        const originalIndex = data.findIndex((dataRow) => dataRow === row);
+
+                        return (
                           <tr
                             key={i}
-                            className={`border-b hover:bg-slate-50`}
+                            className="border-b hover:bg-slate-50"
                           >
                             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                             {Object.values(row).map((val: any, j) => (
@@ -994,70 +995,70 @@ const SRMPro = () => {
                                 {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                               </td>
                             ))}
-                              <td className="px-3 py-2">
+                            <td className="px-3 py-2">
+                              <Input
+                                type="text"
+                                placeholder="Add note..."
+                                value={rowNotes[originalIndex] || ''}
+                                onChange={(e) => handleAddNote(originalIndex, e.target.value)}
+                                className="min-w-[150px] h-8 text-xs"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-2">
                                 <Input
-                                  type="text"
-                                  placeholder="Add note..."
-                                  value={rowNotes[originalIndex] || ''}
-                                  onChange={(e) => handleAddNote(originalIndex, e.target.value)}
-                                  className="min-w-[150px] h-8 text-xs"
+                                  type="file"
+                                  multiple
+                                  onChange={(e) => handleUploadEvidence(originalIndex, e.target.files)}
+                                  className="hidden"
+                                  id={`evidence-${originalIndex}`}
                                 />
-                              </td>
-                              <td className="px-3 py-2">
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    type="file"
-                                    multiple
-                                    onChange={(e) => handleUploadEvidence(originalIndex, e.target.files)}
-                                    className="hidden"
-                                    id={`evidence-${originalIndex}`}
-                                  />
-                                  <label htmlFor={`evidence-${originalIndex}`}>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="gap-1 h-8 text-xs cursor-pointer"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        document.getElementById(`evidence-${originalIndex}`)?.click();
-                                      }}
-                                    >
-                                      <Upload className="h-3 w-3" />
-                                      Upload
-                                    </Button>
-                                  </label>
-                                  {rowEvidence[originalIndex] && rowEvidence[originalIndex].length > 0 && (
-                                    <span className="text-xs text-green-600">
-                                      {rowEvidence[originalIndex].length} file(s)
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2 whitespace-nowrap">
-                                <div className="flex gap-1 flex-nowrap">
+                                <label htmlFor={`evidence-${originalIndex}`}>
                                   <Button
+                                    type="button"
                                     variant="outline"
                                     size="sm"
-                                    className="gap-1 h-8 text-xs px-2"
-                                    onClick={() => handleEditRow(originalIndex)}
-                                  >
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    className="gap-1 h-8 text-xs px-2"
-                                    onClick={() => {
-                                      setRowToDelete(originalIndex);
-                                      setDeleteDialogOpen(true);
+                                    className="gap-1 h-8 text-xs cursor-pointer"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      document.getElementById(`evidence-${originalIndex}`)?.click();
                                     }}
                                   >
-                                    <Trash2 className="h-3 w-3" />
-                                    Delete
+                                    <Upload className="h-3 w-3" />
+                                    Upload
                                   </Button>
-                                </div>
-                              </td>
+                                </label>
+                                {rowEvidence[originalIndex] && rowEvidence[originalIndex].length > 0 && (
+                                  <span className="text-xs text-green-600">
+                                    {rowEvidence[originalIndex].length} file(s)
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <div className="flex gap-1 flex-nowrap">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="gap-1 h-8 text-xs px-2"
+                                  onClick={() => handleEditRow(originalIndex)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  className="gap-1 h-8 text-xs px-2"
+                                  onClick={() => {
+                                    setRowToDelete(originalIndex);
+                                    setDeleteDialogOpen(true);
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  Delete
+                                </Button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
