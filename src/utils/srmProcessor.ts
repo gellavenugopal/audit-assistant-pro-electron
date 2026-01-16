@@ -14,96 +14,210 @@ export const deepClean = (val: any): string => {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
 };
 
+// Load mapping file from public folder
+const loadMappingFile = async (filename: string, assesseeType: string) => {
+  try {
+    const response = await fetch(`/SRM_Pro/${filename}`);
+    const arrayBuffer = await response.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as DataRow[];
+    
+    // Filter by assessee type (column 0)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return data.filter((row: any[]) => row && row[0] && String(row[0]) === assesseeType);
+  } catch (error) {
+    console.error(`Error loading mapping file ${filename}:`, error);
+    return [];
+  }
+};
+
+// Apply Mapping.xlsx rules - exact match on 2nd highest parent
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const processAccountingData = (workbook: XLSX.WorkBook): any[] => {
-  const s1Raw = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as DataRow[];
-  const s2Raw = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[1]], { header: 1 }) as DataRow[];
-  const s3Raw = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[2]], { header: 1 }) as DataRow[];
-
-  // 1. Build Mapping Master (Sheet 1)
-  // Logic: Column C (Parent) -> Column D (Category)
-  const mappingMap: Record<string, string> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  s1Raw.forEach((row: any[]) => {
-    const parentKey = deepClean(row[2]);
-    if (parentKey) mappingMap[parentKey] = row[3];
-  });
-
-  // 2. Build Tally Hierarchy (Sheet 3)
-  // Logic: Find the cell containing "Primary", take the cell to its left
-  const hierarchyMap: Record<string, string> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  s3Raw.forEach((row: any[]) => {
-    if (!row || row.length < 2) return;
-    const ledgerName = deepClean(row[0]); // $Name is usually Col A
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cleanRow = row.map((cell: any) => deepClean(cell));
-    const pIdx = cleanRow.findIndex((cell: string) => cell.includes('primary'));
-    if (pIdx > 0) {
-      hierarchyMap[ledgerName] = cleanRow[pIdx - 1];
+const applyMapping1 = (ledger: any, mappingRules: DataRow[]): string => {
+  // Extract 2nd highest parent from hierarchy (before Primary)
+  const hierarchyParts: string[] = [];
+  
+  // Build hierarchy from Group.$Parent columns in TB
+  // Assuming columns 12-20 contain hierarchy
+  if (ledger.hierarchyArray) {
+    hierarchyParts.push(...ledger.hierarchyArray);
+  }
+  
+  // 2nd highest parent is the first non-empty value (Primary is last, so we take first)
+  const secondHighestParent = hierarchyParts[0] || '';
+  
+  if (!secondHighestParent) return 'NOT MAPPED';
+  
+  // Match with Level 2 (column index 2) in mapping rules
+  for (const rule of mappingRules) {
+    const level2 = String(rule[2] || '').trim();
+    if (level2.toLowerCase() === secondHighestParent.toLowerCase()) {
+      // Return Level 3 (column index 3)
+      return String(rule[3] || 'NOT MAPPED').trim();
     }
-  });
+  }
+  
+  return 'NOT MAPPED';
+};
 
-  // 3. Find Start of Trial Balance (Sheet 2)
+// Apply Mapping (1).xlsx rules - priority-based keyword search
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const applyMapping2 = (ledger: any, mappingRules: DataRow[]): string => {
+  // Sort rules by priority (column 7)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let headerRowIdx = s2Raw.findIndex((row: any[]) =>
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    row.some((cell: any) => {
-      const c = deepClean(cell);
-      return c.includes('ledger') || c.includes('particulars') || c.includes('name') || c.includes('1-apr');
-    })
-  );
-  if (headerRowIdx === -1) headerRowIdx = 0;
-
-  const headers = (s2Raw[headerRowIdx] || []) as DataRow;
-  const dataRows = s2Raw.slice(headerRowIdx + 1);
-
-  // Auto-detect Ledger and Amount columns
-  const ledgerIdx =
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    headers.findIndex((h: any) => {
-      const s = deepClean(h);
-      return s.includes('ledger') || s.includes('particulars') || s.includes('name');
-    }) || 0;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const amtIdx = headers.findIndex((h: any) => {
-    const s = deepClean(h);
-    return s.includes('amount') || s.includes('closing') || s.includes('31-mar') || s.includes('1-apr');
+  const sortedRules = [...mappingRules].sort((a: any[], b: any[]) => {
+    const priorityA = parseInt(String(a[7] || '999')) || 999;
+    const priorityB = parseInt(String(b[7] || '999')) || 999;
+    return priorityA - priorityB;
   });
-
-  // 4. Transform Data
-  const results = dataRows
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((row: any[]) => {
-      if (!row || row.length === 0 || !row[ledgerIdx]) return null;
-
-      const rawName = row[ledgerIdx];
-      const cleanedName = deepClean(rawName);
-      const parent = hierarchyMap[cleanedName];
-      const category = parent ? mappingMap[parent] || 'NOT MAPPED' : 'NOT MAPPED';
-
-      // Numeric parsing
-      const rawAmt = row[amtIdx !== -1 ? amtIdx : ledgerIdx + 1];
-      let cleanAmt = 0;
-      if (rawAmt !== undefined) {
-        cleanAmt = parseFloat(String(rawAmt).replace(/,/g, '').replace(/[^-0-9.]/g, '')) || 0;
+  
+  // Build search path: hierarchy in descending order + ledger name
+  const searchPath: string[] = [];
+  if (ledger.hierarchyArray) {
+    searchPath.push(...ledger.hierarchyArray);
+  }
+  searchPath.push(ledger.Name || '');
+  
+  // Search through each hierarchy level
+  for (const pathItem of searchPath) {
+    if (!pathItem) continue;
+    const pathItemLower = pathItem.toLowerCase();
+    
+    // Check each rule in priority order
+    for (const rule of sortedRules) {
+      const keywordsStr = String(rule[1] || '');
+      const category = String(rule[2] || '').trim();
+      
+      if (!keywordsStr || !category) continue;
+      
+      // Split keywords by "|"
+      const keywords = keywordsStr.split('|').map(k => k.trim().toLowerCase());
+      
+      // Check if any keyword matches (substring match)
+      for (const keyword of keywords) {
+        if (keyword && pathItemLower.includes(keyword)) {
+          return category;
+        }
       }
+    }
+  }
+  
+  return 'NOT MAPPED';
+};
 
-      // Build row object preserving original data
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const obj: Record<string, any> = {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      headers.forEach((h: any, i: number) => {
-        obj[h || `Col_${i}`] = row[i];
-      });
-      obj['Mapped Category'] = category;
-      obj['AmountValue'] = cleanAmt;
-      obj['Logic Trace'] = parent ? `Parent: ${parent}` : 'Hierarchy Match Failed';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const processAccountingData = async (workbook: XLSX.WorkBook, assesseeType: string = '3'): Promise<any[]> => {
+  // Load mapping files
+  const mapping1Rules = await loadMappingFile('Mapping.xlsx', assesseeType);
+  const mapping2Rules = await loadMappingFile('Mapping (1).xlsx', assesseeType);
+  
+  console.log(`Loaded ${mapping1Rules.length} rules from Mapping.xlsx`);
+  console.log(`Loaded ${mapping2Rules.length} rules from Mapping (1).xlsx`);
 
-      return obj;
-    })
-    .filter((r) => r !== null);
+  // Handle single-sheet format with columns: Name, Parent, OpeningBalance, Debit, Credit, ClosingBalance, IsDeemedPositive, TrailBalance, Group.$Parent hierarchy
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as DataRow[];
+
+  if (rawData.length < 2) {
+    console.error('No data found in sheet');
+    return [];
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const headers = rawData[0] as any[];
+  const dataRows = rawData.slice(1);
+
+  console.log('Headers:', headers);
+  console.log('Total data rows:', dataRows.length);
+
+  // Find column indices
+  const findColumnIndex = (keywords: string[]) => {
+    return headers.findIndex((h: string) => {
+      const clean = deepClean(h);
+      return keywords.some(kw => clean.includes(kw));
+    });
+  };
+
+  const nameIdx = findColumnIndex(['name', 'ledger', 'particulars']);
+  const parentIdx = findColumnIndex(['parent']) !== -1 ? findColumnIndex(['parent']) : 11; // Default to column 11
+  const openingIdx = findColumnIndex(['opening', 'openingbalance']);
+  const debitIdx = findColumnIndex(['debit']);
+  const creditIdx = findColumnIndex(['credit']);
+  const closingIdx = findColumnIndex(['closing', 'closingbalance']);
+  const isDeemedPositiveIdx = findColumnIndex(['isdeemedpositive', 'deemed']);
+  const trailBalanceIdx = findColumnIndex(['trailbalance', 'trail']);
+
+  console.log('Column indices:', { nameIdx, parentIdx, openingIdx, debitIdx, creditIdx, closingIdx, isDeemedPositiveIdx, trailBalanceIdx });
+
+  // Process each row
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const results: any[] = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  dataRows.forEach((row: any[]) => {
+    if (!row || row.length === 0 || !row[nameIdx]) return;
+
+    const name = String(row[nameIdx] || '').trim();
+    if (!name) return;
+
+    const parent = String(row[parentIdx] || '').trim();
+    const openingBalance = parseFloat(String(row[openingIdx] || 0).replace(/,/g, '')) || 0;
+    const debit = parseFloat(String(row[debitIdx] || 0).replace(/,/g, '')) || 0;
+    const credit = parseFloat(String(row[creditIdx] || 0).replace(/,/g, '')) || 0;
+    const closingBalance = parseFloat(String(row[closingIdx] || 0).replace(/,/g, '')) || 0;
+    const isDeemedPositive = row[isDeemedPositiveIdx] === 1 || row[isDeemedPositiveIdx] === '1';
+    const trailBalance = String(row[trailBalanceIdx] || '').trim();
+
+    // Build hierarchy path from Group.$Parent columns (12 onwards)
+    const hierarchyParts: string[] = [];
+    for (let i = 12; i < Math.min(21, headers.length); i++) {
+      if (row[i] && String(row[i]).trim() && !String(row[i]).includes('Primary')) {
+        hierarchyParts.push(String(row[i]).trim());
+      }
+    }
+    const hierarchyPath = hierarchyParts.join(' > ');
+
+    // Apply sign correction based on IsDeemedPositive
+    // If IsDeemedPositive = 1: Assets/Expenses -> Debit positive, Credit negative
+    // If IsDeemedPositive = 0: Liabilities/Income -> Credit positive, Debit negative
+    let correctedClosing = closingBalance;
+    if (!isDeemedPositive) {
+      correctedClosing = -closingBalance;
+    }
+
+    // Build ledger object for mapping
+    const ledgerObj = {
+      Name: name,
+      Parent: parent,
+      hierarchyArray: hierarchyParts,
+      'AILE Type': trailBalance,
+    };
+
+    // Apply mappings
+    const mappedCategory1 = applyMapping1(ledgerObj, mapping1Rules);
+    const mappedCategory2 = applyMapping2(ledgerObj, mapping2Rules);
+
+    // Build result object
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const obj: Record<string, any> = {
+      Name: name,
+      Parent: parent,
+      'Opening Balance': openingBalance,
+      Debit: debit,
+      Credit: credit,
+      'Closing Balance': closingBalance,
+      'Corrected Closing': correctedClosing,
+      IsDeemedPositive: isDeemedPositive ? 'Yes' : 'No',
+      'AILE Type': trailBalance,
+      'Hierarchy Path': hierarchyPath,
+      'Mapped Category': mappedCategory1,
+      'Mapped Category 2': mappedCategory2,
+    };
+
+    results.push(obj);
+  });
 
   console.log('Processed Rows:', results.length);
   return results;
@@ -113,8 +227,9 @@ export const processAccountingData = (workbook: XLSX.WorkBook): any[] => {
 export const summarizeData = (processedData: any[]): Record<string, number> => {
   const summary: Record<string, number> = {};
   processedData.forEach((row) => {
-    const key = deepClean(row['Mapped Category']);
-    summary[key] = (summary[key] || 0) + (row['AmountValue'] || 0);
+    const category = row['Mapped Category'] || 'NOT MAPPED';
+    const amount = row['Corrected Closing'] || 0;
+    summary[category] = (summary[category] || 0) + amount;
   });
   return summary;
 };

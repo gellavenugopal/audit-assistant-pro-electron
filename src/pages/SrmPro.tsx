@@ -61,6 +61,7 @@ const SRMPro = () => {
   const [selectedMappingConfig, setSelectedMappingConfig] = useState('');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [savedMappings, setSavedMappings] = useState<any[]>([]);
+  const [assesseeType, setAssesseeType] = useState('3'); // 3=Corporate, 4=Non-Corporate, 5=LLP
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -76,10 +77,10 @@ const SRMPro = () => {
     setPeriodYear(selectedYear);
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        const processed = processAccountingData(wb);
+        const processed = await processAccountingData(wb, assesseeType);
         if (processed.length === 0) throw new Error('No ledgers found. Check Sheet 2 column headers.');
 
         // Check for duplicates and merge with existing data
@@ -143,33 +144,23 @@ const SRMPro = () => {
           toast.success(`Trial Balance loaded: ${processed.length} items`, { duration: 3000 });
         }
 
-        // TODO: Process with mapping data 2 (with priority) for BS2/PL2
-        // const processed2 = processAccountingData(wb, mappingData2, assesseeType, true);
-        // console.log('Processed data (Mapping 2 with priority):', processed2.length, 'rows');
+        // Process data2: Use Mapped Category 2 for BS2/PL2 tabs
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const processed2 = processed.map((row: any) => ({
+          ...row,
+          'Mapped Category': row['Mapped Category 2'] || row['Mapped Category']
+        }));
         
-        // setData2(processed2);
+        setData2(processed2);
         
-        // Create merged dataset for Summary2/BS2/PL2:
-        // Use Mapped Category 2 when present, otherwise use Mapped Category from original
-        // const mergedData = processed.map((row, index) => {
-        //   const row2 = processed2[index];
-        //   const mappedCategory2 = row2?.['Mapped Category'];
-        //   
-        //   // If Mapped Category 2 exists and is not 'NOT MAPPED', use it; otherwise use original
-        //   if (mappedCategory2 && mappedCategory2 !== 'NOT MAPPED') {
-        //     return { ...row, 'Mapped Category': mappedCategory2 };
-        //   }
-        //   return row;
-        // });
-        
-        // const summarized2 = summarizeData(mergedData);
-        // setSummary2(summarized2);
+        const summarized2 = summarizeData(processed2);
+        setSummary2(summarized2);
 
-        // if (selectedPeriod === 'current') {
-        //   setCurrentYearData2(summarized2);
-        // } else {
-        //   setPreviousYearData2(summarized2);
-        // }
+        if (selectedPeriod === 'current') {
+          setCurrentYearData2(summarized2);
+        } else {
+          setPreviousYearData2(summarized2);
+        }
 
         setActiveTab('results');
         toast.success(`${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully`);
@@ -953,6 +944,21 @@ const SRMPro = () => {
                 </div>
 
                 {/* Assessee Type */}
+                <div className="space-y-1">
+                  <Label htmlFor="assessee-type" className="text-sm">Constitution</Label>
+                  <Select value={assesseeType} onValueChange={setAssesseeType}>
+                    <SelectTrigger id="assessee-type" className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="3">Corporate</SelectItem>
+                      <SelectItem value="4">Non-Corporate</SelectItem>
+                      <SelectItem value="5">LLP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* File Upload */}
                 <div className="space-y-1">
                   <Label htmlFor="file-upload" className="text-sm">Select File</Label>
                   <Input
