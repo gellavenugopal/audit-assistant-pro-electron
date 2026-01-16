@@ -2423,14 +2423,17 @@ const SRMPro = () => {
                                   className="w-4 h-4 cursor-pointer"
                                 />
                               </td>
-                            {Object.entries(row).filter(([key]) => {
+                            {data[0] && Object.keys(data[0]).filter(key => {
                               const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
                               return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
-                            }).map(([key, val]: [string, any], j) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                              <td key={j} className="px-3 py-2 whitespace-nowrap">
-                                {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
-                              </td>
-                            ))}
+                            }).map((key, j) => {
+                              const val = row[key];
+                              return (
+                                <td key={j} className="px-3 py-2 whitespace-nowrap">
+                                  {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (val || '')}
+                                </td>
+                              );
+                            })}
                               <td className="px-3 py-2">
                                 <Input
                                   type="text"
@@ -2930,14 +2933,17 @@ const SRMPro = () => {
                                   className="w-4 h-4 cursor-pointer"
                                 />
                               </td>
-                            {Object.entries(row).filter(([key]) => {
+                            {data[0] && Object.keys(data[0]).filter(key => {
                               const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
                               return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
-                            }).map(([key, val]: [string, any], j) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                              <td key={j} className="px-3 py-2 whitespace-nowrap">
-                                {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
-                              </td>
-                            ))}
+                            }).map((key, j) => {
+                              const val = row[key];
+                              return (
+                                <td key={j} className="px-3 py-2 whitespace-nowrap">
+                                  {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (val || '')}
+                                </td>
+                              );
+                            })}
                               <td className="px-3 py-2 whitespace-nowrap bg-blue-50">
                                 {data2[originalIndex] ? data2[originalIndex]['Mapped Category'] || '-' : '-'}
                               </td>
