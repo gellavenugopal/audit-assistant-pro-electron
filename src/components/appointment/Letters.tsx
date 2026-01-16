@@ -56,13 +56,10 @@ export function LettersPage({ engagementId }: LettersPageProps) {
   const [phone, setPhone] = useState('');
 
   // Engagement Period Section
-  const [engagementStartDate, setEngagementStartDate] = useState('');
-  const [engagementEndDate, setEngagementEndDate] = useState('');
   const [financialYearStart, setFinancialYearStart] = useState('');
   const [financialYearEnd, setFinancialYearEnd] = useState('');
   const [appointmentLetterDate, setAppointmentLetterDate] = useState('');
   const [agmDate, setAgmDate] = useState('');
-  const [meetingNumber, setMeetingNumber] = useState('');
   const [appointmentType, setAppointmentType] = useState('appointment');
   const [assessmentYear, setAssessmentYear] = useState('');
 
@@ -114,10 +111,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
 
   // Commercial Terms Section
   const [professionalFees, setProfessionalFees] = useState('');
-  const [gstRatePercent, setGstRatePercent] = useState('');
-  const [gstAmount, setGstAmount] = useState('');
   const [gstExtraApplicable, setGstExtraApplicable] = useState(false);
-  const [paymentTerms, setPaymentTerms] = useState('');
   const [outOfPocketExpenses, setOutOfPocketExpenses] = useState(false);
 
   // Management Responsibility Section
@@ -149,13 +143,10 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     address,
     email,
     phone,
-    engagementStartDate,
-    engagementEndDate,
     financialYearStart,
     financialYearEnd,
     appointmentLetterDate,
     agmDate,
-    meetingNumber,
     appointmentType,
     assessmentYear,
     firmName,
@@ -163,10 +154,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     partnerPlace,
     partnerSignatureDate,
     professionalFees,
-    gstRatePercent,
-    gstAmount,
     gstExtraApplicable,
-    paymentTerms,
     outOfPocketExpenses,
     acceptManagementResponsibility,
     understandAuditProcess,
@@ -189,13 +177,10 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     setAddress(d.address || '');
     setEmail(d.email || '');
     setPhone(d.phone || '');
-    setEngagementStartDate(d.engagementStartDate || '');
-    setEngagementEndDate(d.engagementEndDate || '');
     setFinancialYearStart(d.financialYearStart || '');
     setFinancialYearEnd(d.financialYearEnd || '');
     setAppointmentLetterDate(d.appointmentLetterDate || '');
     setAgmDate(d.agmDate || '');
-    setMeetingNumber(d.meetingNumber || '');
     setAppointmentType(d.appointmentType || 'appointment');
     setAssessmentYear(d.assessmentYear || '');
     setFirmName(d.firmName || firmName);
@@ -203,16 +188,11 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     setPartnerPlace(d.partnerPlace || partnerPlace);
     setPartnerSignatureDate(d.partnerSignatureDate || '');
     setProfessionalFees(d.professionalFees || '');
-    setGstRatePercent(d.gstRatePercent || '');
-    setGstAmount(d.gstAmount || '');
-    setPaymentTerms(d.paymentTerms || '');
     setOutOfPocketExpenses(!!d.outOfPocketExpenses);
     const gstExtra =
       typeof d.gstExtraApplicable === 'boolean'
         ? d.gstExtraApplicable
-        : typeof d.gstAmount === 'string'
-          ? d.gstAmount.trim() !== ''
-          : !!d.gstAmount;
+        : false;
     setGstExtraApplicable(gstExtra);
     setAcceptManagementResponsibility(!!d.acceptManagementResponsibility);
     setUnderstandAuditProcess(!!d.understandAuditProcess);
@@ -262,14 +242,6 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     }
   }, [letterType]);
 
-  useEffect(() => {
-    if (!gstRatePercent.trim()) return;
-    const feesValue = parseFloat(professionalFees);
-    const gstRateValue = parseFloat(gstRatePercent);
-    if (Number.isNaN(feesValue) || Number.isNaN(gstRateValue)) return;
-    const computed = (feesValue * gstRateValue) / 100;
-    setGstAmount(computed ? computed.toFixed(2) : '');
-  }, [gstRatePercent, professionalFees]);
 
   const getLetterTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
@@ -301,7 +273,6 @@ export function LettersPage({ engagementId }: LettersPageProps) {
   const buildMasterData = (): EngagementLetterMasterData => {
     const startYear = financialYearStart?.split('-')[0] || '';
     const endYear = financialYearEnd?.split('-')[0] || '';
-    const meetingNumberValue = meetingNumber ? parseInt(meetingNumber, 10) : undefined;
     const assessmentYearValue = getComputedAssessmentYear();
 
     return {
@@ -321,12 +292,11 @@ export function LettersPage({ engagementId }: LettersPageProps) {
         financial_year: startYear && endYear ? `${startYear}-${endYear}` : '',
         assessment_year: assessmentYearValue,
         balance_sheet_date: financialYearEnd,
-        appointment_date: engagementStartDate,
+        appointment_date: appointmentLetterDate,
         appointment_letter_date: appointmentLetterDate,
         agm_date: agmDate,
         financial_year_start: financialYearStart,
         financial_year_end: financialYearEnd,
-        meeting_number: Number.isFinite(meetingNumberValue) ? meetingNumberValue : undefined,
         appointment_type: appointmentType,
       },
       auditor: {
@@ -342,7 +312,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
         professional_fees: parseFloat(professionalFees) || 0,
         professional_fees_currency: 'INR',
         taxes_extra: gstExtraApplicable,
-        payment_terms: paymentTerms,
+        payment_terms: '',
         out_of_pocket_exp: outOfPocketExpenses,
       },
       mgmt_responsibilities: {
@@ -754,21 +724,37 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                 <div>
                   <h4 className="font-semibold text-sm mb-3">Engagement Period</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Engagement Start Date</Label>
-                      <Input
-                        type="date"
-                        value={engagementStartDate}
-                        onChange={(e) => setEngagementStartDate(e.target.value)}
-                      />
+                    <div className="space-y-4">
+                      {letterType.includes('statutory') && (
+                        <div className="space-y-2">
+                          <Label>AGM Date in which appointed</Label>
+                          <Input
+                            type="date"
+                            value={agmDate}
+                            onChange={(e) => setAgmDate(e.target.value)}
+                          />
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <Label>Appointment Letter Date</Label>
+                        <Input
+                          type="date"
+                          value={appointmentLetterDate}
+                          onChange={(e) => setAppointmentLetterDate(e.target.value)}
+                        />
+                      </div>
                     </div>
                     <div className="space-y-2">
-                      <Label>Engagement End Date</Label>
-                      <Input
-                        type="date"
-                        value={engagementEndDate}
-                        onChange={(e) => setEngagementEndDate(e.target.value)}
-                      />
+                      <Label>Appointment / Reappointment</Label>
+                      <Select value={appointmentType} onValueChange={setAppointmentType}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="appointment">Appointment</SelectItem>
+                          <SelectItem value="reappointment">Reappointment</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>Appointment Letter Date</Label>
@@ -796,10 +782,10 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                 <Separator />
 
                 <div>
-                  <h4 className="font-semibold text-sm mb-3">Financial Year</h4>
+                  <h4 className="font-semibold text-sm mb-3">Engagement period coverage</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label>FY Start Date</Label>
+                      <Label>Engagement period FY Start Date</Label>
                       <Input
                         type="date"
                         value={financialYearStart}
@@ -807,7 +793,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>FY End Date</Label>
+                      <Label>Engagement period FY End Date</Label>
                       <Input
                         type="date"
                         value={financialYearEnd}
@@ -836,33 +822,6 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                   </>
                 )}
 
-                {letterType.includes('statutory') && (
-                  <>
-                    <Separator />
-                    <div>
-                      <h4 className="font-semibold text-sm mb-3">AGM Details</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>AGM Date</Label>
-                          <Input
-                            type="date"
-                            value={agmDate}
-                            onChange={(e) => setAgmDate(e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Meeting Number</Label>
-                          <Input
-                            type="number"
-                            value={meetingNumber}
-                            onChange={(e) => setMeetingNumber(e.target.value)}
-                            placeholder="e.g., 1"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
 
               <div className="flex justify-between gap-2 pt-4">
@@ -900,7 +859,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                     placeholder="e.g., XYZ Chartered Accountants"
                     disabled={!firmName ? false : true}
                   />
-                  <p className="text-xs text-muted-foreground">Edit from Admin Settings → Firm</p>
+                  <p className="text-xs text-muted-foreground">Edit from Admin Settings G�� Firm</p>
                 </div>
 
                 <div className="space-y-2">
@@ -922,7 +881,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                       )}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">From Admin Settings → Partners</p>
+                  <p className="text-xs text-muted-foreground">From Admin Settings G�� Partners</p>
                 </div>
 
                 <div className="space-y-2">
@@ -949,7 +908,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                 <AlertCircle className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
                 <div className="text-xs text-blue-800">
                   <p><strong>Firm information is prefilled from Admin Settings.</strong></p>
-                  <p className="mt-1">To change firm name or address, go to Admin Settings → Firm tab.</p>
+                  <p className="mt-1">To change firm name or address, go to Admin Settings G�� Firm tab.</p>
                 </div>
               </div>
 
@@ -988,38 +947,6 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                       value={professionalFees}
                       onChange={(e) => setProfessionalFees(e.target.value)}
                       placeholder="e.g., 50000"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>GST %</Label>
-                    <Input
-                      type="number"
-                      value={gstRatePercent}
-                      onChange={(e) => setGstRatePercent(e.target.value)}
-                      placeholder="e.g., 18"
-                      min="0"
-                      step="0.01"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>GST Amount (INR)</Label>
-                    <Input
-                      type="number"
-                      value={gstAmount}
-                      onChange={(e) => setGstAmount(e.target.value)}
-                      placeholder="Auto-calculated from GST %"
-                      readOnly={!!gstRatePercent}
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>Payment Terms</Label>
-                    <Input
-                      value={paymentTerms}
-                      onChange={(e) => setPaymentTerms(e.target.value)}
-                      placeholder="e.g., 50% on engagement, 50% on completion"
                     />
                   </div>
 
@@ -1207,28 +1134,14 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                 {/* Right Column */}
                 <div className="space-y-4">
                   <div>
-                    <h5 className="font-semibold text-sm text-muted-foreground mb-2">Engagement Dates</h5>
-                    {engagementStartDate && engagementEndDate ? (
-                      <p className="text-sm">
-                        {new Date(engagementStartDate).toLocaleDateString()} to{' '}
-                        {new Date(engagementEndDate).toLocaleDateString()}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-amber-600">Dates not fully specified</p>
-                    )}
-                  </div>
-
-                  <Separator />
-
-                  <div>
-                    <h5 className="font-semibold text-sm text-muted-foreground mb-2">Financial Year</h5>
+                    <h5 className="font-semibold text-sm text-muted-foreground mb-2">Engagement Period Coverage</h5>
                     {financialYearStart && financialYearEnd ? (
                       <p className="text-sm">
                         {new Date(financialYearStart).toLocaleDateString()} to{' '}
                         {new Date(financialYearEnd).toLocaleDateString()}
                       </p>
                     ) : (
-                      <p className="text-xs text-amber-600">FY dates not fully specified</p>
+                      <p className="text-xs text-amber-600">Coverage dates not fully specified</p>
                     )}
                   </div>
 

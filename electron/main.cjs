@@ -67,8 +67,11 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('odbc-test-connection', async () => {
+  ipcMain.handle('odbc-test-connection', async (event, portOverride) => {
     try {
+      if (!odbc) {
+        return { success: false, error: 'ODBC module not available. Install the Tally ODBC driver and restart the app.' };
+      }
       // If already connected, verify it's still active
       if (odbcConnection) {
         try {
@@ -84,7 +87,7 @@ function registerIpcHandlers() {
 
       // Common Tally ODBC drivers
       const drivers = ['Tally ODBC Driver64', 'Tally ODBC Driver', 'Tally ODBC 64-bit Driver'];
-      const port = '9000';
+      const port = typeof portOverride === 'string' && portOverride.trim() ? portOverride.trim() : '9000';
 
       for (const driver of drivers) {
         try {

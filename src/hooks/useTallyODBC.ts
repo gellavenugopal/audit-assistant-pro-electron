@@ -7,7 +7,7 @@ declare global {
   interface Window {
     electronAPI: {
       odbcCheckConnection: () => Promise<{ success: boolean; isConnected?: boolean; error?: string }>;
-      odbcTestConnection: () => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
+      odbcTestConnection: (port?: string) => Promise<{ success: boolean; error?: string; driver?: string; sampleData?: any }>;
       odbcFetchTrialBalance: (fromDate?: string, toDate?: string) => Promise<{ success: boolean; error?: string; data?: any[]; companyName?: string }>;
       odbcFetchMonthWise: (fyStartYear: number, targetMonth: string) => Promise<{ success: boolean; error?: string; data?: { plLines: TallyMonthWiseLine[]; bsLines: TallyMonthWiseLine[]; months: string[]; fyStartYear: number; targetMonth: string } }>;
       odbcDisconnect: () => Promise<{ success: boolean; error?: string }>;
@@ -128,11 +128,15 @@ export const useTallyODBC = () => {
     checkConnectionStatus();
   }, []);
 
-  const testConnection = useCallback(async (): Promise<boolean> => {
+  const testConnection = useCallback(async (port?: string): Promise<boolean> => {
     try {
       setState(prev => ({ ...prev, isConnecting: true, error: null }));
 
-      const result = await window.electronAPI.odbcTestConnection();
+      if (!window.electronAPI || typeof window.electronAPI.odbcTestConnection !== 'function') {
+        throw new Error('ODBC API unavailable. Restart the app and ensure preload is enabled.');
+      }
+
+      const result = await window.electronAPI.odbcTestConnection(port);
 
       if (result.success) {
         const newState = {

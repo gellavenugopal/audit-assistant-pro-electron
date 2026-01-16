@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,8 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle, Package, Upload, Trash2, Save, Plus, Settings } from 'lucide-react';
+import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { processAccountingData, summarizeData, deepClean } from '@/utils/srmProcessor';
 
@@ -30,896 +29,7 @@ const SRMPro = () => {
   const [selectedYear, setSelectedYear] = useState('');
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
-  const [filterSearches, setFilterSearches] = useState<Record<string, string>>({});
-  const [assesseeType, setAssesseeType] = useState<'3' | '4' | '5'>('3'); // 3=Corporate, 4=Non-Corporate, 5=LLP
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [mappingData, setMappingData] = useState<any[]>([]);
-  const [mappingLoaded, setMappingLoaded] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [mappingData2, setMappingData2] = useState<any[]>([]);
-  const [mappingLoaded2, setMappingLoaded2] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [data2, setData2] = useState<any[]>([]);
-  const [currentYearData2, setCurrentYearData2] = useState<Record<string, number>>({});
-  const [previousYearData2, setPreviousYearData2] = useState<Record<string, number>>({});
-  const [summary2, setSummary2] = useState<Record<string, number>>({});
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [rowNotes, setRowNotes] = useState<Record<number, string>>({});
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [rowEvidence, setRowEvidence] = useState<Record<number, File[]>>({});
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [stockDetailsOpen, setStockDetailsOpen] = useState(false);
-  const [stockDetails, setStockDetails] = useState({
-    rawMaterialOpening: '',
-    rawMaterialClosing: '',
-    finishedGoodsOpening: '',
-    finishedGoodsClosing: '',
-    wipOpening: '',
-    wipClosing: '',
-    stockInTradeOpening: '',
-    stockInTradeClosing: '',
-  });
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [editingRow, setEditingRow] = useState<any>(null);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [rowToDelete, setRowToDelete] = useState<number | null>(null);
-  
-  // Configuration and Note Numbers
-  const [configDialogOpen, setConfigDialogOpen] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [savedTBData, setSavedTBData] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [savedMappings, setSavedMappings] = useState<Array<{
-    id: string;
-    name: string;
-    clientName: string;
-    assignment: string;
-    dateCreated: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mappingData: any[];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mappingData2: any[];
-    assesseeType: '3' | '4' | '5';
-  }>>([]);
-  const [selectedMappingConfig, setSelectedMappingConfig] = useState<string>('default');
-  const [noteNumberDialogOpen, setNoteNumberDialogOpen] = useState(false);
-  const [startingNoteNumber, setStartingNoteNumber] = useState('1');
-  const [noteNumbers, setNoteNumbers] = useState<Record<string, string>>({});
-  const [skipEmptyNoteNumbers, setSkipEmptyNoteNumbers] = useState(true);
-  const [openFilterColumn, setOpenFilterColumn] = useState<string | null>(null);
-  const [pageSize, setPageSize] = useState(50);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSizeMapped, setPageSizeMapped] = useState(50);
-  const [currentPageMapped, setCurrentPageMapped] = useState(1);
-  const [pageSizeMapped2, setPageSizeMapped2] = useState(50);
-  const [currentPageMapped2, setCurrentPageMapped2] = useState(1);
-
-  const scaleLabels: Record<string, string> = {
-    '1': 'Rupees',
-    '100': 'Hundreds',
-    '1000': 'Thousands',
-    '100000': 'Lakhs',
-    '10000000': 'Crores',
-  };
-
-  // Load mapping files on mount
-  useEffect(() => {
-    const loadMappingFiles = async () => {
-      // Load Mapping.xlsx
-      try {
-        const response = await fetch('/SRM_Pro/Mapping.xlsx');
-        if (!response.ok) {
-          console.warn('Mapping file not found, will use default mapping');
-        } else {
-          const arrayBuffer = await response.arrayBuffer();
-          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-          const sheet = workbook.Sheets[workbook.SheetNames[0]];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
-          
-          // Skip header row
-          const dataRows = jsonData.slice(1);
-          setMappingData(dataRows);
-          setMappingLoaded(true);
-          console.log('Mapping.xlsx loaded successfully:', dataRows.length, 'mapping rules');
-        }
-      } catch (error) {
-        console.error('Error loading Mapping.xlsx:', error);
-        toast.error('Could not load Mapping.xlsx. Using default mapping.');
-      }
-
-      // Load Mapping2.xlsx (with priority and keyword-based matching)
-      try {
-        const response2 = await fetch('/SRM_Pro/Mapping2.xlsx');
-        if (!response2.ok) {
-          console.warn('Mapping2 file not found');
-        } else {
-          const arrayBuffer2 = await response2.arrayBuffer();
-          const workbook2 = XLSX.read(arrayBuffer2, { type: 'array' });
-          const sheet2 = workbook2.Sheets[workbook2.SheetNames[0]];
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const jsonData2 = XLSX.utils.sheet_to_json(sheet2, { header: 1 }) as any[][];
-          
-          // Skip header row (row 1: Constitution, Level 1, Level 2, ...)
-          const dataRows2 = jsonData2.slice(1);
-          setMappingData2(dataRows2);
-          setMappingLoaded2(true);
-          console.log('Mapping2.xlsx loaded successfully:', dataRows2.length, 'keyword-based mapping rules with priority');
-        }
-      } catch (error) {
-        console.error('Error loading Mapping2.xlsx:', error);
-        toast.error('Could not load Mapping2.xlsx.');
-      }
-    };
-    
-    loadMappingFiles();
-  }, []);
-
-  // Load saved TB data and mappings from localStorage
-  useEffect(() => {
-    const loadSavedData = () => {
-      try {
-        const saved = localStorage.getItem('srmPro_savedTBData');
-        if (saved) {
-          setSavedTBData(JSON.parse(saved));
-        }
-        
-        const savedMaps = localStorage.getItem('srmPro_savedMappings');
-        if (savedMaps) {
-          setSavedMappings(JSON.parse(savedMaps));
-        }
-        
-        const savedNotes = localStorage.getItem('srmPro_noteNumbers');
-        if (savedNotes) {
-          setNoteNumbers(JSON.parse(savedNotes));
-        }
-        
-        const skipEmpty = localStorage.getItem('srmPro_skipEmptyNoteNumbers');
-        if (skipEmpty !== null) {
-          setSkipEmptyNoteNumbers(JSON.parse(skipEmpty));
-        }
-      } catch (error) {
-        console.error('Error loading saved data:', error);
-      }
-    };
-    
-    loadSavedData();
-  }, []);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + K to focus search
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        const searchInput = document.querySelector('input[placeholder="Search ledgers..."]') as HTMLInputElement;
-        if (searchInput) searchInput.focus();
-      }
-      // Ctrl/Cmd + 1-5 for tab navigation
-      if ((e.ctrlKey || e.metaKey) && ['1', '2', '3', '4', '5'].includes(e.key)) {
-        e.preventDefault();
-        const tabs = ['upload', 'results', 'summary', 'balance-sheet', 'profit-loss'];
-        const tabIndex = parseInt(e.key) - 1;
-        if (tabIndex === 0 || data.length > 0) {
-          setActiveTab(tabs[tabIndex]);
-        }
-      }
-      // Ctrl/Cmd + Shift + C to clear data
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C' && data.length > 0) {
-        e.preventDefault();
-        handleClearData();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [data, activeTab]);
-
-  const handleClearData = () => {
-    // Clear all data from both mapping systems
-    setData([]);
-    setData2([]);
-    setCurrentYearData({});
-    setPreviousYearData({});
-    setCurrentYearData2({});
-    setPreviousYearData2({});
-    setSummary({});
-    setSummary2({});
-    
-    // Clear UI state
-    setSearch('');
-    setSortColumn('');
-    setSortDirection('asc');
-    setColumnFilters({});
-    setFilterSearches({});
-    
-    // Clear notes, evidence, and selections
-    setRowNotes({});
-    setRowEvidence({});
-    setSelectedRows(new Set());
-    
-    // Clear stock details
-    setStockDetails({
-      rawMaterialOpening: '',
-      rawMaterialClosing: '',
-      finishedGoodsOpening: '',
-      finishedGoodsClosing: '',
-      wipOpening: '',
-      wipClosing: '',
-      stockInTradeOpening: '',
-      stockInTradeClosing: ''
-    });
-    
-    // Reset form state
-    setSelectedPeriod('current');
-    setSelectedYear('');
-    setPeriodYear('');
-    setCompanyName('');
-    setCin('');
-    setScale('1');
-    setHasUnsavedChanges(false);
-    
-    // Reset to upload tab
-    setActiveTab('upload');
-    
-    toast.success('All data cleared successfully from all tabs');
-    
-    // Reset file input
-    const fileInput = document.getElementById('file-upload') as HTMLInputElement;
-    if (fileInput) fileInput.value = '';
-  };
-
-  const handleExportToExcel = (type: 'tb' | 'bs' | 'pl' | 'tb2' | 'bs2' | 'pl2') => {
-    try {
-      let wb: XLSX.WorkBook;
-      let fileName = '';
-
-      if (type === 'tb') {
-        // Export Mapped Trial Balance
-        fileName = `Mapped_TB_${companyName}_${periodYear}.xlsx`;
-        wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.json_to_sheet(data);
-        XLSX.utils.book_append_sheet(wb, ws, 'Mapped TB');
-      } else if (type === 'tb2') {
-        // Export Mapped Trial Balance 2 (Both mappings comparison)
-        fileName = `Mapped_TB2_Comparison_${companyName}_${periodYear}.xlsx`;
-        wb = XLSX.utils.book_new();
-        
-        // Combine data from both mappings
-        const combinedData = data.map((row, i) => {
-          const baseRow = { ...row };
-          // Add Mapped Category 2 from data2
-          if (data2[i]) {
-            baseRow['Mapped Category 2'] = data2[i]['Mapped Category'] || '-';
-          } else {
-            baseRow['Mapped Category 2'] = '-';
-          }
-          return baseRow;
-        });
-        
-        const ws = XLSX.utils.json_to_sheet(combinedData);
-        XLSX.utils.book_append_sheet(wb, ws, 'Mapped TB2 Comparison');
-      } else if (type === 'bs' || type === 'bs2') {
-        // Export Balance Sheet (BS or BS2)
-        const useData2 = type === 'bs2';
-        const activeCurrentYearData = useData2 ? currentYearData2 : currentYearData;
-        const activePreviousYearData = useData2 ? previousYearData2 : previousYearData;
-        fileName = `Balance_Sheet${useData2 ? '_2' : ''}_${companyName}_${periodYear}.xlsx`;
-        
-        wb = XLSX.utils.book_new();
-        
-        // Create formatted data matching screen display
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const bsExportData: any[] = [];
-        
-        // Add header rows
-        bsExportData.push({
-          'Particulars': companyName,
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        bsExportData.push({
-          'Particulars': `CIN: ${cin}`,
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        bsExportData.push({
-          'Particulars': `Balance Sheet as at 31 March ${periodYear}`,
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        bsExportData.push({
-          'Particulars': `(Amount in ₹ ${scaleLabels[scale]})`,
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        bsExportData.push({
-          'Particulars': '',
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        
-        // Add data rows with serial numbers
-        bsStructure.forEach((row, index) => {
-          let currentVal = activeCurrentYearData[deepClean(row.key)] || 0;
-          let previousVal = activePreviousYearData[deepClean(row.key)] || 0;
-          
-          // Calculate profit and add to Reserves & Surplus (same logic as screen)
-          if (deepClean(row.key) === deepClean('Reserves and surplus') || deepClean(row.key) === deepClean('Uncategorised Reserves and Surplus')) {
-            let currentProfit = 0;
-            let previousProfit = 0;
-            let currentPLRevenueTotal = 0;
-            let previousPLRevenueTotal = 0;
-            let currentPLExpensesTotal = 0;
-            let previousPLExpensesTotal = 0;
-            let currentPLTaxExpense = 0;
-            let previousPLTaxExpense = 0;
-            let isInPLExpensesSection = false;
-            let isInPLTaxSection = false;
-            
-            plStructure.forEach((plRow) => {
-              if (plRow.label === 'EXPENSES') isInPLExpensesSection = true;
-              if (plRow.label === '(11) Tax expense') isInPLTaxSection = true;
-              if (plRow.label === 'Profit/(Loss) for the period') isInPLTaxSection = false;
-              
-              if (!plRow.h && !plRow.sub && plRow.key) {
-                const cVal = activeCurrentYearData[deepClean(plRow.key)] || 0;
-                const pVal = activePreviousYearData[deepClean(plRow.key)] || 0;
-                
-                if (isInPLTaxSection) {
-                  currentPLTaxExpense += cVal;
-                  previousPLTaxExpense += pVal;
-                } else if (isInPLExpensesSection) {
-                  currentPLExpensesTotal += cVal;
-                  previousPLExpensesTotal += pVal;
-                } else {
-                  currentPLRevenueTotal += cVal;
-                  previousPLRevenueTotal += pVal;
-                }
-              }
-            });
-            
-            currentProfit = currentPLRevenueTotal - currentPLExpensesTotal - currentPLTaxExpense;
-            previousProfit = previousPLRevenueTotal - previousPLExpensesTotal - previousPLTaxExpense;
-            currentVal += currentProfit;
-            previousVal += previousProfit;
-          }
-          
-          let particularsText = row.label;
-          // Add serial numbers for main sections
-          if (row.label && row.label.match(/^\(\d+\)/)) {
-            particularsText = row.label;
-          }
-          
-          // Get dynamic note number from state
-          let noteNumber = '';
-          if (!row.h && !row.sub && !row.un && row.key) {
-            const prefix = useData2 ? 'bs2_' : 'bs_';
-            noteNumber = noteNumbers[`${prefix}${row.key}`] || '';
-          }
-          
-          bsExportData.push({
-            'Particulars': particularsText,
-            'Note No.': noteNumber,
-            [periodYear]: row.key ? formatValue(currentVal) : (row.label === 'TOTAL' ? formatValue(0) : ''),
-            [String(parseInt(periodYear) - 1)]: row.key ? formatValue(previousVal) : (row.label === 'TOTAL' ? formatValue(0) : '')
-          });
-        });
-        
-        const ws = XLSX.utils.json_to_sheet(bsExportData);
-        XLSX.utils.book_append_sheet(wb, ws, useData2 ? 'Balance Sheet 2' : 'Balance Sheet');
-      } else {
-        // Export P&L (PL or PL2)
-        const useData2 = type === 'pl2';
-        const activeCurrentYearData = useData2 ? currentYearData2 : currentYearData;
-        const activePreviousYearData = useData2 ? previousYearData2 : previousYearData;
-        fileName = `Profit_Loss${useData2 ? '_2' : ''}_${companyName}_${periodYear}.xlsx`;
-        
-        wb = XLSX.utils.book_new();
-        
-        // Create formatted data matching screen display
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const plExportData: any[] = [];
-        
-        // Add header rows
-        plExportData.push({
-          'Particulars': companyName,
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        plExportData.push({
-          'Particulars': `CIN: ${cin}`,
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        plExportData.push({
-          'Particulars': `Statement of Profit & Loss`,
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        plExportData.push({
-          'Particulars': `(Amount in ₹ ${scaleLabels[scale]})`,
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        plExportData.push({
-          'Particulars': '',
-          'Note No.': '',
-          [periodYear]: '',
-          [String(parseInt(periodYear) - 1)]: ''
-        });
-        
-        // Add data rows with serial numbers
-        plStructure.forEach((row) => {
-          const currentVal = activeCurrentYearData[deepClean(row.key)] || 0;
-          const previousVal = activePreviousYearData[deepClean(row.key)] || 0;
-          
-          const particularsText = row.label;
-          
-          // Get dynamic note number from state
-          let noteNumber = '';
-          if (!row.h && !row.sub && !row.un && row.key) {
-            const prefix = useData2 ? 'pl2_' : 'pl_';
-            noteNumber = noteNumbers[`${prefix}${row.key}`] || '';
-          }
-          
-          plExportData.push({
-            'Particulars': particularsText,
-            'Note No.': noteNumber,
-            [periodYear]: row.key ? formatValue(currentVal) : '',
-            [String(parseInt(periodYear) - 1)]: row.key ? formatValue(previousVal) : ''
-          });
-        });
-        
-        const ws = XLSX.utils.json_to_sheet(plExportData);
-        XLSX.utils.book_append_sheet(wb, ws, useData2 ? 'P&L Statement 2' : 'P&L Statement');
-      }
-
-      XLSX.writeFile(wb, fileName);
-      toast.success(`${type.toUpperCase()} exported to Excel successfully`);
-    } catch (error) {
-      console.error('Export error:', error);
-      toast.error('Failed to export to Excel');
-    }
-  };
-
-  const handleAddNote = (rowIndex: number, note: string) => {
-    setRowNotes(prev => ({ ...prev, [rowIndex]: note }));
-    setHasUnsavedChanges(true);
-  };
-
-  const handleUploadEvidence = (rowIndex: number, files: FileList | null) => {
-    if (files && files.length > 0) {
-      const fileArray = Array.from(files);
-      setRowEvidence(prev => ({ ...prev, [rowIndex]: [...(prev[rowIndex] || []), ...fileArray] }));
-      setHasUnsavedChanges(true);
-      toast.success(`${files.length} file(s) uploaded for row ${rowIndex + 1}`);
-    }
-  };
-
-  const handleSelectRow = (rowIndex: number) => {
-    setSelectedRows(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(rowIndex)) {
-        newSet.delete(rowIndex);
-      } else {
-        newSet.add(rowIndex);
-      }
-      return newSet;
-    });
-  };
-
-  const handleSelectAll = () => {
-    if (selectedRows.size === data.length) {
-      setSelectedRows(new Set());
-    } else {
-      setSelectedRows(new Set(data.map((_, i) => i)));
-    }
-  };
-
-  const handleEditRow = (rowIndex: number) => {
-    setEditingRow({ ...data[rowIndex], originalIndex: rowIndex });
-    setEditDialogOpen(true);
-  };
-
-  const handleSaveEdit = () => {
-    if (editingRow && editingRow.originalIndex !== undefined) {
-      const newData = [...data];
-      const { originalIndex, ...rowData } = editingRow;
-      newData[originalIndex] = rowData;
-      setData(newData);
-      
-      // Recalculate summary from updated data
-      const summarized = summarizeData(newData);
-      setSummary(summarized);
-      if (uploadPeriod === 'current') {
-        setCurrentYearData(summarized);
-      } else {
-        setPreviousYearData(summarized);
-      }
-      
-      setEditDialogOpen(false);
-      setEditingRow(null);
-      setHasUnsavedChanges(true);
-      toast.success('Row updated successfully');
-    }
-  };
-
-  const handleDeleteConfirm = () => {
-    if (rowToDelete !== null) {
-      handleDeleteRow(rowToDelete);
-      setDeleteDialogOpen(false);
-      setRowToDelete(null);
-    }
-  };
-
-  const handleBulkAddNote = () => {
-    const note = prompt('Enter note to add to all selected rows:');
-    if (note) {
-      const newNotes = { ...rowNotes };
-      selectedRows.forEach(rowIndex => {
-        newNotes[rowIndex] = note;
-      });
-      setRowNotes(newNotes);
-      setHasUnsavedChanges(true);
-      toast.success(`Note added to ${selectedRows.size} row(s)`);
-    }
-  };
-
-  const handleBulkUploadEvidence = (files: FileList | null) => {
-    if (files && files.length > 0) {
-      const fileArray = Array.from(files);
-      const newEvidence = { ...rowEvidence };
-      selectedRows.forEach(rowIndex => {
-        newEvidence[rowIndex] = [...(newEvidence[rowIndex] || []), ...fileArray];
-      });
-      setRowEvidence(newEvidence);
-      setHasUnsavedChanges(true);
-      toast.success(`${files.length} file(s) uploaded to ${selectedRows.size} row(s)`);
-    }
-  };
-
-  const handleBulkDelete = () => {
-    if (confirm(`Are you sure you want to delete ${selectedRows.size} row(s)?`)) {
-      const newData = data.filter((_, i) => !selectedRows.has(i));
-      setData(newData);
-      
-      // Recalculate summary from updated data
-      const summarized = summarizeData(newData);
-      setSummary(summarized);
-      if (uploadPeriod === 'current') {
-        setCurrentYearData(summarized);
-      } else {
-        setPreviousYearData(summarized);
-      }
-      
-      setSelectedRows(new Set());
-      setHasUnsavedChanges(true);
-      toast.success(`${selectedRows.size} row(s) deleted`);
-    }
-  };
-
-  const handleDeleteRow = (rowIndex: number) => {
-    const newData = data.filter((_, i) => i !== rowIndex);
-    setData(newData);
-    
-    // Recalculate summary from updated data
-    const summarized = summarizeData(newData);
-    setSummary(summarized);
-    if (uploadPeriod === 'current') {
-      setCurrentYearData(summarized);
-    } else {
-      setPreviousYearData(summarized);
-    }
-    
-    setHasUnsavedChanges(true);
-    toast.success('Row deleted');
-  };
-
-  const handleSaveChanges = () => {
-    // In a real application, this would save to a database
-    setHasUnsavedChanges(false);
-    toast.success('Changes saved successfully');
-  };
-
-  const handleSaveStockDetails = () => {
-    // Validate that at least some data is entered
-    const hasData = Object.values(stockDetails).some(val => val !== '');
-    if (!hasData) {
-      toast.error('Please enter at least one value');
-      return;
-    }
-    
-    // Calculate totals
-    const totalOpeningInventories = 
-      parseFloat(stockDetails.rawMaterialOpening || '0') +
-      parseFloat(stockDetails.finishedGoodsOpening || '0') +
-      parseFloat(stockDetails.wipOpening || '0') +
-      parseFloat(stockDetails.stockInTradeOpening || '0');
-    
-    const totalClosingInventories = 
-      parseFloat(stockDetails.rawMaterialClosing || '0') +
-      parseFloat(stockDetails.finishedGoodsClosing || '0') +
-      parseFloat(stockDetails.wipClosing || '0') +
-      parseFloat(stockDetails.stockInTradeClosing || '0');
-    
-    // Remove any existing inventory adjustment entries
-    const filteredData = data.filter(row => 
-      row.Name !== 'Opening Inventories' && 
-      row.Name !== 'Closing Inventories' && 
-      row.Name !== 'Closing Inventories (PL)'
-    );
-    
-    // Add inventory adjustment line items
-    const inventoryAdjustments = [];
-    
-    // Create a template row from existing data to get all column structure
-    const templateRow = data[0] || {};
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const createInventoryRow = (overrides: any) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const newRow: any = {};
-      // Copy all columns from template and set to empty/zero
-      Object.keys(templateRow).forEach(key => {
-        if (key.includes('Group') && key.includes('Parent')) {
-          newRow[key] = ''; // Clear all Group.$Parent columns
-        } else {
-          newRow[key] = '';
-        }
-      });
-      // Apply specific values
-      Object.assign(newRow, overrides);
-      return newRow;
-    };
-    
-    // 1. Opening Inventories (negative value, mapped to Uncategorised Purchase Accounts)
-    if (totalOpeningInventories > 0) {
-      inventoryAdjustments.push(createInventoryRow({
-        Period: data[0]?.Period || '',
-        Branch: data[0]?.Branch || '',
-        'Ledger Code': '',
-        Name: 'Opening Inventories',
-        OpeningBalance: -totalOpeningInventories,
-        Debit: 0,
-        Credit: 0,
-        ClosingBalance: -totalOpeningInventories,
-        IsRevenue: false,
-        IsDeemedPositive: false,
-        TrailBalance: -totalOpeningInventories,
-        Ledger: 'Opening Inventories',
-        'Ledger Parent': '',
-        Group: '',
-        Parent: '',
-        'Mapped Category': 'Uncategorised Purchase Accounts',
-        AmountValue: totalOpeningInventories,
-        '2nd Parent After Primary': '',
-        'Logic Trace': 'Stock Details - Opening Inventories'
-      }));
-    }
-    
-    // 2. Closing Inventories (positive value, for Balance Sheet)
-    if (totalClosingInventories > 0) {
-      inventoryAdjustments.push(createInventoryRow({
-        Period: data[0]?.Period || '',
-        Branch: data[0]?.Branch || '',
-        'Ledger Code': '',
-        Name: 'Closing Inventories',
-        OpeningBalance: 0,
-        Debit: 0,
-        Credit: 0,
-        ClosingBalance: totalClosingInventories,
-        IsRevenue: false,
-        IsDeemedPositive: false,
-        TrailBalance: totalClosingInventories,
-        Ledger: 'Closing Inventories',
-        'Ledger Parent': '',
-        Group: '',
-        Parent: '',
-        'Mapped Category': 'Inventories',
-        AmountValue: totalClosingInventories,
-        '2nd Parent After Primary': '',
-        'Logic Trace': 'Stock Details - Closing Inventories (BS)'
-      }));
-      
-      // 3. Closing Inventories (PL) (negative value, mapped to Uncategorised Purchase Accounts)
-      inventoryAdjustments.push(createInventoryRow({
-        Period: data[0]?.Period || '',
-        Branch: data[0]?.Branch || '',
-        'Ledger Code': '',
-        Name: 'Closing Inventories (PL)',
-        OpeningBalance: 0,
-        Debit: 0,
-        Credit: 0,
-        ClosingBalance: -totalClosingInventories,
-        IsRevenue: false,
-        IsDeemedPositive: false,
-        TrailBalance: -totalClosingInventories,
-        Ledger: 'Closing Inventories (PL)',
-        'Ledger Parent': '',
-        Group: '',
-        Parent: '',
-        'Mapped Category': 'Uncategorised Purchase Accounts',
-        AmountValue: -totalClosingInventories,
-        '2nd Parent After Primary': '',
-        'Logic Trace': 'Stock Details - Closing Inventories (PL)'
-      }));
-    }
-    
-    // Update data with inventory adjustments
-    const updatedData = [...filteredData, ...inventoryAdjustments];
-    setData(updatedData);
-    
-    // Recalculate summary from updated data
-    const summarized = summarizeData(updatedData);
-    setSummary(summarized);
-    if (uploadPeriod === 'current') {
-      setCurrentYearData(summarized);
-    } else {
-      setPreviousYearData(summarized);
-    }
-    
-    setHasUnsavedChanges(true);
-    setStockDetailsOpen(false);
-    toast.success('Stock details saved and trial balance adjusted');
-  };
-
-  const handleSaveMappingConfiguration = () => {
-    const configName = prompt('Enter a name for this mapping configuration:');
-    if (!configName) return;
-    
-    const clientNameInput = prompt('Enter client name:');
-    if (!clientNameInput) return;
-    
-    const assignmentInput = prompt('Enter assignment name:');
-    if (!assignmentInput) return;
-    
-    const newConfig = {
-      id: Date.now().toString(),
-      name: configName,
-      clientName: clientNameInput,
-      assignment: assignmentInput,
-      dateCreated: new Date().toISOString(),
-      mappingData,
-      mappingData2,
-      assesseeType
-    };
-    
-    const updated = [...savedMappings, newConfig];
-    setSavedMappings(updated);
-    localStorage.setItem('srmPro_savedMappings', JSON.stringify(updated));
-    toast.success(`Mapping configuration "${configName}" saved successfully`);
-  };
-
-  const handleLoadMappingConfiguration = (configId: string) => {
-    if (configId === 'default') {
-      // Reload default mappings
-      toast.info('Using system default mappings');
-      setSelectedMappingConfig('default');
-      return;
-    }
-    
-    const config = savedMappings.find(m => m.id === configId);
-    if (config) {
-      setMappingData(config.mappingData);
-      setMappingData2(config.mappingData2);
-      setAssesseeType(config.assesseeType);
-      setSelectedMappingConfig(configId);
-      toast.success(`Loaded mapping configuration: ${config.name}`);
-    }
-  };
-
-  const handleDeleteMappingConfiguration = (configId: string) => {
-    if (confirm('Are you sure you want to delete this mapping configuration?')) {
-      const updated = savedMappings.filter(m => m.id !== configId);
-      setSavedMappings(updated);
-      localStorage.setItem('srmPro_savedMappings', JSON.stringify(updated));
-      if (selectedMappingConfig === configId) {
-        setSelectedMappingConfig('default');
-      }
-      toast.success('Mapping configuration deleted');
-    }
-  };
-
-  const handleClearSavedTBData = () => {
-    if (confirm('Are you sure you want to clear all saved trial balance data? This cannot be undone.')) {
-      setSavedTBData([]);
-      localStorage.removeItem('srmPro_savedTBData');
-      toast.success('Saved trial balance data cleared');
-    }
-  };
-
-  const handleGenerateNoteNumbers = () => {
-    const startNum = parseInt(startingNoteNumber);
-    if (isNaN(startNum) || startNum < 1) {
-      toast.error('Please enter a valid starting note number (1 or greater)');
-      return;
-    }
-    
-    const newNoteNumbers: Record<string, string> = {};
-    let currentNoteNum = startNum;
-    
-    // Generate for BS
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    bsStructure.forEach((row: any) => {
-      if (!row.h && !row.sub && row.key) {
-        const currentVal = currentYearData[deepClean(row.key)] || 0;
-        const previousVal = previousYearData[deepClean(row.key)] || 0;
-        
-        // Assign note number based on skipEmptyNoteNumbers setting
-        const hasValue = currentVal !== 0 || previousVal !== 0;
-        if (!skipEmptyNoteNumbers || hasValue) {
-          newNoteNumbers[`bs_${row.key}`] = currentNoteNum.toString();
-          currentNoteNum++;
-        }
-      }
-    });
-    
-    // Generate for PL
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    plStructure.forEach((row: any) => {
-      if (!row.h && !row.sub && row.key) {
-        const currentVal = currentYearData[deepClean(row.key)] || 0;
-        const previousVal = previousYearData[deepClean(row.key)] || 0;
-        
-        // Assign note number based on skipEmptyNoteNumbers setting
-        const hasValue = currentVal !== 0 || previousVal !== 0;
-        if (!skipEmptyNoteNumbers || hasValue) {
-          newNoteNumbers[`pl_${row.key}`] = currentNoteNum.toString();
-          currentNoteNum++;
-        }
-      }
-    });
-    
-    // Generate for BS2 (restart from starting number)
-    currentNoteNum = startNum; // Reset to starting number for BS2/PL2
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    bsStructure.forEach((row: any) => {
-      if (!row.h && !row.sub && row.key) {
-        const currentVal = currentYearData2[deepClean(row.key)] || 0;
-        const previousVal = previousYearData2[deepClean(row.key)] || 0;
-        
-        // Assign note number based on skipEmptyNoteNumbers setting
-        const hasValue = currentVal !== 0 || previousVal !== 0;
-        if (!skipEmptyNoteNumbers || hasValue) {
-          newNoteNumbers[`bs2_${row.key}`] = currentNoteNum.toString();
-          currentNoteNum++;
-        }
-      }
-    });
-    
-    // Generate for PL2 (continues from BS2)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    plStructure.forEach((row: any) => {
-      if (!row.h && !row.sub && row.key) {
-        const currentVal = currentYearData2[deepClean(row.key)] || 0;
-        const previousVal = previousYearData2[deepClean(row.key)] || 0;
-        
-        // Assign note number based on skipEmptyNoteNumbers setting
-        const hasValue = currentVal !== 0 || previousVal !== 0;
-        if (!skipEmptyNoteNumbers || hasValue) {
-          newNoteNumbers[`pl2_${row.key}`] = currentNoteNum.toString();
-          currentNoteNum++;
-        }
-      }
-    });
-    
-    setNoteNumbers(newNoteNumbers);
-    localStorage.setItem('srmPro_noteNumbers', JSON.stringify(newNoteNumbers));
-    setNoteNumberDialogOpen(false);
-    toast.success(`Note numbers generated: ${startNum} to ${currentNoteNum - 1}`, { duration: 4000 });
-  };
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -938,23 +48,8 @@ const SRMPro = () => {
     reader.onload = (evt) => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        
-        console.log('Workbook loaded. Sheet names:', wb.SheetNames);
-        console.log('Number of sheets:', wb.SheetNames.length);
-        
-        // Process with mapping data and assessee type (for BS/PL) - using OLD exact-match logic
-        const processed = processAccountingData(wb, mappingData, assesseeType, false);
-        
-        console.log('Processed data (Mapping 1):', processed.length, 'rows');
-        console.log('Using assessee type:', assesseeType === '3' ? 'Corporate' : assesseeType === '4' ? 'Non-Corporate' : 'LLP');
-        console.log('Mapping loaded:', mappingLoaded ? 'Yes' : 'No');
-        if (processed.length > 0) {
-          console.log('Sample row:', processed[0]);
-        }
-        
-        if (processed.length === 0) {
-          throw new Error('No ledgers found. Please check that your Excel file has the correct column headers (Name, Parent, OpeningBalance, Debit, Credit, ClosingBalance, IsDeemedPositive).');
-        }
+        const processed = processAccountingData(wb);
+        if (processed.length === 0) throw new Error('No ledgers found. Check Sheet 2 column headers.');
 
         // Check for duplicates and merge with existing data
         if (savedTBData.length > 0) {
@@ -1045,20 +140,10 @@ const SRMPro = () => {
           setPreviousYearData2(summarized2);
         }
 
-        const mappedCount = processed.filter(r => r['Mapped Category'] !== 'NOT MAPPED').length;
-        const unmappedCount = processed.length - mappedCount;
-        const mappedCount2 = processed2.filter(r => r['Mapped Category'] !== 'NOT MAPPED').length;
-        const unmappedCount2 = processed2.length - mappedCount2;
-        
         setActiveTab('results');
-        toast.success(
-          `${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully. ` +
-          `Mapping 1: ${processed.length} ledgers (${mappedCount} mapped, ${unmappedCount} unmapped). ` +
-          `Mapping 2: ${processed2.length} ledgers (${mappedCount2} mapped, ${unmappedCount2} unmapped).`
-        );
+        toast.success(`${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully`);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
-        console.error('File processing error:', err);
         toast.error(err.message || 'Error processing file');
       }
       setLoading(false);
@@ -1121,13 +206,11 @@ const SRMPro = () => {
     { label: '(c) Other operating revenues', key: 'Other operating revenues' },
     { label: 'Uncategorised Revenue from operations', key: 'Uncategorised Revenue from operations', un: true },
     { label: '(2) Other Income', key: 'Other income' },
-    { label: 'Uncategorised Income', key: 'Uncategorised Income', un: true },
     { label: 'Total Revenue', sub: true },
     { label: 'EXPENSES', h: true },
     { label: '(3) Cost of materials consumed', key: 'Cost of materials consumed' },
     { label: '(4) Purchases of Stock-in-Trade', key: 'Purchases of Stock-in-Trade' },
     { label: '(5) Changes in inventories of finished goods, work-in-progress and Stock-in-Trade', key: 'Changes in inventories of finished goods, work-in-progress and Stock-in-Trade' },
-    { label: 'Uncategorised Purchase Accounts', key: 'Uncategorised Purchase Accounts', un: true },
     { label: '(6) Employee benefit expense', sub: true },
     { label: '(a) Salaries and wages', key: 'Salaries and wages' },
     { label: '(b) Contribution to provident and other funds', key: 'Contribution to provident and other funds' },
@@ -1151,7 +234,7 @@ const SRMPro = () => {
     { label: '(j) Bad debts written off', key: 'Bad debts written off' },
     { label: '(k) Provision for doubtful debts', key: 'Provision for doubtful debts' },
     { label: '(l) Miscellaneous expenses', key: 'Miscellaneous expenses' },
-    { label: 'Uncategorised expenses', key: 'Uncategorised expenses', un: true },
+    { label: 'Uncategorised Other expenses', key: 'Uncategorised Other expenses', un: true },
     { label: 'Total Expenses', sub: true },
     { label: '(10) Prior period items', key: 'Prior period items' },
     { label: 'Profit/(Loss) before tax', sub: true },
@@ -1203,45 +286,21 @@ const SRMPro = () => {
   };
 
   const handleFilterChange = (column: string, value: string) => {
-    setColumnFilters((prev) => {
-      const currentFilters = prev[column] || [];
-      if (currentFilters.includes(value)) {
-        // Remove if already selected
-        const newFilters = currentFilters.filter(v => v !== value);
-        return newFilters.length > 0 ? { ...prev, [column]: newFilters } : { ...prev, [column]: [] };
-      } else {
-        // Add to selected
-        return { ...prev, [column]: [...currentFilters, value] };
-      }
-    });
+    setColumnFilters((prev) => ({
+      ...prev,
+      [column]: value,
+    }));
   };
-
-  // Get unique values for each column for dropdown filters
-  const getUniqueColumnValues = useMemo(() => {
-    const uniqueValues: Record<string, string[]> = {};
-    if (data.length > 0) {
-      Object.keys(data[0]).forEach((key) => {
-        const values = new Set<string>();
-        data.forEach((row) => {
-          const val = String(row[key] || '').trim();
-          if (val) values.add(val);
-        });
-        uniqueValues[key] = Array.from(values).sort();
-      });
-    }
-    return uniqueValues;
-  }, [data]);
 
   const filteredAndSortedData = useMemo(() => {
     let result = [...data];
 
-    // Apply column filters (array-based multi-selection)
-    Object.entries(columnFilters).forEach(([column, selectedValues]) => {
-      if (selectedValues && selectedValues.length > 0) {
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, filterValue]) => {
+      if (filterValue) {
         result = result.filter((row) => {
-          const cellValue = String(row[column] || '');
-          // Match if cell value is in the selected values
-          return selectedValues.includes(cellValue);
+          const cellValue = String(row[column] || '').toLowerCase();
+          return cellValue.includes(filterValue.toLowerCase());
         });
       }
     });
@@ -1276,15 +335,8 @@ const SRMPro = () => {
     
     if (data.length > 0) {
       Object.keys(data[0]).forEach((key) => {
-        // Try to parse as number for any column that might contain numeric values
-        const firstVal = data[0][key];
-        const testNum = typeof firstVal === 'number' ? firstVal : parseFloat(String(firstVal || '').replace(/,/g, ''));
-        
-        if (!isNaN(testNum)) {
-          totals[key] = data.reduce((sum, row) => {
-            const val = typeof row[key] === 'number' ? row[key] : parseFloat(String(row[key] || '').replace(/,/g, ''));
-            return sum + (isNaN(val) ? 0 : val);
-          }, 0);
+        if (typeof data[0][key] === 'number') {
+          totals[key] = data.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
         }
       });
     }
@@ -1327,47 +379,6 @@ const SRMPro = () => {
     let previousAssetsTotal = 0;
     let isInAssetsSection = false;
     let totalCount = 0;
-
-    // Pre-calculate totals for P&L
-    let currentRevenueTotal = 0;
-    let previousRevenueTotal = 0;
-    let currentExpensesTotal = 0;
-    let previousExpensesTotal = 0;
-    let currentTaxExpense = 0;
-    let previousTaxExpense = 0;
-    let isInExpensesSection = false;
-    let isInTaxSection = false;
-
-    if (isPL) {
-      structure.forEach((row) => {
-        if (row.label === 'EXPENSES') {
-          isInExpensesSection = true;
-        }
-        if (row.label === '(11) Tax expense') {
-          isInTaxSection = true;
-        }
-        if (row.label === 'Profit/(Loss) for the period') {
-          isInTaxSection = false;
-        }
-        
-        if (!row.h && !row.sub && row.key) {
-          const currentVal = activeCurrentYearData[deepClean(row.key)] || 0;
-          const previousVal = activePreviousYearData[deepClean(row.key)] || 0;
-          
-          if (isInTaxSection) {
-            currentTaxExpense += currentVal;
-            previousTaxExpense += previousVal;
-          } else if (isInExpensesSection) {
-            currentExpensesTotal += currentVal;
-            previousExpensesTotal += previousVal;
-          } else {
-            // Income section
-            currentRevenueTotal += currentVal;
-            previousRevenueTotal += previousVal;
-          }
-        }
-      });
-    }
 
     // Pre-calculate totals for Balance Sheet
     if (!isPL) {
@@ -1449,29 +460,14 @@ const SRMPro = () => {
     return (
       <div className="space-y-4">
         <Card>
-          <CardHeader className="text-center relative">
-            <Button 
-              onClick={() => {
-                if (isData2) {
-                  handleExportToExcel(isPL ? 'pl2' : 'bs2');
-                } else {
-                  handleExportToExcel(isPL ? 'pl' : 'bs');
-                }
-              }} 
-              variant="outline" 
-              size="sm"
-              className="absolute top-4 right-4 gap-2"
-            >
-              <Download className="h-4 w-4" />
-              Export Excel
-            </Button>
+          <CardHeader className="text-center">
             <CardTitle className="text-2xl">{companyName}</CardTitle>
             <p className="text-sm text-muted-foreground">CIN: {cin}</p>
             <CardTitle className="text-xl mt-2">{isPL ? 'Statement of Profit & Loss' : 'Balance Sheet as at 31 March ' + periodYear}</CardTitle>
             <p className="text-sm font-medium">(Amount in ₹ {scaleLabels[scale]})</p>
             {hasDifference && (
               <p className="text-red-600 font-bold mt-2">
-                ⚠️ Balance Sheet does not match! Difference: Current Year: {formatValue(currentDifference)}, Previous Year: {formatValue(previousDifference)}
+                ⚠️ Balance Sheet does not balance! Difference: Current Year: {formatValue(currentDifference)}, Previous Year: {formatValue(previousDifference)}
               </p>
             )}
           </CardHeader>
@@ -1551,30 +547,6 @@ const SRMPro = () => {
                     let displayCurrentTotal = 0;
                     let displayPreviousTotal = 0;
                     let isAssetTotal = false;
-                    
-                    // Handle P&L totals
-                    let showPLTotal = false;
-                    if (isPL) {
-                      if (row.label === 'Total Revenue') {
-                        showPLTotal = true;
-                        displayCurrentTotal = currentRevenueTotal;
-                        displayPreviousTotal = previousRevenueTotal;
-                      } else if (row.label === 'Total Expenses') {
-                        showPLTotal = true;
-                        displayCurrentTotal = currentExpensesTotal;
-                        displayPreviousTotal = previousExpensesTotal;
-                      } else if (row.label === 'Profit/(Loss) before tax') {
-                        showPLTotal = true;
-                        displayCurrentTotal = currentRevenueTotal - currentExpensesTotal;
-                        displayPreviousTotal = previousRevenueTotal - previousExpensesTotal;
-                      } else if (row.label === 'Profit/(Loss) for the period') {
-                        showPLTotal = true;
-                        const currentPBT = currentRevenueTotal - currentExpensesTotal;
-                        const previousPBT = previousRevenueTotal - previousExpensesTotal;
-                        displayCurrentTotal = currentPBT - currentTaxExpense;
-                        displayPreviousTotal = previousPBT - previousTaxExpense;
-                      }
-                    }
 
                     if (showTotal && !isPL) {
                       // Check if this is Assets total (second TOTAL) or Liabilities total (first TOTAL)
@@ -1598,25 +570,19 @@ const SRMPro = () => {
                           ${row.h ? 'bg-slate-100 font-bold text-lg' : ''}
                           ${row.sub ? 'font-semibold bg-slate-50' : ''}
                           ${showTotal ? 'bg-blue-50 font-bold text-lg' : ''}
-                          ${showPLTotal ? 'bg-blue-50 font-bold text-lg' : ''}
                         `}
                       >
                         <td style={{ paddingLeft: indent }} className={`px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
                           {row.label}
                         </td>
                         <td className={`text-center px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {!row.h && !row.sub && !row.un && !showPLTotal && row.key ? (
-                            (() => {
-                              const prefix = isPL ? (isData2 ? 'pl2_' : 'pl_') : (isData2 ? 'bs2_' : 'bs_');
-                              return noteNumbers[`${prefix}${row.key}`] || '';
-                            })()
-                          ) : ''}
+                          {!row.h && !row.sub && !row.un ? row.note || '' : ''}
                         </td>
                         <td className={`text-right px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {showTotal || showPLTotal ? formatValue(displayCurrentTotal) : !row.h && !row.sub ? formatValue(currentVal) : ''}
+                          {showTotal ? formatValue(displayCurrentTotal) : !row.h && !row.sub ? formatValue(currentVal) : ''}
                         </td>
                         <td className={`text-right px-3 py-2 border border-slate-200 ${isAlert ? 'text-red-700 text-xs' : ''}`}>
-                          {showTotal || showPLTotal ? formatValue(displayPreviousTotal) : !row.h && !row.sub ? formatValue(previousVal) : ''}
+                          {showTotal ? formatValue(displayPreviousTotal) : !row.h && !row.sub ? formatValue(previousVal) : ''}
                         </td>
                       </tr>
                     );
@@ -1695,7 +661,7 @@ const SRMPro = () => {
             className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-all duration-200"
           >
             <Search className="h-4 w-4" />
-            Mapped TB
+            Results
           </TabsTrigger>
           <TabsTrigger 
             value="summary" 
@@ -1801,24 +767,6 @@ const SRMPro = () => {
 
                 {/* Assessee Type */}
                 <div className="space-y-1">
-                  <Label htmlFor="assessee-type" className="text-sm">
-                    Assessee Type
-                    {mappingLoaded && <span className="ml-2 text-xs text-green-600">✓</span>}
-                  </Label>
-                  <Select value={assesseeType} onValueChange={(value: '3' | '4' | '5') => setAssesseeType(value)}>
-                    <SelectTrigger id="assessee-type" className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="3">Corporate</SelectItem>
-                      <SelectItem value="4">Non-Corporate</SelectItem>
-                      <SelectItem value="5">LLP</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* File Upload */}
-                <div className="space-y-1 md:col-span-2">
                   <Label htmlFor="file-upload" className="text-sm">Select File</Label>
                   <Input
                     id="file-upload"
@@ -1830,39 +778,12 @@ const SRMPro = () => {
                   />
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex gap-2">
-                  <Button
-                    onClick={() => setConfigDialogOpen(true)}
-                    variant="outline"
-                    size="sm"
-                    disabled={loading}
-                    className="h-9"
-                  >
-                    <Settings className="h-4 w-4 mr-1" />
-                    Config
-                  </Button>
-
-                  {data.length > 0 && (
-                    <Button
-                      onClick={handleClearData}
-                      variant="destructive"
-                      size="sm"
-                      disabled={loading}
-                      className="h-9"
-                    >
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Clear
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {loading && (
-                <div className="flex items-center justify-center py-4 mt-4">
-                  <div className="text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-                    <p className="mt-2 text-xs text-muted-foreground">Processing...</p>
+                {loading && (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                      <p className="mt-2 text-xs text-muted-foreground">Processing...</p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1899,172 +820,53 @@ const SRMPro = () => {
                       className="max-w-sm"
                     />
                     
-                    {/* Totals Summary - Opening Balance, Debit, Credit, Closing Balance */}
-                    {data.length > 0 && (
-                      <div className="flex gap-4 p-3 bg-slate-50 rounded-lg border justify-center flex-wrap">
-                        {Object.keys(data[0]).map((key) => {
-                          const keyLower = key.toLowerCase();
-                          const isTargetColumn = keyLower.includes('opening') || 
-                                               keyLower.includes('debit') || 
-                                               keyLower.includes('credit') || 
-                                               keyLower.includes('closing');
-                          if (isTargetColumn && trialBalanceTotals[key] !== undefined) {
-                            return (
-                              <div key={key} className="text-center px-3">
-                                <p className="text-xs text-muted-foreground font-medium mb-0.5">{key === 'TrailBalance' ? 'AILE' : key}</p>
-                                <p className="text-sm font-bold text-slate-800">
-                                  {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                </p>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })}
-                      </div>
-                    )}
-                    
-                    <div className="overflow-x-auto border rounded-lg max-h-[600px]">
+                    <div className="overflow-x-auto border rounded-lg max-h-96">
                       <table className="w-full text-sm">
                         <thead className="bg-gradient-to-r from-slate-700 to-slate-800 text-white sticky top-0 z-10">
                           <tr>
-                            {data[0] && Object.keys(data[0]).filter(key => {
-                              const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
-                              return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
-                            }).map((key) => (
-                              <th key={key} className="px-3 py-3 text-left font-semibold whitespace-nowrap border-r border-slate-600 last:border-r-0 relative">
-                                <div className="relative">
+                            {data[0] && Object.keys(data[0]).map((key) => (
+                              <th key={key} className="px-2 py-2 text-left font-medium whitespace-nowrap">
+                                <div className="space-y-1">
                                   <button
-                                    onClick={() => setOpenFilterColumn(openFilterColumn === key ? null : key)}
-                                    className="flex items-center gap-2 hover:text-blue-300 transition-colors w-full"
-                                    aria-label={`Filter and sort by ${key}`}
+                                    onClick={() => handleSort(key)}
+                                    className="flex items-center gap-1 hover:text-blue-300"
                                   >
-                                    <span className="font-semibold">{key === 'TrailBalance' ? 'AILE' : key}</span>
-                                    <div className="flex items-center gap-1 ml-auto">
-                                      {columnFilters[key]?.length > 0 && (
-                                        <span className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                                          {columnFilters[key].length}
-                                        </span>
-                                      )}
-                                      <ArrowUpDown className="h-3.5 w-3.5 opacity-70" />
-                                    </div>
+                                    {key}
+                                    <ArrowUpDown className="h-3 w-3" />
                                   </button>
-                                  
-                                  {openFilterColumn === key && (
-                                    <>
-                                      <div 
-                                        className="fixed inset-0 z-20" 
-                                        onClick={() => setOpenFilterColumn(null)}
-                                      />
-                                      <div className="absolute left-0 top-full mt-2 w-72 bg-white border-2 border-slate-300 rounded-lg shadow-2xl z-30" onClick={(e) => e.stopPropagation()}>
-                                        {/* Sort Options */}
-                                        <div className="border-b border-slate-200 p-2 bg-slate-50">
-                                          <div className="text-xs font-semibold text-slate-700 mb-2">SORT</div>
-                                          <div className="flex gap-2">
-                                            <button
-                                              onClick={() => {
-                                                handleSort(key);
-                                                if (sortDirection === 'desc') setOpenFilterColumn(null);
-                                              }}
-                                              className={`flex-1 px-3 py-2 text-xs rounded ${sortColumn === key && sortDirection === 'asc' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'}`}
-                                            >
-                                              ↑ A → Z
-                                            </button>
-                                            <button
-                                              onClick={() => {
-                                                if (sortColumn !== key || sortDirection === 'asc') {
-                                                  handleSort(key);
-                                                  if (sortColumn === key) handleSort(key);
-                                                }
-                                                setOpenFilterColumn(null);
-                                              }}
-                                              className={`flex-1 px-3 py-2 text-xs rounded ${sortColumn === key && sortDirection === 'desc' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'}`}
-                                            >
-                                              ↓ Z → A
-                                            </button>
-                                          </div>
-                                        </div>
-                                        
-                                        {/* Filter Options */}
-                                        <div className="p-2">
-                                          <div className="text-xs font-semibold text-slate-700 mb-2">FILTER</div>
-                                          <Input
-                                            placeholder="Search values..."
-                                            value={filterSearches[key] || ''}
-                                            onChange={(e) => setFilterSearches(prev => ({ ...prev, [key]: e.target.value }))}
-                                            className="h-8 text-xs mb-2"
-                                            autoFocus
-                                          />
-                                          <div className="max-h-64 overflow-y-auto border border-slate-200 rounded">
-                                            {getUniqueColumnValues[key]
-                                              ?.filter(value => !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase()))
-                                              .slice(0, 200)
-                                              .map((value) => (
-                                              <label key={value} className="flex items-center gap-2 px-3 py-2 hover:bg-blue-50 cursor-pointer text-slate-900 border-b border-slate-100 last:border-b-0">
-                                                <input
-                                                  type="checkbox"
-                                                  checked={columnFilters[key]?.includes(value) || false}
-                                                  onChange={() => handleFilterChange(key, value)}
-                                                  className="rounded border-slate-400 text-blue-600 focus:ring-blue-500"
-                                                />
-                                                <span className="text-xs flex-1 truncate">{value}</span>
-                                              </label>
-                                            ))}
-                                          </div>
-                                        </div>
-                                        
-                                        {/* Action Buttons */}
-                                        <div className="border-t border-slate-200 p-2 flex gap-2 bg-slate-50">
-                                          {columnFilters[key]?.length > 0 && (
-                                            <button
-                                              onClick={() => {
-                                                setColumnFilters(prev => ({ ...prev, [key]: [] }));
-                                                setOpenFilterColumn(null);
-                                              }}
-                                              className="flex-1 px-3 py-2 text-xs font-medium text-red-600 bg-white border border-red-300 rounded hover:bg-red-50"
-                                            >
-                                              Clear
-                                            </button>
-                                          )}
-                                          <button
-                                            onClick={() => {
-                                              const allValues = getUniqueColumnValues[key]?.filter(value => 
-                                                !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase())
-                                              ) || [];
-                                              setColumnFilters(prev => ({ ...prev, [key]: allValues }));
-                                            }}
-                                            className="flex-1 px-3 py-2 text-xs font-medium text-blue-600 bg-white border border-blue-300 rounded hover:bg-blue-50"
-                                          >
-                                            Select All
-                                          </button>
-                                          <button
-                                            onClick={() => setOpenFilterColumn(null)}
-                                            className="flex-1 px-3 py-2 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
-                                          >
-                                            Apply
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </>
-                                  )}
+                                  <Input
+                                    placeholder="Filter..."
+                                    value={columnFilters[key] || ''}
+                                    onChange={(e) => handleFilterChange(key, e.target.value)}
+                                    className="h-6 text-xs bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
                                 </div>
                               </th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredAndSortedData.map((row, i) => (
-                            <tr key={i} className={`border-b border-slate-200 hover:bg-blue-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
-                              {Object.entries(row).filter(([key]) => {
-                                const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
-                                return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
-                              }).map(([key, val]: [string, any], j) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                <td key={j} className="px-3 py-2 whitespace-nowrap text-xs text-slate-700">
+                          {filteredAndSortedData.slice(0, 100).map((row, i) => (
+                            <tr key={i} className={`border-b hover:bg-slate-50`}>
+                              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                              {Object.values(row).map((val: any, j) => (
+                                <td key={j} className="px-2 py-1 whitespace-nowrap text-xs">
                                   {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                                 </td>
                               ))}
                             </tr>
                           ))}
                         </tbody>
+                        <tfoot className="bg-slate-100 font-bold sticky bottom-0">
+                          <tr>
+                            {data[0] && Object.keys(data[0]).map((key, idx) => (
+                              <td key={key} className="px-2 py-2 text-xs whitespace-nowrap">
+                                {idx === 0 ? 'TOTAL:' : typeof trialBalanceTotals[key] === 'number' ? trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}
+                              </td>
+                            ))}
+                          </tr>
+                        </tfoot>
                       </table>
                     </div>
                   </div>
@@ -2078,7 +880,7 @@ const SRMPro = () => {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Mapped Trial Balance</CardTitle>
+                  <CardTitle>Trial Balance Results</CardTitle>
                   <CardDescription>Processed ledger data with category mappings</CardDescription>
                 </div>
                 <div className="flex gap-4">
@@ -2090,164 +892,6 @@ const SRMPro = () => {
                     <XCircle className="h-5 w-5" />
                     <span className="font-semibold">{unmappedCount} Unmapped</span>
                   </div>
-                  <Button 
-                    onClick={() => handleExportToExcel('tb')} 
-                    variant="outline" 
-                    size="sm"
-                    className="gap-2"
-                  >
-                    <Download className="h-4 w-4" />
-                    Export Excel
-                  </Button>
-                  <Dialog open={stockDetailsOpen} onOpenChange={setStockDetailsOpen}>
-                    <DialogTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        className="gap-2"
-                      >
-                        <Package className="h-4 w-4" />
-                        Stock Details
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-3xl">
-                      <DialogHeader>
-                        <DialogTitle>Stock Details</DialogTitle>
-                      </DialogHeader>
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-2 border-slate-800">
-                          <thead>
-                            <tr className="bg-slate-100">
-                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold">Category</th>
-                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold bg-amber-100">Opening Inventories</th>
-                              <th className="text-left px-4 py-3 border border-slate-800 font-semibold bg-blue-100">Closing Inventories</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td className="px-4 py-3 border border-slate-800 font-medium">Raw Material</td>
-                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={stockDetails.rawMaterialOpening}
-                                  onChange={(e) => setStockDetails(prev => ({ ...prev, rawMaterialOpening: e.target.value }))}
-                                  className="w-full"
-                                  placeholder="0.00"
-                                />
-                              </td>
-                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={stockDetails.rawMaterialClosing}
-                                  onChange={(e) => setStockDetails(prev => ({ ...prev, rawMaterialClosing: e.target.value }))}
-                                  className="w-full"
-                                  placeholder="0.00"
-                                />
-                              </td>
-                            </tr>
-                            <tr>
-                              <td className="px-4 py-3 border border-slate-800 font-medium">Finished Goods</td>
-                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={stockDetails.finishedGoodsOpening}
-                                  onChange={(e) => setStockDetails(prev => ({ ...prev, finishedGoodsOpening: e.target.value }))}
-                                  className="w-full"
-                                  placeholder="0.00"
-                                />
-                              </td>
-                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={stockDetails.finishedGoodsClosing}
-                                  onChange={(e) => setStockDetails(prev => ({ ...prev, finishedGoodsClosing: e.target.value }))}
-                                  className="w-full"
-                                  placeholder="0.00"
-                                />
-                              </td>
-                            </tr>
-                            <tr>
-                              <td className="px-4 py-3 border border-slate-800 font-medium">Work-in-progress</td>
-                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={stockDetails.wipOpening}
-                                  onChange={(e) => setStockDetails(prev => ({ ...prev, wipOpening: e.target.value }))}
-                                  className="w-full"
-                                  placeholder="0.00"
-                                />
-                              </td>
-                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={stockDetails.wipClosing}
-                                  onChange={(e) => setStockDetails(prev => ({ ...prev, wipClosing: e.target.value }))}
-                                  className="w-full"
-                                  placeholder="0.00"
-                                />
-                              </td>
-                            </tr>
-                            <tr>
-                              <td className="px-4 py-3 border border-slate-800 font-medium">Stock-in-trade</td>
-                              <td className="px-2 py-2 border border-slate-800 bg-amber-50">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={stockDetails.stockInTradeOpening}
-                                  onChange={(e) => setStockDetails(prev => ({ ...prev, stockInTradeOpening: e.target.value }))}
-                                  className="w-full"
-                                  placeholder="0.00"
-                                />
-                              </td>
-                              <td className="px-2 py-2 border border-slate-800 bg-blue-50">
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  value={stockDetails.stockInTradeClosing}
-                                  onChange={(e) => setStockDetails(prev => ({ ...prev, stockInTradeClosing: e.target.value }))}
-                                  className="w-full"
-                                  placeholder="0.00"
-                                />
-                              </td>
-                            </tr>
-                            <tr className="bg-slate-100 font-bold">
-                              <td className="px-4 py-3 border border-slate-800">Total</td>
-                              <td className="px-4 py-3 border border-slate-800 bg-amber-50 text-right">
-                                {(
-                                  parseFloat(stockDetails.rawMaterialOpening || '0') +
-                                  parseFloat(stockDetails.finishedGoodsOpening || '0') +
-                                  parseFloat(stockDetails.wipOpening || '0') +
-                                  parseFloat(stockDetails.stockInTradeOpening || '0')
-                                ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                              <td className="px-4 py-3 border border-slate-800 bg-blue-50 text-right">
-                                {(
-                                  parseFloat(stockDetails.rawMaterialClosing || '0') +
-                                  parseFloat(stockDetails.finishedGoodsClosing || '0') +
-                                  parseFloat(stockDetails.wipClosing || '0') +
-                                  parseFloat(stockDetails.stockInTradeClosing || '0')
-                                ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="flex justify-end gap-2 mt-4">
-                        <Button variant="outline" onClick={() => setStockDetailsOpen(false)}>
-                          Cancel
-                        </Button>
-                        <Button onClick={handleSaveStockDetails}>
-                          Save
-                        </Button>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
                 </div>
               </div>
             </CardHeader>
@@ -2263,21 +907,15 @@ const SRMPro = () => {
                   />
                 </div>
 
-                {/* Totals Summary - Opening Balance, Debit, Credit, Closing Balance */}
+                {/* Totals Summary */}
                 {data.length > 0 && (
-                  <div className="flex gap-6 p-4 bg-slate-50 rounded-lg border justify-center">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50 rounded-lg border">
                     {Object.keys(data[0]).map((key) => {
-                      const keyLower = key.toLowerCase();
-                      const isTargetColumn = keyLower.includes('opening') || 
-                                           keyLower.includes('debit') || 
-                                           keyLower.includes('credit') || 
-                                           keyLower.includes('closing');
-                      // Check if column has numeric total
-                      if (isTargetColumn && trialBalanceTotals[key] !== undefined) {
+                      if (typeof data[0][key] === 'number' && trialBalanceTotals[key]) {
                         return (
-                          <div key={key} className="text-center px-4">
-                            <p className="text-xs text-muted-foreground font-medium mb-0.5">{key === 'TrailBalance' ? 'AILE' : key}</p>
-                            <p className="text-base font-bold text-slate-800">
+                          <div key={key} className="text-center">
+                            <p className="text-xs text-muted-foreground font-medium">{key}</p>
+                            <p className="text-lg font-bold text-slate-800">
                               {trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </p>
                           </div>
@@ -2317,86 +955,23 @@ const SRMPro = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-800 text-white sticky top-0">
                       <tr>
-                        <th className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={selectedRows.size === filteredAndSortedData.length && filteredAndSortedData.length > 0}
-                            onChange={handleSelectAll}
-                            className="w-4 h-4 cursor-pointer"
-                          />
-                        </th>
-                        {data[0] && Object.keys(data[0]).filter(key => {
-                          const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
-                          return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
-                        }).map((key) => (
+                        {data[0] && Object.keys(data[0]).map((key) => (
                           <th key={key} className="px-3 py-2 text-left font-medium whitespace-nowrap">
                             <div className="space-y-1">
                               <button
                                 onClick={() => handleSort(key)}
                                 className="flex items-center gap-1 hover:text-blue-300 w-full"
-                                aria-label={`Sort by ${key}`}
                               >
                                 {key === 'TrailBalance' ? 'AILE' : key}
                                 <ArrowUpDown className="h-3 w-3" />
                               </button>
-                              <div className="relative">
-                                <details className="group">
-                                  <summary className="h-7 text-xs bg-blue-600 text-white border border-blue-500 rounded px-2 py-1 cursor-pointer hover:bg-blue-700 list-none flex items-center justify-between">
-                                    <span className="truncate">
-                                      {columnFilters[key]?.length > 0 ? `${columnFilters[key].length} selected` : 'Filter...'}
-                                    </span>
-                                    <span className="ml-1">▾</span>
-                                  </summary>
-                                  <div className="absolute z-50 mt-1 w-64 bg-white border border-slate-300 rounded shadow-lg" onClick={(e) => e.stopPropagation()}>
-                                    <div className="sticky top-0 bg-white border-b p-2">
-                                      <Input
-                                        placeholder="Search..."
-                                        value={filterSearches[key] || ''}
-                                        onChange={(e) => setFilterSearches(prev => ({ ...prev, [key]: e.target.value }))}
-                                        className="h-7 text-xs"
-                                        autoFocus
-                                      />
-                                    </div>
-                                    <div className="max-h-60 overflow-y-auto">
-                                      {getUniqueColumnValues[key]
-                                        ?.filter(value => !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase()))
-                                        .slice(0, 200)
-                                        .map((value) => (
-                                        <label key={value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-100 cursor-pointer text-slate-900">
-                                          <input
-                                            type="checkbox"
-                                            checked={columnFilters[key]?.includes(value) || false}
-                                            onChange={() => handleFilterChange(key, value)}
-                                            className="rounded border-slate-300"
-                                          />
-                                          <span className="text-xs truncate">{value}</span>
-                                        </label>
-                                      ))}
-                                    </div>
-                                    <div className="sticky bottom-0 bg-white border-t flex">
-                                      {columnFilters[key]?.length > 0 && (
-                                        <button
-                                          onClick={() => setColumnFilters(prev => ({ ...prev, [key]: [] }))}
-                                          className="flex-1 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                                        >
-                                          Clear All
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() => {
-                                          const allValues = getUniqueColumnValues[key]?.filter(value => 
-                                            !filterSearches[key] || value.toLowerCase().includes(filterSearches[key].toLowerCase())
-                                          ) || [];
-                                          setColumnFilters(prev => ({ ...prev, [key]: allValues }));
-                                        }}
-                                        className="flex-1 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 border-l"
-                                      >
-                                        Select All
-                                      </button>
-                                    </div>
-                                  </div>
-                                </details>
-                              </div>
+                              <Input
+                                placeholder="Filter..."
+                                value={columnFilters[key] || ''}
+                                onChange={(e) => handleFilterChange(key, e.target.value)}
+                                className="h-7 text-xs bg-slate-700 text-white border-slate-600 placeholder:text-slate-400"
+                                onClick={(e) => e.stopPropagation()}
+                              />
                             </div>
                           </th>
                         ))}
@@ -2407,26 +982,14 @@ const SRMPro = () => {
                     </thead>
                     <tbody>
                       {filteredAndSortedData
-                        .slice((currentPageMapped - 1) * pageSizeMapped, currentPageMapped * pageSizeMapped)
-                        .map((row, i) => {
-                          const originalIndex = data.findIndex(dataRow => dataRow === row);
-                          return (
-                            <tr
-                              key={i}
-                              className={`border-b hover:bg-slate-50 ${selectedRows.has(originalIndex) ? 'bg-blue-50' : ''}`}
-                            >
-                              <td className="px-3 py-2 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedRows.has(originalIndex)}
-                                  onChange={() => handleSelectRow(originalIndex)}
-                                  className="w-4 h-4 cursor-pointer"
-                                />
-                              </td>
-                            {Object.entries(row).filter(([key]) => {
-                              const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
-                              return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
-                            }).map(([key, val]: [string, any], j) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+                        .slice(0, 100)
+                        .map((row, i) => (
+                          <tr
+                            key={i}
+                            className={`border-b hover:bg-slate-50`}
+                          >
+                            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                            {Object.values(row).map((val: any, j) => (
                               <td key={j} className="px-3 py-2 whitespace-nowrap">
                                 {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
                               </td>
@@ -2499,6 +1062,15 @@ const SRMPro = () => {
                         );
                       })}
                     </tbody>
+                    <tfoot className="bg-slate-100 font-bold sticky bottom-0">
+                      <tr>
+                        {data[0] && Object.keys(data[0]).map((key, idx) => (
+                          <td key={key} className="px-3 py-2 whitespace-nowrap">
+                            {idx === 0 ? 'TOTAL:' : typeof trialBalanceTotals[key] === 'number' ? trialBalanceTotals[key].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}
+                          </td>
+                        ))}
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
                 
