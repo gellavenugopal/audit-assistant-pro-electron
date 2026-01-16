@@ -21,12 +21,10 @@ interface FilterModalProps {
   onOpenChange: (open: boolean) => void;
   
   // Filter values
-  statusFilter: string;
   groupFilter: string;
   balanceFilter: string;
   
   // Filter setters
-  onStatusFilterChange: (value: string) => void;
   onGroupFilterChange: (value: string) => void;
   onBalanceFilterChange: (value: string) => void;
   
@@ -37,16 +35,13 @@ interface FilterModalProps {
 export function FilterModal({
   open,
   onOpenChange,
-  statusFilter,
   groupFilter,
   balanceFilter,
-  onStatusFilterChange,
   onGroupFilterChange,
   onBalanceFilterChange,
   onResetFilters,
 }: FilterModalProps) {
   const activeFiltersCount = [
-    statusFilter !== 'all',
     groupFilter !== 'all',
     balanceFilter !== 'all',
   ].filter(Boolean).length;
@@ -77,22 +72,6 @@ export function FilterModal({
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-6 py-4">
-          {/* Status Filter */}
-          <div className="space-y-2">
-            <Label>Status</Label>
-            <Select value={statusFilter} onValueChange={onStatusFilterChange}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="Mapped">Mapped</SelectItem>
-                <SelectItem value="Unmapped">Unmapped</SelectItem>
-                <SelectItem value="Error">Error</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
           {/* Group Filter */}
           <div className="space-y-2">
             <Label>Tally Group</Label>
