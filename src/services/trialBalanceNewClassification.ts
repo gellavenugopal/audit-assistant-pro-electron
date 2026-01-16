@@ -35,6 +35,8 @@ export interface LedgerRow {
   'Errors'?: string;
   'Verified'?: string;
   'Notes'?: string;
+  'Auto'?: string;
+  'Auto Reason'?: string;
   'Sheet Name'?: string;
   'Technical Code'?: string;
   'Head Code'?: string;

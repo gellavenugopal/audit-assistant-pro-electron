@@ -81,10 +81,9 @@ export function ClassificationRulesBot({
     return (bsplOptions.h3Options[draft.h1] || {})[draft.h2] || [];
   }, [bsplOptions.h3Options, draft.h1, draft.h2]);
 
-  const handleApply = () => {
-    if (!draft.h1.trim()) return;
-
-    const rule: ClassificationRule = {
+  const buildRuleFromDraft = () => {
+    if (!draft.h1.trim()) return null;
+    return {
       ...draft,
       id: editingId || `rule_${Date.now()}`,
       primaryGroupContains: draft.primaryGroupContains?.trim() || '',
@@ -93,14 +92,19 @@ export function ClassificationRulesBot({
       h1: draft.h1.trim(),
       h2: draft.h2.trim(),
       h3: draft.h3.trim(),
-    };
+    } as ClassificationRule;
+  };
 
-    setRows(prev => {
-      if (editingId) {
-        return prev.map(item => (item.id === editingId ? rule : item));
-      }
-      return [...prev, rule];
-    });
+  const handleApply = () => {
+    const rule = buildRuleFromDraft();
+    if (!rule) return;
+
+    const nextRows = editingId
+      ? rows.map(item => (item.id === editingId ? rule : item))
+      : [...rows, rule];
+
+    setRows(nextRows);
+    onSave(nextRows);
     setEditingId(null);
     setDraft({ ...emptyDraft, scope: defaultScope });
   };
@@ -111,11 +115,20 @@ export function ClassificationRulesBot({
   };
 
   const handleDelete = (id: string) => {
-    setRows(prev => prev.filter(rule => rule.id !== id));
+    const nextRows = rows.filter(rule => rule.id !== id);
+    setRows(nextRows);
+    onSave(nextRows);
   };
 
   const handleSave = () => {
-    onSave(rows);
+    const rule = buildRuleFromDraft();
+    const nextRows = rule
+      ? (editingId
+          ? rows.map(item => (item.id === editingId ? rule : item))
+          : [...rows, rule])
+      : rows;
+    setRows(nextRows);
+    onSave(nextRows);
     onOpenChange(false);
   };
 
@@ -280,6 +293,23 @@ export function ClassificationRulesBot({
               </Button>
             )}
           </div>
+        </div>
+
+        <div className="border rounded-md p-3 text-xs text-muted-foreground">
+          <div className="font-medium text-foreground text-sm">Predefined Auto Rules</div>
+          <div className="mt-2 grid grid-cols-1 gap-1">
+            <div>Sales Accounts → H2: Revenue from Operations (H3 by ledger keywords)</div>
+            <div>Direct/Indirect Incomes → H2: Other Income (H3 by ledger keywords)</div>
+            <div>Purchase Accounts → Trading: Purchases of Stock in Trade; Others: Cost of Materials Consumed / Purchase of Raw Materials</div>
+            <div>Direct Expenses → Trading: Other Expense; Others: Cost of Materials Consumed / Other Direct expenses</div>
+            <div>Stock-in-Hand (Trading) → Change in Inventories</div>
+            <div>Indirect Expenses → Finance Costs / Depreciation & Amortisation / Employee Benefits / Tax / Other Expense (by keywords)</div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+          <span>Saved Rules: {rows.length}</span>
+          {rows.length === 0 && <span>Add a rule above to see it here.</span>}
         </div>
 
         <div className="border rounded-md overflow-hidden">

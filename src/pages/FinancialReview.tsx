@@ -18,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import {
   Select,
@@ -27,6 +28,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -99,6 +108,178 @@ const BUSINESS_TYPES = [
 // Disabled entity types (not supported in this phase)
 const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
 
+type InlineComboboxProps = {
+  value: string;
+  options: string[];
+  placeholder: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+  className?: string;
+  inputStyle?: React.CSSProperties;
+};
+
+type TableTabKey = 'actual' | 'classified' | 'stock';
+
+type TableTabSettings = {
+  rowHeight: number;
+  widths: Record<string, number>;
+  fonts: Record<string, number>;
+};
+
+const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
+  actual: {
+    rowHeight: 28,
+    widths: {
+      'Ledger Name': 160,
+      'Parent Group': 120,
+      'Primary Group': 120,
+      'Opening Balance': 100,
+      'Debit': 100,
+      'Credit': 100,
+      'Closing Balance': 100,
+      'Is Revenue': 80,
+    },
+    fonts: {
+      'Ledger Name': 10,
+      'Parent Group': 10,
+      'Primary Group': 10,
+      'Opening Balance': 10,
+      'Debit': 10,
+      'Credit': 10,
+      'Closing Balance': 10,
+      'Is Revenue': 10,
+    },
+  },
+  classified: {
+    rowHeight: 28,
+    widths: {
+      'Ledger Name': 120,
+      'Parent Group': 100,
+      'Primary Group': 65,
+      'Opening Balance': 70,
+      'Closing Balance': 70,
+      'H1': 80,
+      'H2': 85,
+      'H3': 119,
+      'Auto': 60,
+    },
+    fonts: {
+      'Ledger Name': 10,
+      'Parent Group': 10,
+      'Primary Group': 10,
+      'Opening Balance': 10,
+      'Closing Balance': 10,
+      'H1': 11,
+      'H2': 11,
+      'H3': 11,
+      'Auto': 10,
+    },
+  },
+  stock: {
+    rowHeight: 28,
+    widths: {
+      'Item Name': 180,
+      'Stock Group': 120,
+      'Primary Group': 120,
+      'Opening Value': 100,
+      'Closing Value': 100,
+      'Stock Category': 140,
+      'Actions': 80,
+    },
+    fonts: {
+      'Item Name': 10,
+      'Stock Group': 10,
+      'Primary Group': 10,
+      'Opening Value': 10,
+      'Closing Value': 10,
+      'Stock Category': 10,
+      'Actions': 10,
+    },
+  },
+};
+
+function InlineCombobox({
+  value,
+  options,
+  placeholder,
+  disabled = false,
+  onChange,
+  className,
+  inputStyle,
+}: InlineComboboxProps) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setSearch('');
+    }
+  }, [open, value]);
+
+  const filteredOptions = useMemo(() => {
+    const needle = search.toLowerCase().trim();
+    if (!needle) return options;
+    return options.filter(option => option.toLowerCase().includes(needle));
+  }, [options, search]);
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (disabled) {
+          setOpen(false);
+          return;
+        }
+        setOpen(next);
+        if (next) {
+          setSearch('');
+        }
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Input
+          value={value}
+          onChange={(e) => {
+            const nextValue = e.target.value;
+            onChange(nextValue);
+            setSearch(nextValue);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onClick={(e) => e.stopPropagation()}
+          placeholder={placeholder}
+          disabled={disabled}
+          className={`${className} truncate whitespace-nowrap overflow-hidden`}
+          style={inputStyle}
+        />
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-0 z-[9999]" align="start" sideOffset={4}>
+        <Command>
+          <CommandList className="max-h-56 overflow-auto" onWheel={(e) => e.stopPropagation()}>
+            {filteredOptions.length === 0 && (
+              <CommandEmpty>No matches found.</CommandEmpty>
+            )}
+            <CommandGroup>
+              {filteredOptions.map(option => (
+                <CommandItem
+                  key={option}
+                  value={option}
+                  onSelect={() => {
+                    onChange(option);
+                    setOpen(false);
+                  }}
+                >
+                  {option}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function FinancialReview() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
@@ -160,18 +341,18 @@ export default function FinancialReview() {
     isResizing: classifiedTbIsResizing,
     resizingColumn: classifiedTbResizingColumn
   } = useResizableColumns({
-    'Ledger Name': 150,
-    'Parent Group': 110,
+    'Ledger Name': 120,
+    'Parent Group': 100,
     'Primary Group': 110,
-    'Opening Balance': 90,
-    'Debit': 90,
-    'Credit': 90,
-    'Closing Balance': 90,
+    'Opening Balance': 85,
+    'Debit': 85,
+    'Credit': 85,
+    'Closing Balance': 85,
     'Is Revenue': 80,
-    'H1': 100,
-    'H2': 120,
-    'H3': 140,
-    'Notes': 140
+    'H1': 80,
+    'H2': 85,
+    'H3': 85,
+    'Auto': 60
   });
 
   const actualStickyOffsets = useMemo(() => {
@@ -201,7 +382,39 @@ export default function FinancialReview() {
   const [isResetConfirmDialogOpen, setIsResetConfirmDialogOpen] = useState(false);
   const [isBsplHeadsOpen, setIsBsplHeadsOpen] = useState(false);
   const [isRulesBotOpen, setIsRulesBotOpen] = useState(false);
-
+  const [isTableSettingsOpen, setIsTableSettingsOpen] = useState(false);
+  const [tableSettings, setTableSettings] = useState(DEFAULT_TABLE_SETTINGS);
+  const actualColumns = useMemo(() => ([
+    'Ledger Name',
+    'Parent Group',
+    'Primary Group',
+    'Opening Balance',
+    'Debit',
+    'Credit',
+    'Closing Balance',
+    'Is Revenue',
+  ]), []);
+  const classifiedColumns = useMemo(() => ([
+    'Ledger Name',
+    'Parent Group',
+    'Primary Group',
+    'Opening Balance',
+    'Closing Balance',
+    'H1',
+    'H2',
+    'H3',
+    'Auto',
+  ]), []);
+  const stockColumns = useMemo(() => ([
+    'Item Name',
+    'Stock Group',
+    'Primary Group',
+    'Opening Value',
+    'Closing Value',
+    'Stock Category',
+    'Actions',
+  ]), []);
+  
   const [bsplHeads, setBsplHeads] = useState(DEFAULT_BSPL_HEADS);
   const [classificationRules, setClassificationRules] = useState<ClassificationRule[]>([]);
   const [tallyGroups, setTallyGroups] = useState<string[]>(TALLY_DEFAULT_GROUPS);
@@ -275,6 +488,16 @@ export default function FinancialReview() {
       localStorage.setItem(`tb_bspl_heads_${currentEngagement.id}`, JSON.stringify(rows));
     }
     setBsplHeads(rows);
+  }, [currentEngagement?.id, businessType]);
+
+  const handleRestoreBsplHeads = useCallback((rows: BsplHeadRow[]) => {
+    const applyGlobal = window.confirm('Restore default BSPL Heads for all clients?\n\nOK = All Clients\nCancel = This Client Only');
+    if (applyGlobal) {
+      localStorage.removeItem('tb_bspl_heads_global');
+    } else if (currentEngagement?.id) {
+      localStorage.removeItem(`tb_bspl_heads_${currentEngagement.id}`);
+    }
+    setBsplHeads(rows);
   }, [currentEngagement?.id]);
 
   useEffect(() => {
@@ -313,11 +536,57 @@ export default function FinancialReview() {
       localStorage.setItem(`tb_classification_rules_${currentEngagement.id}`, JSON.stringify(client));
     }
     setClassificationRules(rules);
-
-    setCurrentData(prev =>
-      prev.map(row => applyClassificationRules(row, rules))
-    );
   }, [currentEngagement?.id]);
+
+  // Helper to get safe column settings with defaults
+  const getColumnWidth = useCallback((columnName: string) => {
+    const locked = tableSettings.classified.widths[columnName];
+    if (typeof locked === 'number') {
+      return locked;
+    }
+    const value = classifiedTbColumnWidths[columnName];
+    return typeof value === 'number' ? value : 80;
+  }, [tableSettings, classifiedTbColumnWidths]);
+
+  const getColumnFontSize = useCallback((columnName: string) => {
+    const locked = tableSettings.classified.fonts[columnName];
+    if (typeof locked === 'number') {
+      return locked;
+    }
+    return 10;
+  }, [tableSettings]);
+
+  const getActualColumnWidth = useCallback((columnName: string) => {
+    const override = tableSettings.actual.widths[columnName];
+    if (typeof override === 'number') {
+      return override;
+    }
+    const value = actualTbColumnWidths[columnName];
+    return typeof value === 'number' ? value : 100;
+  }, [tableSettings, actualTbColumnWidths]);
+
+  const getActualFontSize = useCallback((columnName: string) => {
+    const override = tableSettings.actual.fonts[columnName];
+    if (typeof override === 'number') {
+      return override;
+    }
+    return 10;
+  }, [tableSettings]);
+
+  const getActualRowHeight = useCallback(() => {
+    return tableSettings.actual.rowHeight || 28;
+  }, [tableSettings]);
+
+  const getClassifiedRowHeight = useCallback(() => {
+    return tableSettings.classified.rowHeight || 28;
+  }, [tableSettings]);
+
+  const handleApplyClassificationRules = useCallback((rules: ClassificationRule[]) => {
+    setClassificationRules(rules);
+    setCurrentData(prev =>
+      prev.map(row => applyClassificationRules(row, rules, { businessType }))
+    );
+  }, [businessType]);
 
   const handleAddTallyGroup = useCallback((value: string, scope: 'client' | 'global') => {
     const trimmed = value.trim();
@@ -333,6 +602,69 @@ export default function FinancialReview() {
       return next;
     });
   }, [currentEngagement?.id]);
+
+  const handleReapplyAutoClassification = useCallback(() => {
+    const isPlaceholderValue = (value?: string) => {
+      const normalized = (value || '').toLowerCase().trim();
+      return !normalized ||
+        normalized === 'h2' ||
+        normalized === 'h3' ||
+        normalized === 'select h1' ||
+        normalized === 'select h1/h2' ||
+        normalized === 'select h1 h2';
+    };
+    const isGenericOtherExpense = (value?: string) => {
+      const normalized = (value || '').toLowerCase().trim();
+      return normalized.startsWith('other exp');
+    };
+
+    setCurrentData(prev => prev.map(row => {
+      const primary = (row['Primary Group'] || '').toLowerCase();
+      const parent = (row['Parent Group'] || '').toLowerCase();
+      const group = primary || parent;
+      const forceClear = group.includes('indirect expenses') || group.includes('direct expenses');
+      const shouldClear = forceClear ||
+        isPlaceholderValue(row['H2']) ||
+        isPlaceholderValue(row['H3']) ||
+        isGenericOtherExpense(row['H2']);
+      const cleared = shouldClear
+        ? { ...row, 'H2': '', 'H3': '', Auto: undefined, 'Auto Reason': undefined }
+        : { ...row, Auto: undefined, 'Auto Reason': undefined };
+      return applyClassificationRules(cleared, classificationRules, { businessType, force: true });
+    }));
+    toast({
+      title: 'Auto classification updated',
+      description: 'Reapplied auto rules to classified rows.',
+    });
+  }, [classificationRules, businessType, toast]);
+
+  useEffect(() => {
+    if (currentData.length === 0) return;
+    const normalizeValue = (value?: string) => (value || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+    const isPlaceholder = (value?: string) => {
+      const normalized = normalizeValue(value);
+      return !normalized || normalized === 'h2' || normalized === 'h3' || normalized === 'select h1/h2' || normalized === 'select h1 h2';
+    };
+    const isGeneric = (value?: string) => normalizeValue(value).startsWith('other exp');
+
+    let changed = false;
+    const next = currentData.map(row => {
+      const primary = normalizeValue(row['Primary Group']);
+      const parent = normalizeValue(row['Parent Group']);
+      const group = primary || parent;
+      const shouldAuto = (group.includes('indirect expenses') || group.includes('direct expenses')) &&
+        (isPlaceholder(row['H3']) || isGeneric(row['H2']));
+      if (!shouldAuto) return row;
+      const updated = applyClassificationRules({ ...row, Auto: undefined, 'Auto Reason': undefined }, classificationRules, { businessType, force: true });
+      if (row['H1'] !== updated['H1'] || row['H2'] !== updated['H2'] || row['H3'] !== updated['H3'] || row['Auto'] !== updated['Auto']) {
+        changed = true;
+      }
+      return updated;
+    });
+    if (changed) {
+      setCurrentData(next);
+    }
+  }, [currentData, classificationRules, businessType]);
   
   // Compute stock item counts and totals directly via useMemo (avoids infinite loop from callbacks)
   const { stockItemCount, stockTotals } = useMemo(() => {
@@ -382,9 +714,40 @@ export default function FinancialReview() {
     return filterBsplHeadsByEntityType(bsplHeads, entityType);
   }, [bsplHeads, entityType]);
 
+  const mergedBsplHeads = useMemo(() => {
+    const combined = [...DEFAULT_BSPL_HEADS];
+    bsplHeads.forEach(row => {
+      const exists = combined.some(existing =>
+        existing.H1 === row.H1 &&
+        existing.H2 === row.H2 &&
+        existing.H3 === row.H3 &&
+        (existing.Condition || '') === (row.Condition || '')
+      );
+      if (!exists) combined.push(row);
+    });
+    return combined;
+  }, [bsplHeads]);
+
   const bsplOptions = useMemo(() => {
-    return buildBsplOptions(filteredBsplHeads);
-  }, [filteredBsplHeads]);
+    return buildBsplOptions(mergedBsplHeads);
+  }, [mergedBsplHeads]);
+
+  const resolveH2Key = useCallback((h1: string | undefined, h2: string | undefined) => {
+    if (!h1 || !h2) return h2 || '';
+    const options = bsplOptions.h2Options[h1] || [];
+    const direct = options.find(option => option === h2);
+    if (direct) return direct;
+    const lower = h2.toLowerCase().trim();
+    const ciMatch = options.find(option => option.toLowerCase() === lower);
+    if (ciMatch) return ciMatch;
+    const withoutS = lower.endsWith('s') ? lower.slice(0, -1) : lower;
+    const withS = lower.endsWith('s') ? lower : `${lower}s`;
+    const singularMatch = options.find(option => option.toLowerCase() === withoutS);
+    if (singularMatch) return singularMatch;
+    const pluralMatch = options.find(option => option.toLowerCase() === withS);
+    if (pluralMatch) return pluralMatch;
+    return h2;
+  }, [bsplOptions.h2Options]);
 
   const getBalanceSignValue = useCallback((row: LedgerRow) => {
     const closing = row['Closing Balance'] || 0;
@@ -393,6 +756,10 @@ export default function FinancialReview() {
   }, []);
 
   const deriveH1FromRevenueAndBalance = useCallback((row: LedgerRow) => {
+    const primaryGroup = (row['Primary Group'] || '').toLowerCase();
+    if (primaryGroup.includes('sales accounts')) {
+      return 'Income';
+    }
     const isRevenue = row['Is Revenue'] === 'Yes';
     const signValue = getBalanceSignValue(row);
     const isDebit = signValue < 0;
@@ -409,9 +776,9 @@ export default function FinancialReview() {
 
   const filterClassifiedRows = useCallback((rows: LedgerRow[]) => {
     return rows.filter(row => {
-      const debit = row['Debit'] || 0;
-      const credit = row['Credit'] || 0;
-      return Math.abs(debit - credit) !== 0;
+      const opening = row['Opening Balance'] || 0;
+      const closing = row['Closing Balance'] || 0;
+      return opening !== 0 || closing !== 0;
     });
   }, []);
   
@@ -501,9 +868,9 @@ export default function FinancialReview() {
   
   const baseClassifiedData = useMemo(() => {
     return currentData.filter(row => {
-      const debit = row['Debit'] || 0;
-      const credit = row['Credit'] || 0;
-      return Math.abs(debit - credit) !== 0;
+      const opening = row['Opening Balance'] || 0;
+      const closing = row['Closing Balance'] || 0;
+      return opening !== 0 || closing !== 0;
     });
   }, [currentData]);
 
@@ -734,7 +1101,7 @@ export default function FinancialReview() {
             'H2': row['H2'] || '',
             'H3': row['H3'] || '',
           };
-          return applyClassificationRules(baseRow, classificationRules);
+          return applyClassificationRules(baseRow, classificationRules, { businessType });
         });
       
       // Store actual data (unclassified) - FILTERED DATA (no completely inactive ledgers)
@@ -921,7 +1288,7 @@ export default function FinancialReview() {
     const classified = [applyClassificationRules({
       ...newLine,
       'H1': deriveH1FromRevenueAndBalance(newLine),
-    }, classificationRules)];
+    }, classificationRules, { businessType })];
     
     if (newLineForm.periodType === 'current') {
       setCurrentData(prev => [...prev, classified[0]]);
@@ -1023,6 +1390,10 @@ export default function FinancialReview() {
     if (!baseRow) return;
 
     const finalUpdates: Partial<LedgerRow> = { ...updates };
+    if ('H1' in updates || 'H2' in updates || 'H3' in updates) {
+      finalUpdates['Auto'] = 'Manual';
+      finalUpdates['Auto Reason'] = undefined;
+    }
     if ('H1' in updates) {
       finalUpdates['H2'] = '';
       finalUpdates['H3'] = '';
@@ -1177,7 +1548,7 @@ export default function FinancialReview() {
           'Sheet Name': 'TB CY'
         };
         row['H1'] = deriveH1FromRevenueAndBalance(row);
-        return applyClassificationRules(row, classificationRules);
+        return applyClassificationRules(row, classificationRules, { businessType });
       });
       
       setActualData(loadedData);
@@ -1561,7 +1932,7 @@ export default function FinancialReview() {
             if (!mapped['H1']) {
               mapped['H1'] = deriveH1FromRevenueAndBalance(mapped);
             }
-            return applyClassificationRules(mapped, classificationRules);
+            return applyClassificationRules(mapped, classificationRules, { businessType });
           })
           .filter(row => {
             // Filter out rows where both opening and closing balances are 0
@@ -1948,7 +2319,17 @@ export default function FinancialReview() {
             className="h-8"
           >
             <Sparkles className="w-3 h-3 mr-1.5" />
-            Rules Bot
+            Rules Bot {classificationRules.length > 0 ? `(${classificationRules.length})` : ''}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReapplyAutoClassification}
+            disabled={currentData.length === 0}
+            className="h-8"
+          >
+            Auto Apply
           </Button>
 
           {/* Export Dropdown */}
@@ -2046,6 +2427,10 @@ export default function FinancialReview() {
               <DropdownMenuItem onClick={() => setIsBsplHeadsOpen(true)}>
                 <Settings className="w-4 h-4 mr-2" />
                 Manage BSPL Heads
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsTableSettingsOpen(true)}>
+                <Settings className="w-4 h-4 mr-2" />
+                Table Settings
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleSave} disabled={currentData.length === 0}>
                 <Save className="w-4 h-4 mr-2" />
@@ -2216,9 +2601,9 @@ export default function FinancialReview() {
                   </TableHead>
                   <TableHead
                     className="sticky top-0 bg-white relative"
-                    style={{ width: actualTbColumnWidths['Ledger Name'], left: actualStickyOffsets.ledger, zIndex: 19 }}
+                    style={{ width: getActualColumnWidth('Ledger Name'), left: actualStickyOffsets.ledger, zIndex: 19 }}
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Ledger Name')}px` }}>
                       Ledger Name
                       <ColumnFilter
                         column="Ledger Name"
@@ -2236,8 +2621,8 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="top-0 bg-white relative" style={{ width: actualTbColumnWidths['Parent Group'] }}>
-                    <div className="flex items-center gap-1">
+                  <TableHead className="top-0 bg-white relative" style={{ width: getActualColumnWidth('Parent Group') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Parent Group')}px` }}>
                       Parent Group
                       <ColumnFilter
                         column="Parent Group"
@@ -2255,8 +2640,8 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="top-0 bg-white relative" style={{ width: actualTbColumnWidths['Primary Group'] }}>
-                    <div className="flex items-center gap-1">
+                  <TableHead className="top-0 bg-white relative" style={{ width: getActualColumnWidth('Primary Group') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Primary Group')}px` }}>
                       Primary Group
                       <ColumnFilter
                         column="Primary Group"
@@ -2274,8 +2659,8 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Opening Balance'] }}>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getActualColumnWidth('Opening Balance') }}>
+                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Opening Balance')}px` }}>
                       Opening
                       <ColumnFilter
                         column="Opening Balance"
@@ -2294,8 +2679,8 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Debit'] }}>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getActualColumnWidth('Debit') }}>
+                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Debit')}px` }}>
                       Debit
                       <ColumnFilter
                         column="Debit"
@@ -2314,8 +2699,8 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Credit'] }}>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getActualColumnWidth('Credit') }}>
+                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Credit')}px` }}>
                       Credit
                       <ColumnFilter
                         column="Credit"
@@ -2334,8 +2719,8 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: actualTbColumnWidths['Closing Balance'] }}>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getActualColumnWidth('Closing Balance') }}>
+                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Closing Balance')}px` }}>
                       Closing
                       <ColumnFilter
                         column="Closing Balance"
@@ -2354,8 +2739,8 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: actualTbColumnWidths['Is Revenue'] }}>
-                    <div className="flex items-center gap-1">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Is Revenue') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Is Revenue')}px` }}>
                       Is Revenue
                       <ColumnFilter
                         column="Is Revenue"
@@ -2375,11 +2760,6 @@ export default function FinancialReview() {
                   </TableHead>
                 </TableRow>
               </TableHeader>
-              <datalist id="h1-options">
-                {bsplOptions.h1Options.map(option => (
-                  <option key={option} value={option} />
-                ))}
-              </datalist>
               <TableBody>
                 {filteredActualData.length === 0 ? (
                   <TableRow>
@@ -2401,6 +2781,7 @@ export default function FinancialReview() {
                           isSelected && "bg-blue-100/50",
                           "cursor-pointer hover:bg-gray-50"
                         )}
+                        style={{ height: `${getActualRowHeight()}px` }}
                         onClick={(e) => toggleRowSelection(originalIndex, e)}
                       >
                         <TableCell className="sticky left-0 bg-white z-10 p-0" style={{ left: actualStickyOffsets.selection, width: 32 }}>
@@ -2416,38 +2797,38 @@ export default function FinancialReview() {
                         </TableCell>
                         <TableCell
                           className="font-medium sticky bg-white z-10 truncate"
-                          style={{ left: actualStickyOffsets.ledger, width: actualTbColumnWidths['Ledger Name'] }}
+                          style={{ left: actualStickyOffsets.ledger, width: getActualColumnWidth('Ledger Name'), fontSize: `${getActualFontSize('Ledger Name')}px` }}
                           title={row['Ledger Name']}
                         >
                           {row['Ledger Name']}
                         </TableCell>
                         <TableCell
-                          className="text-sm text-gray-600 max-w-[180px] truncate"
-                          style={{ width: actualTbColumnWidths['Parent Group'] }}
+                          className="text-gray-600 max-w-[180px] truncate"
+                          style={{ width: getActualColumnWidth('Parent Group'), fontSize: `${getActualFontSize('Parent Group')}px` }}
                           title={row['Parent Group']}
                         >
                           {row['Parent Group']}
                         </TableCell>
                         <TableCell
-                          className="text-sm max-w-[180px] truncate"
-                          style={{ width: actualTbColumnWidths['Primary Group'] }}
+                          className="max-w-[180px] truncate"
+                          style={{ width: getActualColumnWidth('Primary Group'), fontSize: `${getActualFontSize('Primary Group')}px` }}
                           title={row['Primary Group']}
                         >
                           {row['Primary Group']}
                         </TableCell>
-                        <TableCell className="text-right text-sm" style={{ width: actualTbColumnWidths['Opening Balance'] }}>
+                        <TableCell className="text-right" style={{ width: getActualColumnWidth('Opening Balance'), fontSize: `${getActualFontSize('Opening Balance')}px` }}>
                           {formatNumber(row['Opening Balance'])}
                         </TableCell>
-                        <TableCell className="text-right text-sm" style={{ width: actualTbColumnWidths['Debit'] }}>
+                        <TableCell className="text-right" style={{ width: getActualColumnWidth('Debit'), fontSize: `${getActualFontSize('Debit')}px` }}>
                           {formatNumber(row['Debit'])}
                         </TableCell>
-                        <TableCell className="text-right text-sm" style={{ width: actualTbColumnWidths['Credit'] }}>
+                        <TableCell className="text-right" style={{ width: getActualColumnWidth('Credit'), fontSize: `${getActualFontSize('Credit')}px` }}>
                           {formatNumber(row['Credit'])}
                         </TableCell>
-                        <TableCell className="text-right text-sm font-medium" style={{ width: actualTbColumnWidths['Closing Balance'] }}>
+                        <TableCell className="text-right font-medium" style={{ width: getActualColumnWidth('Closing Balance'), fontSize: `${getActualFontSize('Closing Balance')}px` }}>
                           {formatNumber(row['Closing Balance'])}
                         </TableCell>
-                        <TableCell className="text-sm" style={{ width: actualTbColumnWidths['Is Revenue'] }}>
+                        <TableCell style={{ width: getActualColumnWidth('Is Revenue'), fontSize: `${getActualFontSize('Is Revenue')}px` }}>
                           {row['Is Revenue']}
                         </TableCell>
                       </TableRow>
@@ -2461,8 +2842,8 @@ export default function FinancialReview() {
 
             {/* CLASSIFIED TRIAL BALANCE TAB */}
             <TabsContent value="classified-tb" className="mt-0 p-1">
-              <div className="border rounded-lg overflow-hidden">
-            <Table className="table-fixed">
+              <div className="border rounded-lg overflow-x-auto h-[calc(100vh-300px)]">
+            <Table className="table-fixed w-full border-collapse">
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
                   <TableHead className="w-8 sticky top-0 bg-white p-0" style={{ left: classifiedStickyOffsets.selection, zIndex: 20 }}>
@@ -2485,9 +2866,9 @@ export default function FinancialReview() {
                   </TableHead>
                   <TableHead
                     className="sticky top-0 bg-white relative"
-                    style={{ width: classifiedTbColumnWidths['Ledger Name'], left: classifiedStickyOffsets.ledger, zIndex: 19 }}
+                    style={{ width: getColumnWidth('Ledger Name'), left: classifiedStickyOffsets.ledger, zIndex: 19 }}
                   >
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Ledger Name')}px` }}>
                       Ledger Name
                       <ColumnFilter
                         column="Ledger Name"
@@ -2498,15 +2879,9 @@ export default function FinancialReview() {
                         onSort={(dir) => handleClassifiedTbSort('Ledger Name', dir)}
                       />
                     </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('Ledger Name', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
                   </TableHead>
-                  <TableHead className="top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Parent Group'] }}>
-                    <div className="flex items-center gap-1">
+                  <TableHead className="top-0 bg-white relative" style={{ width: getColumnWidth('Parent Group') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Parent Group')}px` }}>
                       Parent Group
                       <ColumnFilter
                         column="Parent Group"
@@ -2517,15 +2892,9 @@ export default function FinancialReview() {
                         onSort={(dir) => handleClassifiedTbSort('Parent Group', dir)}
                       />
                     </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('Parent Group', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
                   </TableHead>
-                  <TableHead className="top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Primary Group'] }}>
-                    <div className="flex items-center gap-1">
+                  <TableHead className="top-0 bg-white relative" style={{ width: getColumnWidth('Primary Group') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Primary Group')}px` }}>
                       Primary Group
                       <ColumnFilter
                         column="Primary Group"
@@ -2536,15 +2905,9 @@ export default function FinancialReview() {
                         onSort={(dir) => handleClassifiedTbSort('Primary Group', dir)}
                       />
                     </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('Primary Group', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Opening Balance'] }}>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getColumnWidth('Opening Balance') }}>
+                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getColumnFontSize('Opening Balance')}px` }}>
                       Opening
                       <ColumnFilter
                         column="Opening Balance"
@@ -2556,15 +2919,9 @@ export default function FinancialReview() {
                         isNumeric
                       />
                     </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('Opening Balance', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Closing Balance'] }}>
-                    <div className="flex items-center justify-end gap-1">
+                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getColumnWidth('Closing Balance') }}>
+                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getColumnFontSize('Closing Balance')}px` }}>
                       Closing
                       <ColumnFilter
                         column="Closing Balance"
@@ -2576,15 +2933,9 @@ export default function FinancialReview() {
                         isNumeric
                       />
                     </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('Closing Balance', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['H1'] }}>
-                    <div className="flex items-center gap-1">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('H1') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('H1')}px` }}>
                       H1
                       <ColumnFilter
                         column="H1"
@@ -2595,15 +2946,9 @@ export default function FinancialReview() {
                         onSort={(dir) => handleClassifiedTbSort('H1', dir)}
                       />
                     </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('H1', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['H2'] }}>
-                    <div className="flex items-center gap-1">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('H2') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('H2')}px` }}>
                       H2
                       <ColumnFilter
                         column="H2"
@@ -2614,15 +2959,9 @@ export default function FinancialReview() {
                         onSort={(dir) => handleClassifiedTbSort('H2', dir)}
                       />
                     </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('H2', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['H3'] }}>
-                    <div className="flex items-center gap-1">
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('H3') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('H3')}px` }}>
                       H3
                       <ColumnFilter
                         column="H3"
@@ -2631,40 +2970,20 @@ export default function FinancialReview() {
                         onFilterChange={(values) => handleClassifiedTbFilterChange('H3', values)}
                         sortDirection={classifiedTbSortColumn === 'H3' ? classifiedTbSortDirection : null}
                         onSort={(dir) => handleClassifiedTbSort('H3', dir)}
-                    />
-                  </div>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: classifiedTbColumnWidths['Notes'] }}>
-                    <div className="flex items-center gap-1">
-                      Notes
-                      <ColumnFilter
-                        column="Notes"
-                        values={getClassifiedTbColumnValues('Notes')}
-                        selectedValues={classifiedTbColumnFilters['Notes'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('Notes', values)}
-                        sortDirection={classifiedTbSortColumn === 'Notes' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('Notes', dir)}
                       />
                     </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('Notes', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
                   </TableHead>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => classifiedTbHandleMouseDown('H3', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('Auto') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Auto')}px` }}>
+                      Auto
+                    </div>
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                       {currentData.length === 0 
                         ? "No classified data. Import from Tally to get started."
                         : "No results match your search criteria."}
@@ -2687,6 +3006,7 @@ export default function FinancialReview() {
                           isFocused && "ring-2 ring-blue-400 ring-inset",
                           "cursor-pointer hover:bg-gray-50 transition-colors"
                         )}
+                        style={{ height: `${getClassifiedRowHeight()}px` }}
                         onClick={(e) => {
                           setFocusedClassifiedRowIndex(originalIndex);
                           toggleRowSelection(originalIndex, e);
@@ -2694,7 +3014,7 @@ export default function FinancialReview() {
                         tabIndex={0}
                         onFocus={() => setFocusedClassifiedRowIndex(originalIndex)}
                       >
-                        <TableCell onClick={(e) => e.stopPropagation()} className="sticky left-0 bg-white z-10 p-0" style={{ left: classifiedStickyOffsets.selection, width: 32 }}>
+                        <TableCell onClick={(e) => e.stopPropagation()} className="sticky left-0 bg-white z-10 p-0" style={{ left: classifiedStickyOffsets.selection, width: 28 }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -2706,84 +3026,96 @@ export default function FinancialReview() {
                           />
                         </TableCell>
                         <TableCell
-                          className="font-medium text-sm sticky bg-white z-10 truncate"
-                          style={{ left: classifiedStickyOffsets.ledger, width: classifiedTbColumnWidths['Ledger Name'] }}
+                          className="font-medium sticky bg-white z-10 truncate px-2 py-1"
+                          style={{ left: classifiedStickyOffsets.ledger, width: getColumnWidth('Ledger Name'), fontSize: `${getColumnFontSize('Ledger Name')}px` }}
                           title={row['Ledger Name']}
                         >
                           {row['Ledger Name']}
                         </TableCell>
                         <TableCell
-                          className="text-xs text-gray-600 max-w-[180px] truncate"
-                          style={{ width: classifiedTbColumnWidths['Parent Group'] }}
+                          className="text-gray-600 truncate px-2 py-1"
+                          style={{ width: getColumnWidth('Parent Group'), fontSize: `${getColumnFontSize('Parent Group')}px` }}
                           title={row['Parent Group'] || row['Primary Group'] || '-'}
                         >
                           {row['Parent Group'] || row['Primary Group'] || '-'}
                         </TableCell>
                         <TableCell
-                          className="text-xs max-w-[180px] truncate"
-                          style={{ width: classifiedTbColumnWidths['Primary Group'] }}
+                          className="truncate px-2 py-1"
+                          style={{ width: getColumnWidth('Primary Group'), fontSize: `${getColumnFontSize('Primary Group')}px` }}
                           title={row['Primary Group']}
                         >
                           {row['Primary Group']}
                         </TableCell>
-                        <TableCell className="text-right text-sm" style={{ width: classifiedTbColumnWidths['Opening Balance'] }}>
+                        <TableCell className="text-right px-2 py-1" style={{ width: getColumnWidth('Opening Balance'), fontSize: `${getColumnFontSize('Opening Balance')}px` }}>
                           {formatNumber(row['Opening Balance'])}
                         </TableCell>
-                        <TableCell className="text-right text-sm font-medium" style={{ width: classifiedTbColumnWidths['Closing Balance'] }}>
+                        <TableCell className="text-right font-medium px-2 py-1" style={{ width: getColumnWidth('Closing Balance'), fontSize: `${getColumnFontSize('Closing Balance')}px` }}>
                           {formatNumber(row['Closing Balance'])}
                         </TableCell>
-                        <TableCell className="text-xs" style={{ width: classifiedTbColumnWidths['H1'] }}>
-                          <Input
+                        <TableCell className="px-2 py-1" style={{ width: getColumnWidth('H1'), fontSize: `${getColumnFontSize('H1')}px` }}>
+                          <Select
                             value={row['H1'] || ''}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => updateRowAtIndex(originalIndex, { 'H1': e.target.value })}
-                            className="h-6 text-xs"
-                            placeholder="H1"
-                            list="h1-options"
-                          />
+                            onValueChange={(value) => updateRowAtIndex(originalIndex, { 'H1': value, 'H2': '', 'H3': '' })}
+                          >
+                            <SelectTrigger className="h-4 px-1" style={{ fontSize: `${getColumnFontSize('H1')}px` }}>
+                              <SelectValue placeholder="Select H1" />
+                            </SelectTrigger>
+                            <SelectContent position="popper" className="z-[9999]" sideOffset={4}>
+                              {bsplOptions.h1Options.map(option => (
+                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
-                        <TableCell className="text-xs" style={{ width: classifiedTbColumnWidths['H2'] }}>
-                          <Input
+                        <TableCell className="px-2 py-1 truncate text-left" style={{ width: getColumnWidth('H2'), fontSize: `${getColumnFontSize('H2')}px` }}>
+                          <InlineCombobox
                             value={row['H2'] || ''}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => updateRowAtIndex(originalIndex, { 'H2': e.target.value })}
-                            className="h-6 text-xs"
+                            options={[
+                              ...(bsplOptions.h2Options[row['H1'] || ''] || []),
+                              'User_Defined',
+                            ]}
                             placeholder={row['H1'] ? 'H2' : 'Select H1'}
                             disabled={!row['H1']}
-                            list={`h2-options-${row['Composite Key'] || originalIndex}`}
+                            onChange={(value) => updateRowAtIndex(originalIndex, { 'H2': value })}
+                            className="h-4 px-1 w-full text-gray-900 leading-none py-0"
+                            inputStyle={{ fontSize: `${getColumnFontSize('H2')}px`, textAlign: 'left' }}
                           />
-                          <datalist id={`h2-options-${row['Composite Key'] || originalIndex}`}>
-                            {(bsplOptions.h2Options[row['H1'] || ''] || []).map(option => (
-                              <option key={option} value={option} />
-                            ))}
-                            <option value="User_Defined" />
-                          </datalist>
                         </TableCell>
-                        <TableCell className="text-xs" style={{ width: classifiedTbColumnWidths['H3'] }}>
-                          <Input
-                            value={row['H3'] || ''}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => updateRowAtIndex(originalIndex, { 'H3': e.target.value })}
-                            className="h-6 text-xs"
-                            placeholder={row['H1'] && row['H2'] ? 'H3' : 'Select H1/H2'}
-                            disabled={!row['H1'] || !row['H2']}
-                            list={`h3-options-${row['Composite Key'] || originalIndex}`}
-                          />
-                          <datalist id={`h3-options-${row['Composite Key'] || originalIndex}`}>
-                            {((bsplOptions.h3Options[row['H1'] || ''] || {})[row['H2'] || ''] || []).map(option => (
-                              <option key={option} value={option} />
-                            ))}
-                            <option value="User_Defined" />
-                          </datalist>
+                        <TableCell className="px-2 py-1 truncate text-left" style={{ width: getColumnWidth('H3'), fontSize: `${getColumnFontSize('H3')}px` }}>
+                          {(() => {
+                            const resolvedH2 = resolveH2Key(row['H1'], row['H2']);
+                            const options = (bsplOptions.h3Options[row['H1'] || ''] || {})[resolvedH2 || row['H2'] || ''] || [];
+                            return (
+                              <>
+                                <InlineCombobox
+                                  value={row['H3'] || ''}
+                                  options={[...options, 'User_Defined']}
+                                  placeholder={row['H1'] && row['H2'] ? 'H3' : 'Select H1/H2'}
+                                  disabled={!row['H1'] || !row['H2']}
+                                  onChange={(value) => updateRowAtIndex(originalIndex, { 'H3': value })}
+                                  className="h-4 px-1 w-full text-gray-900 leading-none py-0"
+                                  inputStyle={{ fontSize: `${getColumnFontSize('H3')}px`, textAlign: 'left' }}
+                                />
+                              </>
+                            );
+                          })()}
                         </TableCell>
-                        <TableCell className="text-xs" style={{ width: classifiedTbColumnWidths['Notes'] }}>
-                          <Input
-                            value={row['Notes'] || ''}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => updateRowAtIndex(originalIndex, { Notes: e.target.value })}
-                            className="h-6 text-xs"
-                            placeholder="Notes"
-                          />
+                        <TableCell className="px-2 py-1" style={{ width: getColumnWidth('Auto'), fontSize: `${getColumnFontSize('Auto')}px` }}>
+                          {row['Auto'] === 'Yes' ? (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <Badge variant="secondary" title="Auto classified" className="h-4 px-1 text-[10px]">
+                                Auto
+                              </Badge>
+                            </div>
+                          ) : row['Auto'] === 'Manual' ? (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <Badge variant="outline" title="Manually classified" className="h-4 px-1 text-[10px]">
+                                Manual
+                              </Badge>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
@@ -2803,6 +3135,7 @@ export default function FinancialReview() {
                 onSelectionChange={setStockSelectedCount}
                 bulkUpdateRequestId={stockBulkUpdateRequestId}
                 deleteSelectedRequestId={stockDeleteRequestId}
+                tableSettings={tableSettings.stock}
               />
             </TabsContent>
             
@@ -2810,10 +3143,10 @@ export default function FinancialReview() {
           </Tabs>
         </div>
 
-        {/* Status Bar (Excel-style) */}
-        <div className="flex items-center justify-between px-4 py-1.5 bg-gray-100 border-t text-xs text-muted-foreground">
-          <div className="flex items-center gap-4">
-            <span>Ready</span>
+      {/* Status Bar (Excel-style) */}
+      <div className="flex items-center justify-between px-4 py-1.5 bg-gray-100 border-t text-xs text-muted-foreground">
+        <div className="flex items-center gap-4">
+          <span>Ready</span>
             {currentData.length > 0 && (
               <>
                 <span>|</span>
@@ -2826,10 +3159,242 @@ export default function FinancialReview() {
           </div>
           <div className="flex items-center gap-2">
             <kbd className="px-1.5 py-0.5 text-xs font-semibold text-gray-600 bg-white border border-gray-300 rounded">Ctrl+/</kbd>
-            <span>for shortcuts</span>
-          </div>
+          <span>for shortcuts</span>
         </div>
       </div>
+    </div>
+    
+      {/* Table Settings Dialog */}
+      <Dialog open={isTableSettingsOpen} onOpenChange={setIsTableSettingsOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Table Settings</DialogTitle>
+            <DialogDescription>
+              Adjust column widths, font sizes, and row heights for each tab.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 text-xs">
+            <div className="rounded-md border p-3">
+              <div className="mb-2 font-semibold">Actual TB</div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-24">Row Height</span>
+                <input
+                  type="number"
+                  min="20"
+                  max="40"
+                  value={tableSettings.actual.rowHeight}
+                  onChange={(e) =>
+                    setTableSettings((prev) => ({
+                      ...prev,
+                      actual: { ...prev.actual, rowHeight: parseInt(e.target.value, 10) || prev.actual.rowHeight },
+                    }))
+                  }
+                  className="h-6 w-20 rounded border px-2"
+                />
+                <span>px</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {actualColumns.map((column) => (
+                  <div key={column} className="flex items-center gap-2">
+                    <span className="w-24 truncate" title={column}>{column}</span>
+                    <label className="flex items-center gap-1">
+                      <span>W</span>
+                      <input
+                        type="number"
+                        min="40"
+                        max="260"
+                        value={tableSettings.actual.widths[column] ?? getActualColumnWidth(column)}
+                        onChange={(e) =>
+                          setTableSettings((prev) => ({
+                            ...prev,
+                            actual: {
+                              ...prev.actual,
+                              widths: {
+                                ...prev.actual.widths,
+                                [column]: parseInt(e.target.value, 10) || prev.actual.widths[column],
+                              },
+                            },
+                          }))
+                        }
+                        className="h-6 w-16 rounded border px-2"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <span>F</span>
+                      <input
+                        type="number"
+                        min="8"
+                        max="14"
+                        value={tableSettings.actual.fonts[column] ?? getActualFontSize(column)}
+                        onChange={(e) =>
+                          setTableSettings((prev) => ({
+                            ...prev,
+                            actual: {
+                              ...prev.actual,
+                              fonts: {
+                                ...prev.actual.fonts,
+                                [column]: parseInt(e.target.value, 10) || prev.actual.fonts[column],
+                              },
+                            },
+                          }))
+                        }
+                        className="h-6 w-12 rounded border px-2"
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-md border p-3">
+              <div className="mb-2 font-semibold">Classified TB</div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-24">Row Height</span>
+                <input
+                  type="number"
+                  min="20"
+                  max="40"
+                  value={tableSettings.classified.rowHeight}
+                  onChange={(e) =>
+                    setTableSettings((prev) => ({
+                      ...prev,
+                      classified: { ...prev.classified, rowHeight: parseInt(e.target.value, 10) || prev.classified.rowHeight },
+                    }))
+                  }
+                  className="h-6 w-20 rounded border px-2"
+                />
+                <span>px</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {classifiedColumns.map((column) => (
+                  <div key={column} className="flex items-center gap-2">
+                    <span className="w-24 truncate" title={column}>{column}</span>
+                    <label className="flex items-center gap-1">
+                      <span>W</span>
+                      <input
+                        type="number"
+                        min="40"
+                        max="260"
+                        value={tableSettings.classified.widths[column] ?? getColumnWidth(column)}
+                        onChange={(e) =>
+                          setTableSettings((prev) => ({
+                            ...prev,
+                            classified: {
+                              ...prev.classified,
+                              widths: {
+                                ...prev.classified.widths,
+                                [column]: parseInt(e.target.value, 10) || prev.classified.widths[column],
+                              },
+                            },
+                          }))
+                        }
+                        className="h-6 w-16 rounded border px-2"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <span>F</span>
+                      <input
+                        type="number"
+                        min="8"
+                        max="14"
+                        value={tableSettings.classified.fonts[column] ?? getColumnFontSize(column)}
+                        onChange={(e) =>
+                          setTableSettings((prev) => ({
+                            ...prev,
+                            classified: {
+                              ...prev.classified,
+                              fonts: {
+                                ...prev.classified.fonts,
+                                [column]: parseInt(e.target.value, 10) || prev.classified.fonts[column],
+                              },
+                            },
+                          }))
+                        }
+                        className="h-6 w-12 rounded border px-2"
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-md border p-3">
+              <div className="mb-2 font-semibold">Stock Items</div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-24">Row Height</span>
+                <input
+                  type="number"
+                  min="20"
+                  max="40"
+                  value={tableSettings.stock.rowHeight}
+                  onChange={(e) =>
+                    setTableSettings((prev) => ({
+                      ...prev,
+                      stock: { ...prev.stock, rowHeight: parseInt(e.target.value, 10) || prev.stock.rowHeight },
+                    }))
+                  }
+                  className="h-6 w-20 rounded border px-2"
+                />
+                <span>px</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {stockColumns.map((column) => (
+                  <div key={column} className="flex items-center gap-2">
+                    <span className="w-24 truncate" title={column}>{column}</span>
+                    <label className="flex items-center gap-1">
+                      <span>W</span>
+                      <input
+                        type="number"
+                        min="40"
+                        max="260"
+                        value={tableSettings.stock.widths[column] ?? DEFAULT_TABLE_SETTINGS.stock.widths[column]}
+                        onChange={(e) =>
+                          setTableSettings((prev) => ({
+                            ...prev,
+                            stock: {
+                              ...prev.stock,
+                              widths: {
+                                ...prev.stock.widths,
+                                [column]: parseInt(e.target.value, 10) || prev.stock.widths[column],
+                              },
+                            },
+                          }))
+                        }
+                        className="h-6 w-16 rounded border px-2"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <span>F</span>
+                      <input
+                        type="number"
+                        min="8"
+                        max="14"
+                        value={tableSettings.stock.fonts[column] ?? DEFAULT_TABLE_SETTINGS.stock.fonts[column]}
+                        onChange={(e) =>
+                          setTableSettings((prev) => ({
+                            ...prev,
+                            stock: {
+                              ...prev.stock,
+                              fonts: {
+                                ...prev.stock.fonts,
+                                [column]: parseInt(e.target.value, 10) || prev.stock.fonts[column],
+                              },
+                            },
+                          }))
+                        }
+                        className="h-6 w-12 rounded border px-2"
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTableSettingsOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       
       {/* Consolidated Setup Dialog - Entity Type + Business Type + Period + Stock Items */}
       <Dialog open={isEntityDialogOpen} onOpenChange={setIsEntityDialogOpen}>
@@ -2960,7 +3525,9 @@ export default function FinancialReview() {
         open={isBsplHeadsOpen}
         onOpenChange={setIsBsplHeadsOpen}
         heads={bsplHeads}
+        defaultHeads={DEFAULT_BSPL_HEADS}
         onSave={handleSaveBsplHeads}
+        onRestore={handleRestoreBsplHeads}
       />
 
       <ClassificationRulesBot
@@ -3144,4 +3711,3 @@ export default function FinancialReview() {
     </div>
   );
 }
-
