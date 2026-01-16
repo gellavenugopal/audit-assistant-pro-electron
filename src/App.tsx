@@ -38,6 +38,7 @@ import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from "./pages/Gstr1Dashboard";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
+import SrmPro from "./pages/SrmPro";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
 
 const queryClient = new QueryClient();
@@ -275,6 +276,16 @@ const App = () => (
                         <Feedback />
                       </MainLayout>
                     </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/srm-pro"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <SrmPro />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
                   }
                 />
                 <Route
