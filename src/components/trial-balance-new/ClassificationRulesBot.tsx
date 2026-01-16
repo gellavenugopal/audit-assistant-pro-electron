@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import {
   Dialog,
   DialogContent,
@@ -60,6 +61,7 @@ export function ClassificationRulesBot({
 }: Props) {
   const [rows, setRows] = useState<ClassificationRule[]>(rules);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<ClassificationRule>({
     ...emptyDraft,
     scope: defaultScope,
@@ -130,6 +132,55 @@ export function ClassificationRulesBot({
     setRows(nextRows);
     onSave(nextRows);
     onOpenChange(false);
+  };
+
+  const handleExportRules = () => {
+    const exportRows = rows.map(rule => ({
+      Scope: rule.scope,
+      'Ledger Contains': rule.ledgerNameContains || '',
+      'Primary Contains': rule.primaryGroupContains || '',
+      'Parent Contains': rule.parentGroupContains || '',
+      H1: rule.h1,
+      H2: rule.h2,
+      H3: rule.h3,
+    }));
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Rules');
+    XLSX.writeFile(workbook, 'classification_rules.xlsx');
+  };
+
+  const handleImportRules = async (file: File) => {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const jsonRows = XLSX.utils.sheet_to_json(worksheet);
+
+    const imported: ClassificationRule[] = jsonRows
+      .map((row: any, index: number) => {
+        const scopeValue = String(row.Scope || row.scope || defaultScope).toLowerCase();
+        const scope: RuleScope = scopeValue === 'global' ? 'global' : 'client';
+        const h1 = String(row.H1 || row.h1 || '').trim();
+        const h2 = String(row.H2 || row.h2 || '').trim();
+        const h3 = String(row.H3 || row.h3 || '').trim();
+        if (!h1) return null;
+        return {
+          id: `rule_${Date.now()}_${index}`,
+          scope,
+          ledgerNameContains: String(row['Ledger Contains'] || row.ledgerContains || row.ledger || '').trim(),
+          primaryGroupContains: String(row['Primary Contains'] || row.primaryContains || row.primary || '').trim(),
+          parentGroupContains: String(row['Parent Contains'] || row.parentContains || row.parent || '').trim(),
+          h1,
+          h2,
+          h3,
+        } as ClassificationRule;
+      })
+      .filter(Boolean) as ClassificationRule[];
+
+    if (imported.length === 0) return;
+    setRows(imported);
+    onSave(imported);
   };
 
   return (
@@ -294,22 +345,33 @@ export function ClassificationRulesBot({
             )}
           </div>
         </div>
-
-        <div className="border rounded-md p-3 text-xs text-muted-foreground">
-          <div className="font-medium text-foreground text-sm">Predefined Auto Rules</div>
-          <div className="mt-2 grid grid-cols-1 gap-1">
-            <div>Sales Accounts → H2: Revenue from Operations (H3 by ledger keywords)</div>
-            <div>Direct/Indirect Incomes → H2: Other Income (H3 by ledger keywords)</div>
-            <div>Purchase Accounts → Trading: Purchases of Stock in Trade; Others: Cost of Materials Consumed / Purchase of Raw Materials</div>
-            <div>Direct Expenses → Trading: Other Expense; Others: Cost of Materials Consumed / Other Direct expenses</div>
-            <div>Stock-in-Hand (Trading) → Change in Inventories</div>
-            <div>Indirect Expenses → Finance Costs / Depreciation & Amortisation / Employee Benefits / Tax / Other Expense (by keywords)</div>
-          </div>
-        </div>
-
         <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
           <span>Saved Rules: {rows.length}</span>
-          {rows.length === 0 && <span>Add a rule above to see it here.</span>}
+          <div className="flex items-center gap-2">
+            {rows.length === 0 && <span>Add a rule above to see it here.</span>}
+            <Button variant="outline" size="sm" onClick={handleExportRules}>
+              Export Rules
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Import Rules
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                handleImportRules(file);
+                e.currentTarget.value = '';
+              }}
+            />
+          </div>
         </div>
 
         <div className="border rounded-md overflow-hidden">

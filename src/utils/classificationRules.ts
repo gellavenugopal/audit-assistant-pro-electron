@@ -16,6 +16,7 @@ export type ClassificationRule = {
 export type ClassificationContext = {
   businessType?: string;
   force?: boolean;
+  entityType?: string;
 };
 
 function normalize(value?: string): string {
@@ -26,8 +27,43 @@ function normalize(value?: string): string {
     .trim();
 }
 
+function normalizeEntity(value?: string): string {
+  return normalize(value).replace(/\s+/g, ' ');
+}
+
+function isCompanyEntity(entityType?: string): boolean {
+  const value = normalizeEntity(entityType);
+  return value.includes('private limited') ||
+    value.includes('public limited') ||
+    value.includes('one person company') ||
+    value.includes('opc');
+}
+
+function isPartnershipEntity(entityType?: string): boolean {
+  const value = normalizeEntity(entityType);
+  return value.includes('partnership') || value.includes('limited liability partnership') || value.includes('llp');
+}
+
+function normalizeForMatch(value?: string): string {
+  return (value || '')
+    .toString()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function matchesPhrase(value: string, phrase: string): boolean {
+  if (!value || !phrase) return false;
+  const haystack = normalizeForMatch(value);
+  const needle = normalizeForMatch(phrase);
+  if (!needle) return false;
+  const pattern = new RegExp(`(^|\\s)${needle.replace(/\s+/g, '\\s+')}(\\s|$)`, 'i');
+  return pattern.test(haystack);
+}
+
 function hasAny(value: string, needles: string[]): boolean {
-  return needles.some(needle => value.includes(needle));
+  return needles.some(needle => matchesPhrase(value, needle));
 }
 
 function addAutoNote(row: LedgerRow, reason: string): LedgerRow {
@@ -35,71 +71,71 @@ function addAutoNote(row: LedgerRow, reason: string): LedgerRow {
 }
 
 function matchesWord(value: string, word: string): boolean {
-  const pattern = new RegExp(`\\b${word}\\b`, 'i');
-  return pattern.test(value);
+  return matchesPhrase(value, word);
 }
 
 function matchesGroup(value: string, phrase: string): boolean {
-  if (!value) return false;
-  const escaped = phrase
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\s+/g, '\\s+');
-  const pattern = new RegExp(`\\b${escaped}\\b`, 'i');
-  return pattern.test(value);
+  return matchesPhrase(value, phrase);
 }
 
-function getSalesAccountsH3(ledger: string): string {
-  if (hasAny(ledger, ['professional', 'service', 'services'])) return 'Sale of services';
-  if (hasAny(ledger, ['scrap'])) return 'Scrap sales';
-  if (hasAny(ledger, ['export'])) return 'Export incentives';
-  if (hasAny(ledger, ['grant'])) return 'Government grants';
-  if (hasAny(ledger, ['commission'])) return 'Commission income';
-  if (hasAny(ledger, ['rent', 'rental'])) return 'Rental Income';
-  if (hasAny(ledger, ['royalty'])) return 'Royalty income';
-  if (hasAny(ledger, ['know', 'how'])) return 'Technical know how fees';
-  if (hasAny(ledger, ['insurance'])) return 'Insurance claims';
-  if (hasAny(ledger, ['misc'])) return 'Miscellaneous receipts';
+function hasAnyInLedgerOrParent(ledger: string, parent: string, needles: string[]): boolean {
+  return hasAny(ledger, needles) || hasAny(parent, needles);
+}
+
+function matchesPhraseInLedgerOrParent(ledger: string, parent: string, phrase: string): boolean {
+  return matchesPhrase(ledger, phrase) || matchesPhrase(parent, phrase);
+}
+
+function getSalesAccountsH3(ledger: string, parent: string): string {
+  if (hasAnyInLedgerOrParent(ledger, parent, ['professional', 'service', 'services'])) return 'Sale of services';
+  if (hasAnyInLedgerOrParent(ledger, parent, ['scrap'])) return 'Scrap sales';
+  if (hasAnyInLedgerOrParent(ledger, parent, ['export'])) return 'Export incentives';
+  if (hasAnyInLedgerOrParent(ledger, parent, ['grant'])) return 'Government grants';
+  if (hasAnyInLedgerOrParent(ledger, parent, ['commission'])) return 'Commission income';
+  if (hasAnyInLedgerOrParent(ledger, parent, ['rent', 'rental'])) return 'Rental Income';
+  if (hasAnyInLedgerOrParent(ledger, parent, ['royalty'])) return 'Royalty income';
+  if (matchesPhraseInLedgerOrParent(ledger, parent, 'know how')) return 'Technical know how fees';
+  if (hasAnyInLedgerOrParent(ledger, parent, ['insurance'])) return 'Insurance claims';
+  if (hasAnyInLedgerOrParent(ledger, parent, ['misc'])) return 'Miscellaneous receipts';
   return 'Sale of products';
 }
 
-function getOtherIncomeH3(ledger: string): string {
-  const isInterest = ledger.includes('interest') || matchesWord(ledger, 'int');
+function getOtherIncomeH3(ledger: string, parent: string): string {
+  const isInterest = hasAnyInLedgerOrParent(ledger, parent, ['interest', 'int']);
   if (isInterest) {
-    if (hasAny(ledger, ['income tax', 'tax refund', 'tax'])) {
+    if (hasAnyInLedgerOrParent(ledger, parent, ['income tax', 'tax refund', 'tax'])) {
       return 'Interest income on Tax refunds';
     }
-    if (hasAny(ledger, ['bank', 'fd', 'fixed deposit', 'fixeddeposit'])) {
+    if (hasAnyInLedgerOrParent(ledger, parent, ['bank', 'fd', 'fixed deposit', 'fixeddeposit'])) {
       return 'Interest income on Bank deposits';
     }
-    if (hasAny(ledger, ['non-current investment', 'non current investment', 'noncurrent investment'])) {
+    if (hasAnyInLedgerOrParent(ledger, parent, ['non-current investment', 'non current investment', 'noncurrent investment'])) {
       return 'Interest income on Non-current Investments';
     }
-    if (hasAny(ledger, ['current investment', 'current investments'])) {
+    if (hasAnyInLedgerOrParent(ledger, parent, ['current investment', 'current investments'])) {
       return 'Interest income on Current Investments';
     }
-    if (hasAny(ledger, ['advance', 'advances', 'deposit', 'deposits'])) {
+    if (hasAnyInLedgerOrParent(ledger, parent, ['advance', 'advances', 'deposit', 'deposits'])) {
       return 'Interest income on Advances and Deposits';
     }
-    if (hasAny(ledger, ['loan', 'loans'])) {
+    if (hasAnyInLedgerOrParent(ledger, parent, ['loan', 'loans'])) {
       return 'Interest income on Loans';
     }
   }
 
-  if (hasAny(ledger, ['dividend'])) {
+  if (hasAnyInLedgerOrParent(ledger, parent, ['dividend'])) {
     return 'Dividend income on Non-current Investments';
   }
 
-  if ((hasAny(ledger, ['forex', 'foreign']) && hasAny(ledger, ['gain', 'loss']))) {
+  if ((hasAnyInLedgerOrParent(ledger, parent, ['forex', 'foreign']) && hasAnyInLedgerOrParent(ledger, parent, ['gain', 'loss']))) {
     return 'Gain on Foreign Exchange fluctuations (Net)';
   }
 
-  if (ledger.includes('sale') && hasAny(ledger, ['fixed asset', 'fixed assets', 'plant', 'property'])) {
+  if (hasAnyInLedgerOrParent(ledger, parent, ['sale']) && hasAnyInLedgerOrParent(ledger, parent, ['fixed asset', 'fixed assets', 'plant', 'property'])) {
     return 'Gain on Foreign Exchange fluctuations (Net)';
   }
 
-  if (hasAny(ledger, ['written back', 'written off'])) {
+  if (hasAnyInLedgerOrParent(ledger, parent, ['written back', 'written off'])) {
     return 'Provisions written back';
   }
 
@@ -135,6 +171,9 @@ export function applyClassificationRules(
   const hasMeaningfulH2 = !isPlaceholder(row['H2']);
   const hasMeaningfulH3 = !isPlaceholder(row['H3']);
   const forceAuto = context.force === true;
+  if (row.Auto === 'Manual' && !forceAuto) {
+    return row;
+  }
   const allowAutoOverride = forceAuto || !hasMeaningfulH2 || !hasMeaningfulH3 || isGenericH2(row['H2']);
   if (allowAutoOverride) {
     const primary = normalize(row['Primary Group']);
@@ -142,14 +181,17 @@ export function applyClassificationRules(
     const group = primary || parent;
     const ledger = normalize(row['Ledger Name']);
     const businessType = normalize(context.businessType);
+    const entityType = context.entityType;
     const isTrading = businessType.includes('trading');
+    const isCompany = isCompanyEntity(entityType);
+    const isPartnership = isPartnershipEntity(entityType);
 
     if (matchesGroup(group, 'sales accounts')) {
       return addAutoNote({
         ...row,
         'H1': 'Income',
         'H2': 'Revenue from Operations',
-        'H3': getSalesAccountsH3(ledger),
+        'H3': getSalesAccountsH3(ledger, parent),
       }, 'Sales Accounts');
     }
 
@@ -158,7 +200,7 @@ export function applyClassificationRules(
         ...row,
         'H1': 'Income',
         'H2': 'Other Income',
-        'H3': getOtherIncomeH3(ledger),
+        'H3': getOtherIncomeH3(ledger, parent),
       }, 'Direct/Indirect Incomes');
     }
 
@@ -191,9 +233,8 @@ export function applyClassificationRules(
     }
 
     if (matchesGroup(group, 'indirect expenses')) {
-      const haystack = `${ledger} ${parent}`;
-      if (hasAny(haystack, ['interest', 'int.']) || matchesWord(haystack, 'int')) {
-        if (hasAny(haystack, ['bank', 'loan', 'cash credit', 'cc', 'overdraft', 'od'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['interest', 'int', 'int.']) || matchesWord(ledger, 'int') || matchesWord(parent, 'int')) {
+        if (hasAnyInLedgerOrParent(ledger, parent, ['bank', 'loan', 'cash credit', 'cc', 'overdraft', 'od'])) {
           return addAutoNote({
             ...row,
             'H1': 'Expense',
@@ -201,7 +242,7 @@ export function applyClassificationRules(
             'H3': 'Interest expense on Borrowings',
           }, 'Indirect Expenses - Finance Costs (Borrowings)');
         }
-        if (hasAny(haystack, ['gst', 'income tax', 'tds', 'tax'])) {
+        if (hasAnyInLedgerOrParent(ledger, parent, ['gst', 'income tax', 'tds', 'tax'])) {
           return addAutoNote({
             ...row,
             'H1': 'Expense',
@@ -209,7 +250,7 @@ export function applyClassificationRules(
             'H3': 'Interest expense on late payment of taxes',
           }, 'Indirect Expenses - Finance Costs (Taxes)');
         }
-        if (hasAny(haystack, ['partner', 'capital', 'owner'])) {
+        if (hasAnyInLedgerOrParent(ledger, parent, ['partner', 'capital', 'owner'])) {
           return addAutoNote({
             ...row,
             'H1': 'Expense',
@@ -224,7 +265,23 @@ export function applyClassificationRules(
           'H3': 'Interest expense others',
         }, 'Indirect Expenses - Finance Costs');
       }
-      if (hasAny(haystack, ['bank charge', 'bank charges', 'renewal charge', 'processing charge', 'bg commission'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['employee'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Employee Benefits Expense',
+          'H3': 'Salaries and wages',
+        }, 'Indirect Expenses - Employee Benefits (Salaries)');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['esi'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Employee Benefits Expense',
+          'H3': 'Contribution to provident and other funds',
+        }, 'Indirect Expenses - Employee Benefits (ESI/PF)');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['bank charge', 'bank charges', 'renewal charge', 'processing charge', 'bg commission'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -232,8 +289,8 @@ export function applyClassificationRules(
           'H3': 'Other Borrowing costs',
         }, 'Indirect Expenses - Finance Costs (Other Borrowing)');
       }
-      if (hasAny(haystack, ['depreciation', 'depn', 'amortisation', 'amortization'])) {
-        if (hasAny(haystack, ['amortisation', 'amortization', 'amorti'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['depreciation', 'depn', 'amortisation', 'amortization'])) {
+        if (hasAnyInLedgerOrParent(ledger, parent, ['amortisation', 'amortization', 'amorti'])) {
           return addAutoNote({
             ...row,
             'H1': 'Expense',
@@ -248,23 +305,7 @@ export function applyClassificationRules(
           'H3': 'Depreciation on Property, Plant and Equipment',
         }, 'Indirect Expenses - Depreciation');
       }
-      if (hasAny(haystack, ['remuneration'])) {
-        return addAutoNote({
-          ...row,
-          'H1': 'Expense',
-          'H2': "Partners' Remuneration",
-          'H3': "Partners' Remuneration",
-        }, 'Indirect Expenses - Partners Remuneration');
-      }
-      if (hasAny(haystack, ['salary', 'salaries', 'wages', 'wage', 'stipend'])) {
-        return addAutoNote({
-          ...row,
-          'H1': 'Expense',
-          'H2': 'Employee Benefits Expense',
-          'H3': 'Salaries and wages',
-        }, 'Indirect Expenses - Salaries');
-      }
-      if (hasAny(haystack, ['director', 'remuneration'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['director', 'directors']) && hasAnyInLedgerOrParent(ledger, parent, ['remuneration', 'remu']) && isCompany) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -272,7 +313,23 @@ export function applyClassificationRules(
           'H3': "Directors' Remuneration",
         }, 'Indirect Expenses - Directors Remuneration');
       }
-      if (hasAny(haystack, ['pf', 'provident', 'esic', 'employee state', 'gratuity'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['remuneration']) && isPartnership) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': "Partners' Remuneration",
+          'H3': "Partners' Remuneration",
+        }, 'Indirect Expenses - Partners Remuneration');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['salary', 'salaries', 'wages', 'wage', 'stipend'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Employee Benefits Expense',
+          'H3': 'Salaries and wages',
+        }, 'Indirect Expenses - Salaries');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['pf', 'provident', 'esic', 'employee state', 'gratuity'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -280,7 +337,7 @@ export function applyClassificationRules(
           'H3': 'Contribution to provident and other funds',
         }, 'Indirect Expenses - Provident/Gratuity');
       }
-      if (hasAny(haystack, ['income tax', 'current year'])) {
+      if ((hasAnyInLedgerOrParent(ledger, parent, ['income tax', 'tax']) && hasAnyInLedgerOrParent(ledger, parent, ['current', 'current year']))) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -288,7 +345,7 @@ export function applyClassificationRules(
           'H3': 'Income Tax - Current Year',
         }, 'Indirect Expenses - Tax Current Year');
       }
-      if (hasAny(haystack, ['deferred tax', 'deferred'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['deferred tax', 'deferred'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -296,7 +353,7 @@ export function applyClassificationRules(
           'H3': 'Deferred Tax - Origination and reversal of Timing differences',
         }, 'Indirect Expenses - Deferred Tax');
       }
-      if (hasAny(haystack, ['mat'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['mat'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -304,7 +361,7 @@ export function applyClassificationRules(
           'H3': 'Income Tax - Less: MAT Credit Entitlement',
         }, 'Indirect Expenses - MAT');
       }
-      if (hasAny(haystack, ['adver', 'marketing'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['adver', 'marketing'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -312,7 +369,7 @@ export function applyClassificationRules(
           'H3': 'Advertisement and Marketing',
         }, 'Indirect Expenses - Marketing');
       }
-      if (hasAny(haystack, ['audit'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['audit'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -320,7 +377,7 @@ export function applyClassificationRules(
           'H3': "Auditor's Remuneration",
         }, 'Indirect Expenses - Audit');
       }
-      if (hasAny(haystack, ['bad debt', 'write off', 'written off'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['bad debt', 'write off', 'written off'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -328,7 +385,7 @@ export function applyClassificationRules(
           'H3': 'Bad Debts written off',
         }, 'Indirect Expenses - Bad Debts');
       }
-      if (hasAny(haystack, ['bad loan', 'bad adva', 'bad adv'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['bad loan', 'bad adva', 'bad adv'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -336,7 +393,7 @@ export function applyClassificationRules(
           'H3': 'Bad Loans and Advances written off',
         }, 'Indirect Expenses - Bad Loans');
       }
-      if (hasAny(haystack, ['bank chg', 'bank charge'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['bank chg', 'bank charge'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -344,7 +401,7 @@ export function applyClassificationRules(
           'H3': 'Bank Charges',
         }, 'Indirect Expenses - Bank Charges');
       }
-      if (hasAny(haystack, ['commission', 'brokerage'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['commission', 'brokerage'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -352,7 +409,7 @@ export function applyClassificationRules(
           'H3': 'Commission and Brokerage',
         }, 'Indirect Expenses - Commission');
       }
-      if (hasAny(haystack, ['stores', 'spares', 'parts'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['stores', 'spares', 'parts'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -360,7 +417,7 @@ export function applyClassificationRules(
           'H3': 'Stores and spare parts - Purchase',
         }, 'Indirect Expenses - Stores');
       }
-      if (hasAny(haystack, ['conveyance', 'local travel'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['conveyance', 'local travel'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -368,7 +425,7 @@ export function applyClassificationRules(
           'H3': 'Conveyance expenses',
         }, 'Indirect Expenses - Conveyance');
       }
-      if (hasAny(haystack, ['csr', 'corporate social'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['csr', 'corporate social']) && isCompany) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -376,7 +433,7 @@ export function applyClassificationRules(
           'H3': 'Corporate social responsibility expense',
         }, 'Indirect Expenses - CSR');
       }
-      if (hasAny(haystack, ['design', 'product', 'development'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['design', 'product', 'development'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -384,7 +441,7 @@ export function applyClassificationRules(
           'H3': 'Design and product development',
         }, 'Indirect Expenses - Design');
       }
-      if (hasAny(haystack, ['director sitting fees', 'director commission'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['director sitting fees', 'director commission']) && isCompany) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -392,7 +449,7 @@ export function applyClassificationRules(
           'H3': "Directors' fees and commission",
         }, 'Indirect Expenses - Directors Fees');
       }
-      if (hasAny(haystack, ['donation', 'charity'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['donation', 'charity'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -400,7 +457,7 @@ export function applyClassificationRules(
           'H3': 'Donations and charity',
         }, 'Indirect Expenses - Donations');
       }
-      if (hasAny(haystack, ['electricity', 'power', 'fuel', 'diesel', 'petrol'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['electricity', 'power', 'fuel', 'diesel', 'petrol'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -408,7 +465,7 @@ export function applyClassificationRules(
           'H3': 'Electricity, Power and fuel',
         }, 'Indirect Expenses - Power/Fuel');
       }
-      if (hasAny(haystack, ['freight', 'carriage', 'forwarding', 'transport'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['freight', 'carriage', 'forwarding', 'transport'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -416,7 +473,7 @@ export function applyClassificationRules(
           'H3': 'Freight and forwarding',
         }, 'Indirect Expenses - Freight');
       }
-      if (hasAny(haystack, ['information', 'technology', 'software'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['information', 'technology', 'software'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -424,7 +481,7 @@ export function applyClassificationRules(
           'H3': 'Information technology services',
         }, 'Indirect Expenses - IT');
       }
-      if (hasAny(haystack, ['insurance', 'life', 'health', 'key man'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['insurance', 'life', 'health', 'key man'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -432,7 +489,7 @@ export function applyClassificationRules(
           'H3': 'Insurance expenses',
         }, 'Indirect Expenses - Insurance');
       }
-      if (hasAny(haystack, ['office', 'admin'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['office', 'admin'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -440,7 +497,7 @@ export function applyClassificationRules(
           'H3': 'Office and Administration',
         }, 'Indirect Expenses - Office/Admin');
       }
-      if (hasAny(haystack, ['print', 'stationery', 'stationary'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['print', 'stationery', 'stationary'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -448,7 +505,7 @@ export function applyClassificationRules(
           'H3': 'Printing and stationery',
         }, 'Indirect Expenses - Printing');
       }
-      if (hasAny(haystack, ['professional', 'consultancy', 'retainer'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['professional', 'consultancy', 'retainer'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -456,7 +513,7 @@ export function applyClassificationRules(
           'H3': 'Professional and consultancy charges',
         }, 'Indirect Expenses - Professional Fees');
       }
-      if (hasAny(haystack, ['provision', 'debt'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['provision']) && hasAnyInLedgerOrParent(ledger, parent, ['debt'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -464,7 +521,7 @@ export function applyClassificationRules(
           'H3': 'Provision for Doubtful Debts',
         }, 'Indirect Expenses - Provision Debts');
       }
-      if (hasAny(haystack, ['provision', 'loan', 'advance'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['provision']) && hasAnyInLedgerOrParent(ledger, parent, ['loan', 'advance'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -472,7 +529,7 @@ export function applyClassificationRules(
           'H3': 'Provision for Doubtful Loans and Advances',
         }, 'Indirect Expenses - Provision Loans');
       }
-      if (hasAny(haystack, ['provision', 'warran'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['provision']) && hasAnyInLedgerOrParent(ledger, parent, ['warran'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -480,7 +537,7 @@ export function applyClassificationRules(
           'H3': 'Provision for Warranties',
         }, 'Indirect Expenses - Provision Warranties');
       }
-      if (hasAny(haystack, ['provision'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['provision'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -488,7 +545,7 @@ export function applyClassificationRules(
           'H3': 'Provision for Other Expenses',
         }, 'Indirect Expenses - Provision Other');
       }
-      if (hasAny(haystack, ['rates', 'taxes', 'professional tax', 'ptax', 'trade licence', 'municipal tax', 'late fee'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['rates', 'taxes', 'professional tax', 'ptax', 'trade licence', 'municipal tax', 'late fee'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -496,7 +553,7 @@ export function applyClassificationRules(
           'H3': 'Rates and Taxes',
         }, 'Indirect Expenses - Rates/Taxes');
       }
-      if (hasAny(haystack, ['recruitment', 'training'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['recruitment', 'training'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -504,7 +561,7 @@ export function applyClassificationRules(
           'H3': 'Recruitment and training charges',
         }, 'Indirect Expenses - Recruitment');
       }
-      if (hasAny(haystack, ['rent'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['rent'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -512,7 +569,7 @@ export function applyClassificationRules(
           'H3': 'Rent expenses',
         }, 'Indirect Expenses - Rent');
       }
-      if (hasAny(haystack, ['repair', 'r&m']) && hasAny(haystack, ['building', 'office', 'factory'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['repair', 'r&m']) && hasAnyInLedgerOrParent(ledger, parent, ['building', 'office', 'factory'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -520,7 +577,7 @@ export function applyClassificationRules(
           'H3': 'Repairs to buildings',
         }, 'Indirect Expenses - Repairs Buildings');
       }
-      if (hasAny(haystack, ['repair', 'r&m']) && hasAny(haystack, ['plant', 'machinery', 'p&m'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['repair', 'r&m']) && hasAnyInLedgerOrParent(ledger, parent, ['plant', 'machinery', 'p&m'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -528,7 +585,7 @@ export function applyClassificationRules(
           'H3': 'Repairs to machinery',
         }, 'Indirect Expenses - Repairs Machinery');
       }
-      if (hasAny(haystack, ['repair', 'r&m'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['repair', 'r&m'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -536,7 +593,7 @@ export function applyClassificationRules(
           'H3': 'Repairs and maintenance',
         }, 'Indirect Expenses - Repairs');
       }
-      if (hasAny(haystack, ['royalty'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['royalty'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -544,7 +601,7 @@ export function applyClassificationRules(
           'H3': 'Royalty expenses',
         }, 'Indirect Expenses - Royalty');
       }
-      if (hasAny(haystack, ['security', 'housekeeping'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['security', 'housekeeping'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -552,7 +609,7 @@ export function applyClassificationRules(
           'H3': 'Security and Housekeeping',
         }, 'Indirect Expenses - Security');
       }
-      if (hasAny(haystack, ['selling', 'distribution'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['selling', 'distribution'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -560,7 +617,7 @@ export function applyClassificationRules(
           'H3': 'Selling and Distribution expenses',
         }, 'Indirect Expenses - Selling');
       }
-      if (hasAny(haystack, ['telephone', 'mobile', 'internet'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['telephone', 'mobile', 'internet'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -568,7 +625,7 @@ export function applyClassificationRules(
           'H3': 'Telephone and Internet',
         }, 'Indirect Expenses - Telecom');
       }
-      if (hasAny(haystack, ['travel'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['travel'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -612,9 +669,9 @@ export function applyClassificationRules(
     const primaryNeedle = normalize(rule.primaryGroupContains);
     const parentNeedle = normalize(rule.parentGroupContains);
     const ledgerNeedle = normalize(rule.ledgerNameContains);
-    const primaryMatch = primaryNeedle ? primary.includes(primaryNeedle) : true;
-    const parentMatch = parentNeedle ? parent.includes(parentNeedle) : true;
-    const ledgerMatch = ledgerNeedle ? ledger.includes(ledgerNeedle) : true;
+    const primaryMatch = primaryNeedle ? matchesPhrase(primary, primaryNeedle) : true;
+    const parentMatch = parentNeedle ? matchesPhrase(parent, parentNeedle) : true;
+    const ledgerMatch = ledgerNeedle ? (matchesPhrase(ledger, ledgerNeedle) || matchesPhrase(parent, ledgerNeedle)) : true;
     return primaryMatch && parentMatch && ledgerMatch;
   });
 
