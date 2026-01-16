@@ -126,10 +126,10 @@ export default function Appointment() {
       <Tabs defaultValue="appointment" className="space-y-6">
         <TabsList className="grid w-full grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           <TabsTrigger value="eligibility" className="text-[11px] px-1">Eligibility Cert</TabsTrigger>
-          <TabsTrigger value="decision" className="text-[10px] px-1">Engagement Acceptance/Continuation Decision</TabsTrigger>
+          <TabsTrigger value="decision" className="text-[10px] px-1">Acceptance / Continuation Checklist</TabsTrigger>
           <TabsTrigger value="appointment" className="text-[11px] px-1">Appointment</TabsTrigger>
           <TabsTrigger value="engagement-letter" className="text-[11px] px-1">Engagement Letter</TabsTrigger>
-          <TabsTrigger value="declaration" className="text-[11px] px-1">Declaration- Independence & Confidentiality</TabsTrigger>
+          <TabsTrigger value="declaration" className="text-[11px] px-1">Other Declarations</TabsTrigger>
         </TabsList>
 
         <TabsContent value="eligibility" className="space-y-4">
