@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -17,73 +17,41 @@ import {
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { LedgerRow } from '@/services/trialBalanceNewClassification';
-import { H1_OPTIONS, getH2Options, getH3Options, getH4Options } from '@/data/classificationOptions';
+import { BsplOptions } from '@/utils/bsplHeads';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selectedRows: LedgerRow[];
   onUpdate: (updates: Partial<LedgerRow>) => void;
+  bsplOptions: BsplOptions;
 }
 
-export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }: Props) {
+export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate, bsplOptions }: Props) {
+  const [updateParentGroup, setUpdateParentGroup] = useState(false);
+  const [updatePrimaryGroup, setUpdatePrimaryGroup] = useState(false);
+  const [updateIsRevenue, setUpdateIsRevenue] = useState(false);
   const [updateH1, setUpdateH1] = useState(false);
   const [updateH2, setUpdateH2] = useState(false);
   const [updateH3, setUpdateH3] = useState(false);
-  const [updateH4, setUpdateH4] = useState(false);
-  const [updateH5, setUpdateH5] = useState(false);
   
+  const [parentGroup, setParentGroup] = useState<string>('');
+  const [primaryGroup, setPrimaryGroup] = useState<string>('');
+  const [isRevenue, setIsRevenue] = useState<string>('');
   const [h1, setH1] = useState<string>('');
   const [h2, setH2] = useState<string>('');
   const [h3, setH3] = useState<string>('');
-  const [h4, setH4] = useState<string>('');
-  const [h5, setH5] = useState<string>('');
-
-  // Update available H2 options when H1 changes
-  useEffect(() => {
-    const h2Options = getH2Options(h1);
-    if (h1 && h2Options.length > 0) {
-      if (!h2Options.includes(h2)) {
-        setH2('');
-      }
-    } else {
-      setH2('');
-    }
-  }, [h1, h2]);
-
-  // Update available H3 options when H2 changes
-  useEffect(() => {
-    const h3Options = getH3Options(h2);
-    if (h2 && h3Options.length > 0) {
-      if (!h3Options.includes(h3)) {
-        setH3('');
-      }
-    } else {
-      setH3('');
-    }
-  }, [h2, h3]);
-
-  // Update available H4 options when H3 changes
-  useEffect(() => {
-    const h4Options = getH4Options(h3);
-    if (h3 && h4Options.length > 0) {
-      if (!h4Options.includes(h4)) {
-        setH4('');
-      }
-    } else {
-      setH4('');
-    }
-  }, [h3, h4]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
     const updates: Partial<LedgerRow> = {};
+    if (updateParentGroup && parentGroup) updates['Parent Group'] = parentGroup;
+    if (updatePrimaryGroup && primaryGroup) updates['Primary Group'] = primaryGroup;
+    if (updateIsRevenue && isRevenue) updates['Is Revenue'] = isRevenue;
     if (updateH1 && h1) updates['H1'] = h1;
     if (updateH2 && h2) updates['H2'] = h2;
     if (updateH3 && h3) updates['H3'] = h3;
-    if (updateH4 && h4) updates['H4'] = h4;
-    if (updateH5 && h5) updates['H5'] = h5;
     
     if (Object.keys(updates).length === 0) {
       return;
@@ -95,16 +63,18 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
   };
 
   const resetState = () => {
+    setUpdateParentGroup(false);
+    setUpdatePrimaryGroup(false);
+    setUpdateIsRevenue(false);
     setUpdateH1(false);
     setUpdateH2(false);
     setUpdateH3(false);
-    setUpdateH4(false);
-    setUpdateH5(false);
+    setParentGroup('');
+    setPrimaryGroup('');
+    setIsRevenue('');
     setH1('');
     setH2('');
     setH3('');
-    setH4('');
-    setH5('');
   };
 
   const handleClose = (isOpen: boolean) => {
@@ -114,20 +84,81 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
     onOpenChange(isOpen);
   };
 
-  const availableH2Options = h1 ? getH2Options(h1) : [];
-  const availableH3Options = h2 ? getH3Options(h2) : [];
-  const availableH4Options = h3 ? getH4Options(h3) : [];
-
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Bulk Update {selectedRows.length} Items</DialogTitle>
           <DialogDescription>
-            Select which classification fields to update for all selected ledgers.
+            Select which fields to update for all selected ledgers.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Parent Group */}
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="update_parent_group"
+                checked={updateParentGroup}
+                onCheckedChange={(checked) => setUpdateParentGroup(checked === true)}
+              />
+              <Label htmlFor="update_parent_group">Update Parent Group</Label>
+            </div>
+            {updateParentGroup && (
+              <input
+                type="text"
+                value={parentGroup}
+                onChange={(e) => setParentGroup(e.target.value)}
+                placeholder="Enter parent group"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            )}
+          </div>
+
+          {/* Primary Group */}
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="update_primary_group"
+                checked={updatePrimaryGroup}
+                onCheckedChange={(checked) => setUpdatePrimaryGroup(checked === true)}
+              />
+              <Label htmlFor="update_primary_group">Update Primary Group</Label>
+            </div>
+            {updatePrimaryGroup && (
+              <input
+                type="text"
+                value={primaryGroup}
+                onChange={(e) => setPrimaryGroup(e.target.value)}
+                placeholder="Enter primary group"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            )}
+          </div>
+
+          {/* Is Revenue */}
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="update_is_revenue"
+                checked={updateIsRevenue}
+                onCheckedChange={(checked) => setUpdateIsRevenue(checked === true)}
+              />
+              <Label htmlFor="update_is_revenue">Update Is Revenue</Label>
+            </div>
+            {updateIsRevenue && (
+              <Select value={isRevenue} onValueChange={setIsRevenue}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select value" />
+                </SelectTrigger>
+                <SelectContent position="popper" className="z-[9999]" sideOffset={4}>
+                  <SelectItem value="Yes">Yes</SelectItem>
+                  <SelectItem value="No">No</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          
           {/* H1 */}
           <div className="space-y-2">
             <div className="flex items-center space-x-2">
@@ -136,16 +167,23 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
                 checked={updateH1}
                 onCheckedChange={(checked) => setUpdateH1(checked === true)}
               />
-              <Label htmlFor="update_h1">Update H1 (Statement)</Label>
+              <Label htmlFor="update_h1">Update H1</Label>
             </div>
             {updateH1 && (
-              <Select value={h1} onValueChange={setH1}>
+              <Select
+                value={h1}
+                onValueChange={(value) => {
+                  setH1(value);
+                  setH2('');
+                  setH3('');
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select H1" />
                 </SelectTrigger>
                 <SelectContent position="popper" className="z-[9999]" sideOffset={4}>
-                  {H1_OPTIONS.map(opt => (
-                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                  {bsplOptions.h1Options.map(option => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -160,20 +198,23 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
                 checked={updateH2}
                 onCheckedChange={(checked) => setUpdateH2(checked === true)}
               />
-              <Label htmlFor="update_h2">Update H2 (Category)</Label>
+              <Label htmlFor="update_h2">Update H2</Label>
             </div>
             {updateH2 && (
-              <Select 
-                value={h2} 
-                onValueChange={setH2}
-                disabled={!h1 && updateH1}
+              <Select
+                value={h2}
+                onValueChange={(value) => {
+                  setH2(value);
+                  setH3('');
+                }}
+                disabled={!h1}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={!h1 && updateH1 ? "Select H1 first" : "Select H2"} />
+                  <SelectValue placeholder={h1 ? 'Select H2' : 'Select H1 first'} />
                 </SelectTrigger>
                 <SelectContent position="popper" className="z-[9999]" sideOffset={4}>
-                  {availableH2Options.map(opt => (
-                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                  {(bsplOptions.h2Options[h1] || []).map(option => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -188,76 +229,23 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
                 checked={updateH3}
                 onCheckedChange={(checked) => setUpdateH3(checked === true)}
               />
-              <Label htmlFor="update_h3">Update H3 (Sub-Category)</Label>
+              <Label htmlFor="update_h3">Update H3</Label>
             </div>
             {updateH3 && (
-              <Select 
-                value={h3} 
+              <Select
+                value={h3}
                 onValueChange={setH3}
-                disabled={!h2 && updateH2}
+                disabled={!h1 || !h2}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={!h2 && updateH2 ? "Select H2 first" : "Select H3"} />
+                  <SelectValue placeholder={h1 && h2 ? 'Select H3' : 'Select H1 and H2 first'} />
                 </SelectTrigger>
-                <SelectContent position="popper" className="z-[9999] max-h-[200px] overflow-y-auto" sideOffset={4}>
-                  {availableH3Options.map(opt => (
-                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                <SelectContent position="popper" className="z-[9999]" sideOffset={4}>
+                  {((bsplOptions.h3Options[h1] || {})[h2] || []).map(option => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            )}
-          </div>
-
-          {/* H4 */}
-          <div className="space-y-2">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="update_h4"
-                checked={updateH4}
-                onCheckedChange={(checked) => setUpdateH4(checked === true)}
-              />
-              <Label htmlFor="update_h4">Update H4 (Line Item)</Label>
-            </div>
-            {updateH4 && (
-              <Select 
-                value={h4} 
-                onValueChange={setH4}
-                disabled={!h3 && updateH3}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={!h3 && updateH3 ? "Select H3 first" : availableH4Options.length > 0 ? "Select H4" : "No H4 options available"} />
-                </SelectTrigger>
-                <SelectContent position="popper" className="z-[9999] max-h-[200px] overflow-y-auto" sideOffset={4}>
-                  {availableH4Options.length > 0 ? (
-                    availableH4Options.map(opt => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="__none__" disabled>No options available for selected H3</SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {/* H5 */}
-          <div className="space-y-2">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="update_h5"
-                checked={updateH5}
-                onCheckedChange={(checked) => setUpdateH5(checked === true)}
-              />
-              <Label htmlFor="update_h5">Update H5 (Detail)</Label>
-            </div>
-            {updateH5 && (
-              <input
-                type="text"
-                value={h5}
-                onChange={(e) => setH5(e.target.value)}
-                placeholder="Enter detail if required"
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              />
             )}
           </div>
 
@@ -267,7 +255,7 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate }:
             </Button>
             <Button 
               type="submit" 
-              disabled={!updateH1 && !updateH2 && !updateH3 && !updateH4 && !updateH5}
+              disabled={!updateParentGroup && !updatePrimaryGroup && !updateIsRevenue && !updateH1 && !updateH2 && !updateH3}
             >
               Update {selectedRows.length} Items
             </Button>

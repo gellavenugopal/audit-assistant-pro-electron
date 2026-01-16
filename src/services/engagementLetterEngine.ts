@@ -95,6 +95,8 @@ export class EngagementLetterTemplateEngine {
 
     // Step 3: Clean up any remaining unprocessed tags
     result = this.cleanupUnprocessedTags(result);
+    result = this.replaceEngagementPeriodClause(result, context);
+    result = this.collapseDuplicateDates(result);
 
     return result;
   }
@@ -123,7 +125,7 @@ export class EngagementLetterTemplateEngine {
       const falseBlock = parts.length > 1 ? parts.slice(1).join('') : '';
       result = result.replace(fullBlock, shouldInclude ? trueBlock : falseBlock);
 
-      iterations.push(`Condition '${condition}' → ${shouldInclude}`);
+      iterations.push(`Condition '${condition}' G�� ${shouldInclude}`);
 
       // Safety check for infinite loops
       if (iterations.length > 50) {
@@ -219,6 +221,20 @@ export class EngagementLetterTemplateEngine {
     return template.replace(/\{\{[^}]+\}\}/g, '');
   }
 
+  private static replaceEngagementPeriodClause(template: string, context: LetterContext): string {
+    if (!context.agm_date || !context.financial_year_start || !context.financial_year_end) {
+      return template;
+    }
+
+    const replacement = `in the AGM held on ${context.agm_date} for the engagement period beginning ${context.financial_year_start} to engagement period ending ${context.financial_year_end}`;
+    const pattern = /from the conclusion of the\s+Annual General Meeting[^.]*?covering the financial years beginning[^.]*?ending on[^.]*?/gi;
+    return template.replace(pattern, replacement);
+  }
+
+  private static collapseDuplicateDates(template: string): string {
+    return template.replace(/\b(\d{2}-\d{2}-\d{4})\b(?:\s+\1\b)+/g, '$1');
+  }
+
   /**
    * Build context from master data
    */
@@ -236,11 +252,19 @@ export class EngagementLetterTemplateEngine {
 
     const is_statutory_audit_company = engagement_type.startsWith('statutory_audit_company');
     const is_tax_audit_partnership = engagement_type.startsWith('tax_audit_partnership');
-    const appointmentLetterDate =
+    const appointmentDateRaw = period.appointment_date || '';
+    const appointmentLetterDateRaw =
       period.appointment_letter_date || period.appointment_date || auditor.letter_date || '';
-    const partnerSignatureDate = auditor.letter_date || '';
-    const financialYearStart = period.financial_year_start || '';
-    const financialYearEnd = period.financial_year_end || period.balance_sheet_date || '';
+    const partnerSignatureDateRaw = auditor.letter_date || '';
+    const financialYearStartRaw = period.financial_year_start || '';
+    const financialYearEndRaw = period.financial_year_end || period.balance_sheet_date || '';
+    const balanceSheetDateRaw = period.balance_sheet_date || '';
+    const appointmentLetterDate = this.formatDateShort(appointmentLetterDateRaw);
+    const appointmentDate = this.formatDateShort(appointmentDateRaw);
+    const agmDate = this.formatDateShort(period.agm_date || '');
+    const financialYearStart = this.formatDateShort(financialYearStartRaw);
+    const financialYearEnd = this.formatDateShort(financialYearEndRaw);
+    const balanceSheetDate = this.formatDateShort(balanceSheetDateRaw);
     const assessmentYear = period.assessment_year || this.computeAssessmentYear(period.financial_year) || '';
     const meetingNumber = this.toNumber(period.meeting_number);
 
@@ -259,20 +283,20 @@ export class EngagementLetterTemplateEngine {
       // Period
       financial_year: period.financial_year,
       assessment_year: assessmentYear,
-      balance_sheet_date: period.balance_sheet_date,
-      appointment_date: period.appointment_date,
+      balance_sheet_date: balanceSheetDate,
+      appointment_date: appointmentDate,
       appointment_letter_date: appointmentLetterDate,
-      appointment_letter_date_long: this.formatDateLong(appointmentLetterDate),
-      appointment_letter_date_short: this.formatDateShort(appointmentLetterDate),
-      agm_date: period.agm_date || '',
+      appointment_letter_date_long: this.formatDateLong(appointmentLetterDateRaw),
+      appointment_letter_date_short: this.formatDateShort(appointmentLetterDateRaw),
+      agm_date: agmDate,
       agm_date_long: this.formatDateLong(period.agm_date),
       agm_date_short: this.formatDateShort(period.agm_date),
       financial_year_start: financialYearStart,
       financial_year_end: financialYearEnd,
-      financial_year_start_long: this.formatDateLong(financialYearStart),
-      financial_year_end_long: this.formatDateLong(financialYearEnd),
-      financial_year_start_short: this.formatDateShort(financialYearStart),
-      financial_year_end_short: this.formatDateShort(financialYearEnd),
+      financial_year_start_long: this.formatDateLong(financialYearStartRaw),
+      financial_year_end_long: this.formatDateLong(financialYearEndRaw),
+      financial_year_start_short: this.formatDateShort(financialYearStartRaw),
+      financial_year_end_short: this.formatDateShort(financialYearEndRaw),
       meeting_number: meetingNumber,
       meeting_number_plus_5: meetingNumber !== null ? meetingNumber + 5 : undefined,
       appointment_type: period.appointment_type || '',
@@ -287,9 +311,9 @@ export class EngagementLetterTemplateEngine {
       partner_pan: auditor.partner_pan,
       place: auditor.place,
       letter_date: appointmentLetterDate,
-      partner_signature_date: partnerSignatureDate,
-      partner_signature_date_long: this.formatDateLong(partnerSignatureDate),
-      partner_signature_date_short: this.formatDateShort(partnerSignatureDate),
+      partner_signature_date: this.formatDateShort(partnerSignatureDateRaw),
+      partner_signature_date_long: this.formatDateLong(partnerSignatureDateRaw),
+      partner_signature_date_short: this.formatDateShort(partnerSignatureDateRaw),
 
       // Commercial
       professional_fees: this.formatCurrency(commercial.professional_fees),
@@ -464,11 +488,10 @@ export class EngagementLetterTemplateEngine {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat('en-US', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    }).format(date);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = String(date.getFullYear());
+    return `${day}-${month}-${year}`;
   }
 
   private static formatDateShort(value?: string): string {
@@ -477,8 +500,8 @@ export class EngagementLetterTemplateEngine {
     if (Number.isNaN(date.getTime())) return value;
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = String(date.getFullYear()).slice(-2);
-    return `${day}/${month}/${year}`;
+    const year = String(date.getFullYear());
+    return `${day}-${month}-${year}`;
   }
 
   private static looksLikeMonthDate(value: string): boolean {

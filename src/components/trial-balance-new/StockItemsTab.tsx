@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ColumnFilter } from '@/components/ui/column-filter';
-import { Plus, Pencil, Wand2, Settings2, Trash2 } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { classifyStockItem } from '@/utils/fuzzyMatch';
 import { useToast } from '@/hooks/use-toast';
@@ -58,9 +58,20 @@ interface StockItemsTabProps {
   onUpdateStockData: (data: StockItem[]) => void;
   businessType?: string;
   searchTerm?: string;
+  onSelectionChange?: (count: number) => void;
+  bulkUpdateRequestId?: number;
+  deleteSelectedRequestId?: number;
 }
 
-export function StockItemsTab({ stockData, onUpdateStockData, businessType = '', searchTerm = '' }: StockItemsTabProps) {
+export function StockItemsTab({
+  stockData,
+  onUpdateStockData,
+  businessType = '',
+  searchTerm = '',
+  onSelectionChange,
+  bulkUpdateRequestId,
+  deleteSelectedRequestId,
+}: StockItemsTabProps) {
   const { toast } = useToast();
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editCategory, setEditCategory] = useState<string>('');
@@ -233,12 +244,13 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
     setEditCategory('');
   };
 
-  const handleDelete = (index: number) => {
-    if (confirm('Are you sure you want to delete this stock item?')) {
-      const newData = stockData.filter((_, i) => i !== index);
-      onUpdateStockData(newData);
-    }
-  };
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedIndices.size === 0) return;
+    if (!confirm(`Delete ${selectedIndices.size} selected stock item(s)?`)) return;
+    const newData = stockData.filter((_, i) => !selectedIndices.has(i));
+    onUpdateStockData(newData);
+    setSelectedIndices(new Set());
+  }, [selectedIndices, stockData, onUpdateStockData]);
   
   const handleAutoClassifyAll = () => {
     if (!businessType) {
@@ -357,6 +369,28 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
       description: `Updated ${selectedIndices.size} items`,
     });
   }, [selectedIndices, bulkCategory, stockData, onUpdateStockData, toast]);
+
+  useEffect(() => {
+    onSelectionChange?.(selectedIndices.size);
+  }, [selectedIndices, onSelectionChange]);
+
+  useEffect(() => {
+    if (!bulkUpdateRequestId) return;
+    if (selectedIndices.size === 0) {
+      toast({
+        title: 'No Selection',
+        description: 'Select stock items to update',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsBulkUpdateDialogOpen(true);
+  }, [bulkUpdateRequestId, selectedIndices, toast]);
+
+  useEffect(() => {
+    if (!deleteSelectedRequestId) return;
+    handleDeleteSelected();
+  }, [deleteSelectedRequestId, handleDeleteSelected]);
   
   // Keyboard navigation handler
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -438,27 +472,8 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
           No items match the current filters.
         </div>
       ) : (
-        <div className="border rounded-lg">
-          {/* Compact toolbar row inside table container */}
-          <div className="flex items-center justify-between px-2 py-1 bg-gray-50 border-b" style={{ minHeight: '28px' }}>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {selectedIndices.size > 0 && (
-                <>
-                  <span className="text-blue-600 font-medium">
-                    {selectedIndices.size} selected
-                  </span>
-                  <Button size="sm" variant="default" className="h-6 px-2 text-xs" onClick={() => setIsBulkUpdateDialogOpen(true)}>
-                    <Settings2 className="w-3 h-3 mr-1" />
-                    Bulk Update
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={clearSelection}>
-                    Clear
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-          <Table className="stock-items-table">
+        <div className="border rounded-lg w-full overflow-auto">
+          <Table className="stock-items-table table-fixed w-full">
             <TableHeader className="sticky top-0 bg-white">
               <TableRow className="h-7">
                 <TableHead className="w-10 py-1 text-[11px] font-semibold">
@@ -550,7 +565,7 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
                     />
                   </div>
                 </TableHead>
-                <TableHead>Actions</TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -606,27 +621,20 @@ export function StockItemsTab({ stockData, onUpdateStockData, businessType = '',
                       )}
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
-                      <div className="flex gap-2">
-                        {isEditing ? (
-                          <>
-                            <Button size="sm" variant="outline" onClick={handleSaveEdit}>
-                              Save
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => setEditingIndex(null)}>
-                              Cancel
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button size="sm" variant="ghost" onClick={() => handleDoubleClick(item, originalIndex)}>
-                              <Pencil className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => handleDelete(originalIndex)}>
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
+                      {isEditing ? (
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="outline" onClick={handleSaveEdit}>
+                            Save
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setEditingIndex(null)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button size="sm" variant="ghost" onClick={() => handleDoubleClick(item, originalIndex)}>
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

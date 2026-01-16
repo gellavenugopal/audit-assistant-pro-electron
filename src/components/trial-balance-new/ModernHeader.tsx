@@ -23,7 +23,6 @@ import {
   RefreshCw,
   ChevronDown,
   Calendar,
-  FileText,
   Save,
   Trash2,
 } from 'lucide-react';
@@ -55,7 +54,6 @@ interface ModernHeaderProps {
   selectedCount: number;
   
   // Output
-  onFinancialStatements: () => void;
   onSave: () => void;
   onClear: () => void;
 }
@@ -78,7 +76,6 @@ export function ModernHeader({
   onClassificationManager,
   hasData,
   selectedCount,
-  onFinancialStatements,
   onSave,
   onClear,
 }: ModernHeaderProps) {
@@ -155,10 +152,6 @@ export function ModernHeader({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={onFinancialStatements}>
-                <FileText className="w-4 h-4 mr-2" />
-                Generate Financial Statements
-              </DropdownMenuItem>
               <DropdownMenuItem onClick={onExcelExport}>
                 <Download className="w-4 h-4 mr-2" />
                 Export to Excel

@@ -58,10 +58,11 @@ export function getNaturalBalanceSideFromGroups(
 
 export function getActualBalanceSign(row: LedgerRow): BalanceSign {
   const natural = getNaturalBalanceSide(row);
-  const amount = row['Closing Balance'] || 0;
+  const closing = row['Closing Balance'] || 0;
+  const opening = row['Opening Balance'] || 0;
+  const amount = closing !== 0 ? closing : opening;
   if (amount === 0) return natural;
-  const isPositive = amount >= 0;
-  return isPositive ? natural : (natural === 'Dr' ? 'Cr' : 'Dr');
+  return amount < 0 ? 'Dr' : 'Cr';
 }
 
 export function normalizeSignedAmount(row: LedgerRow): number {

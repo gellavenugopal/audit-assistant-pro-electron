@@ -43,7 +43,6 @@ interface RibbonProps {
   selectedCount: number;
   
   // Output section
-  onFinancialStatements: () => void;
   onExcelExport: () => void;
   onSave: () => void;
   onClear: () => void;
@@ -66,7 +65,6 @@ export function Ribbon({
   onClassificationManager,
   hasData,
   selectedCount,
-  onFinancialStatements,
   onExcelExport,
   onSave,
   onClear,
@@ -125,17 +123,13 @@ export function Ribbon({
             e.preventDefault();
             if (hasData) onClassificationManager();
             break;
-          case 'f': // Ctrl+F = Financial Statements
-            e.preventDefault();
-            if (hasData) onFinancialStatements();
-            break;
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [hasData, selectedCount, onExcelImport, onExportTemplate, onSave, onExcelExport, onAutoClassify, onBulkUpdate, onClassificationManager, onFinancialStatements]);
+  }, [hasData, selectedCount, onExcelImport, onExportTemplate, onSave, onExcelExport, onAutoClassify, onBulkUpdate, onClassificationManager]);
 
   return (
     <div className="border-b bg-white shadow-sm">

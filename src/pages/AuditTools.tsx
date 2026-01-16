@@ -82,6 +82,7 @@ import {
   FileDown,
   FileX,
   FolderOpen,
+  HelpCircle,
 } from "lucide-react";
 
 interface ToolCardProps {
@@ -166,6 +167,7 @@ const TallyTools = () => {
 
   // Opening Balance Matching state
   const [showOpeningBalanceDialog, setShowOpeningBalanceDialog] = useState(false);
+  const [showOpeningBalanceHelpDialog, setShowOpeningBalanceHelpDialog] = useState(false);
   const openingBalanceMatching = useOpeningBalanceMatching();
 
   // ODBC connection (only connection method)
@@ -580,8 +582,11 @@ const TallyTools = () => {
     const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
 
     const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => {
-      const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
-      const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
+      // For accounts with opposite balance:
+      // - If expected Dr but has Cr: closingBalance > 0, so closingCr = closingBalance
+      // - If expected Cr but has Dr: closingBalance < 0, so closingDr = abs(closingBalance)
+      const closingCr = line.closingBalance > 0 ? line.closingBalance : 0;
+      const closingDr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
       return {
         "Account Name": line.accountHead,
         "Primary Group": line.primaryGroup,
@@ -700,19 +705,41 @@ const TallyTools = () => {
   // - $DebitTotals and $CreditTotals are typically absolute values (positive)
   // - But we use Math.abs() to ensure they're always positive for totals
   // - Opening and Closing balances follow Tally convention: negative = Debit, positive = Credit
-  const totalOpeningBalance = filteredTBData?.reduce((sum, line) => sum + line.openingBalance, 0) || 0;
-
-  // Total Debit and Credit should be absolute values (sum of all debit/credit amounts)
-  const totalDebit = filteredTBData?.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0) || 0;
-  const totalCredit = filteredTBData?.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0) || 0;
-
+  
+  // Separate Balance Sheet and P&L accounts for proper calculation
+  const bsAccounts = filteredTBData?.filter(line => !line.isRevenue) || [];
+  const plAccounts = filteredTBData?.filter(line => line.isRevenue) || [];
+  
+  // For Balance Sheet accounts: Closing = Opening + Debit - Credit
+  const bsOpeningBalance = bsAccounts.reduce((sum, line) => sum + line.openingBalance, 0);
+  const bsDebit = bsAccounts.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0);
+  const bsCredit = bsAccounts.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0);
+  const bsClosingBalance = bsAccounts.reduce((sum, line) => sum + line.closingBalance, 0);
+  const bsClosingCalculated = bsOpeningBalance + bsDebit - bsCredit;
+  
+  // For P&L accounts: Closing balance is the net result (profit/loss)
+  // The formula Opening + Debit - Credit may not hold for P&L accounts
+  const plOpeningBalance = plAccounts.reduce((sum, line) => sum + line.openingBalance, 0);
+  const plDebit = plAccounts.reduce((sum, line) => sum + Math.abs(line.totalDebit), 0);
+  const plCredit = plAccounts.reduce((sum, line) => sum + Math.abs(line.totalCredit), 0);
+  const plClosingBalance = plAccounts.reduce((sum, line) => sum + line.closingBalance, 0);
+  
+  // Total Opening Balance (all accounts)
+  const totalOpeningBalance = bsOpeningBalance + plOpeningBalance;
+  
+  // Total Debit and Credit (all accounts)
+  const totalDebit = bsDebit + plDebit;
+  const totalCredit = bsCredit + plCredit;
+  
   // Total Closing Balance: Sum of individual closing balances
-  // OR can be calculated as: Opening + Debit - Credit (accounting formula)
-  const totalClosingBalanceSum = filteredTBData?.reduce((sum, line) => sum + line.closingBalance, 0) || 0;
-  const totalClosingBalanceCalculated = totalOpeningBalance + totalDebit - totalCredit;
-
+  const totalClosingBalanceSum = bsClosingBalance + plClosingBalance;
+  
+  // For calculation verification:
+  // - BS accounts should follow: Closing = Opening + Debit - Credit
+  // - P&L accounts closing is the net result, so we only verify BS accounts
+  const totalClosingBalanceCalculated = bsClosingCalculated + plClosingBalance;
+  
   // Use the sum of individual closing balances (more accurate)
-  // But verify it matches the formula (allow small rounding differences)
   const totalClosingBalance = totalClosingBalanceSum;
 
 
@@ -1010,10 +1037,10 @@ const TallyTools = () => {
 
             {/* Results Table */}
             {fetchedTBData && fetchedTBData.length > 0 && (
-              <div className="border rounded-lg overflow-hidden">
-                <div className="max-h-[400px] overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted sticky top-0">
+              <div className="border rounded-lg overflow-hidden flex flex-col" style={{ maxHeight: '500px' }}>
+                <div className="flex-1 overflow-auto" style={{ minHeight: 0 }}>
+                  <table className="w-full text-sm border-collapse">
+                    <thead className="bg-muted sticky top-0 z-10">
                       <tr>
                         <th className="text-left p-2 font-medium">Account Head</th>
                         <th className="text-right p-2 font-medium">Opening Balance</th>
@@ -1045,16 +1072,6 @@ const TallyTools = () => {
                         </tr>
                       ) : null}
                     </tbody>
-                    <tfoot className="bg-muted font-medium sticky bottom-0">
-                      <tr className="border-t-2">
-                        <td className="p-2 text-right font-medium">Total:</td>
-                        <td className="p-2 text-right font-mono">{formatCurrency(totalOpeningBalance)}</td>
-                        <td className="p-2 text-right font-mono">{formatCurrency(totalDebit)}</td>
-                        <td className="p-2 text-right font-mono">{formatCurrency(totalCredit)}</td>
-                        <td className="p-2 text-right font-mono">{formatCurrency(totalClosingBalance)}</td>
-                        <td colSpan={2}></td>
-                      </tr>
-                    </tfoot>
                   </table>
                 </div>
 
@@ -1070,31 +1087,6 @@ const TallyTools = () => {
                       ) : (
                         `${fetchedTBData.length} accounts`
                       )}
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => setFetchedTBData(null)}>
-                        Clear
-                      </Button>
-                      <Button variant="outline" onClick={handleExportToExcel}>
-                        <FileSpreadsheet className="h-4 w-4 mr-2" />
-                        Export to Excel
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          if (!currentEngagement) {
-                            toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
-                            return;
-                          }
-                          toast({
-                            title: "Save to Trial Balance",
-                            description: "Navigate to Trial Balance page and use Import to save this data"
-                          });
-                          setShowTBDialog(false);
-                        }}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Use in Trial Balance
-                      </Button>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
@@ -1114,26 +1106,36 @@ const TallyTools = () => {
                       <span className="text-muted-foreground">Total Closing Balance:</span>
                       <span className="ml-2 font-mono font-medium">{formatCurrency(totalClosingBalance)}</span>
                       {(() => {
-                        // Verify calculation: Closing should equal Opening + Debit - Credit
-                        const difference = Math.abs(totalClosingBalanceSum - totalClosingBalanceCalculated);
-                        const isCalculationCorrect = difference < 100; // Allow small rounding differences
+                        // Verify calculation for Balance Sheet accounts only
+                        // P&L accounts closing balance is the net result and may not follow the formula
+                        const bsDifference = Math.abs(bsClosingBalance - bsClosingCalculated);
+                        const isBSCalculationCorrect = bsDifference < 100; // Allow small rounding differences
+                        
+                        // Check if opening stock might be missing (common cause of mismatch)
+                        const hasStockGroup = filteredTBData?.some(line => 
+                          line.primaryGroup?.toLowerCase().includes('stock') || 
+                          line.accountHead?.toLowerCase().includes('stock')
+                        ) || false;
 
-                        if (!isCalculationCorrect) {
+                        if (!isBSCalculationCorrect) {
                           return (
                             <div className="mt-1">
                               <Badge variant="destructive" className="text-xs">
-                                Calculation Mismatch: {formatCurrency(difference)}
+                                Profit/ Loss Mismatch For the Year: {formatCurrency(bsDifference)}
                               </Badge>
                               <p className="text-xs text-muted-foreground mt-1">
-                                Sum: {formatCurrency(totalClosingBalanceSum)} |
-                                Calc: {formatCurrency(totalClosingBalanceCalculated)}
+                                BS Sum: {formatCurrency(bsClosingBalance)} |
+                                BS Calc: {formatCurrency(bsClosingCalculated)}
                               </p>
+                              {!hasStockGroup && (
+                                <p className="text-xs text-amber-600 mt-1">
+                                  ⚠️ Opening stock may not be included. Stock items are separate from ledgers in Tally.
+                                </p>
+                              )}
                             </div>
                           );
                         }
 
-                        // Check if trial balance is balanced (Total Debit = Total Credit for a balanced TB)
-                        // But this depends on account types, so we just verify the calculation is correct
                         return null;
                       })()}
                     </div>
@@ -1891,8 +1893,7 @@ const TallyTools = () => {
                                   <td className="p-3 text-right font-mono text-xs">
                                     {line.openingBalance !== 0 ? (
                                       <span className={line.openingBalance < 0 ? "text-blue-600" : "text-red-600"}>
-                                        {line.openingBalance < 0 ? "Dr " : "Cr "}
-                                        {formatCurrency(Math.abs(line.openingBalance))}
+                                        {formatCurrency(Math.abs(line.openingBalance))} {line.openingBalance < 0 ? "Dr" : "Cr"}
                                       </span>
                                     ) : (
                                       <span className="text-muted-foreground">-</span>
@@ -1907,8 +1908,7 @@ const TallyTools = () => {
                                   <td className="p-3 text-right font-mono text-xs">
                                     {line.closingBalance !== 0 ? (
                                       <span className={line.closingBalance < 0 ? "text-blue-600" : "text-red-600"}>
-                                        {line.closingBalance < 0 ? "Dr " : "Cr "}
-                                        {formatCurrency(Math.abs(line.closingBalance))}
+                                        {formatCurrency(Math.abs(line.closingBalance))} {line.closingBalance < 0 ? "Dr" : "Cr"}
                                       </span>
                                     ) : (
                                       <span className="text-muted-foreground">-</span>
@@ -1942,14 +1942,14 @@ const TallyTools = () => {
                           Showing {filteredData.length} of {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions
                           <span className="ml-1">(filtered)</span>
                           <span className="ml-2 text-xs">
-                            ({filteredData.filter(l => l.isRevenue).length} P&L, {filteredData.filter(l => !l.isRevenue).length} BS)
+                            ({filteredData.filter(l => !l.isRevenue).length} BS)
                           </span>
                         </>
                       ) : (
                         <>
                           Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions during the year
                           <span className="ml-2 text-xs">
-                            ({noTransactionLedgers.filter(l => l.isRevenue).length} P&L, {noTransactionLedgers.filter(l => !l.isRevenue).length} BS)
+                            ({noTransactionLedgers.filter(l => !l.isRevenue).length} BS)
                           </span>
                         </>
                       )}
@@ -2020,9 +2020,19 @@ const TallyTools = () => {
       <Dialog open={showOpeningBalanceDialog} onOpenChange={setShowOpeningBalanceDialog}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Scale className="h-5 w-5 text-primary" />
-              Opening Balance Matching
+            <DialogTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Scale className="h-5 w-5 text-primary" />
+                Opening Balance Matching
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowOpeningBalanceHelpDialog(true)}
+                className="h-8 w-8 p-0"
+              >
+                <HelpCircle className="h-5 w-5 text-muted-foreground hover:text-primary" />
+              </Button>
             </DialogTitle>
             <DialogDescription>
               Compare opening balances between Old and New Tally instances. Generate XML to import old balances into new Tally.
@@ -2275,6 +2285,114 @@ const TallyTools = () => {
               setShowOpeningBalanceDialog(false);
               openingBalanceMatching.reset();
             }}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Opening Balance Matching Help Dialog */}
+      <Dialog open={showOpeningBalanceHelpDialog} onOpenChange={setShowOpeningBalanceHelpDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HelpCircle className="h-5 w-5 text-primary" />
+              How to Use Opening Balance Matching
+            </DialogTitle>
+            <DialogDescription>
+              Step-by-step guide to compare and match opening balances between Old and New Tally instances
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            <div className="space-y-4">
+              <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                <h3 className="font-semibold text-sm mb-2 text-blue-900 dark:text-blue-100">Overview</h3>
+                <p className="text-sm text-blue-800 dark:text-blue-200">
+                  This tool helps you compare opening balances between two Tally instances (Old and New) and identify any mismatches. 
+                  It's useful when migrating data or ensuring consistency between different Tally company files.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="border-l-4 border-primary pl-4">
+                  <h3 className="font-semibold text-sm mb-2">Step 1: Fetch Old Tally Data</h3>
+                  <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                    <li>Open TallyPrime and load the <strong>Old Tally company file</strong> (the source file with existing balances)</li>
+                    <li>Ensure Tally is running and ODBC connection is active</li>
+                    <li>Click the <strong>"Fetch Old Tally Data"</strong> button</li>
+                    <li>The system will fetch all ledger closing balances from the Old Tally instance</li>
+                    <li>Wait for the confirmation message showing the number of ledgers fetched</li>
+                  </ol>
+                </div>
+
+                <div className="border-l-4 border-primary pl-4">
+                  <h3 className="font-semibold text-sm mb-2">Step 2: Fetch New Tally Data</h3>
+                  <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                    <li>In TallyPrime, close the Old Tally company and load the <strong>New Tally company file</strong> (the target file)</li>
+                    <li>Ensure the ODBC connection is still active</li>
+                    <li>Click the <strong>"Fetch New Tally Data"</strong> button</li>
+                    <li>The system will fetch all ledger opening balances from the New Tally instance</li>
+                    <li>Wait for the confirmation message showing the number of ledgers fetched</li>
+                  </ol>
+                </div>
+
+                <div className="border-l-4 border-primary pl-4">
+                  <h3 className="font-semibold text-sm mb-2">Step 3: Compare Balances</h3>
+                  <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                    <li>Once both Old and New Tally data are fetched, click the <strong>"Compare Balances"</strong> button</li>
+                    <li>The system will compare the closing balances from Old Tally with opening balances from New Tally</li>
+                    <li>Results will show:
+                      <ul className="list-disc list-inside ml-4 mt-1">
+                        <li><strong>Balance Mismatches:</strong> Ledgers where balances don't match between Old and New Tally</li>
+                        <li><strong>Name Mismatches:</strong> Ledgers that exist in one instance but not the other</li>
+                      </ul>
+                    </li>
+                    <li>Review the comparison results in the tables below</li>
+                  </ol>
+                </div>
+
+                <div className="border-l-4 border-green-500 pl-4">
+                  <h3 className="font-semibold text-sm mb-2">Step 4: Export Results</h3>
+                  <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                    <li>Click the <strong>"Download Excel Report"</strong> button to export the comparison results</li>
+                    <li>The Excel file will contain two sheets:
+                      <ul className="list-disc list-inside ml-4 mt-1">
+                        <li><strong>Balance Mismatches:</strong> Detailed comparison of ledgers with different balances</li>
+                        <li><strong>Ledger Name Mismatches:</strong> Ledgers present in only one Tally instance</li>
+                      </ul>
+                    </li>
+                    <li>Use this report to identify and resolve discrepancies between the two Tally instances</li>
+                  </ol>
+                </div>
+              </div>
+
+              <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                <h3 className="font-semibold text-sm mb-2 text-amber-900 dark:text-amber-100">Important Notes</h3>
+                <ul className="list-disc list-inside space-y-1 text-sm text-amber-800 dark:text-amber-200">
+                  <li>Ensure Tally is running with ODBC enabled before starting</li>
+                  <li>Make sure you have the correct company file loaded in Tally for each step</li>
+                  <li>The Old Tally should have closing balances, and New Tally should have opening balances</li>
+                  <li>Ledger names must match exactly between both instances for accurate comparison</li>
+                  <li>If ledger names differ, they will appear in the "Name Mismatches" section</li>
+                  <li>You can reset and start over at any time using the "Reset" button</li>
+                </ul>
+              </div>
+
+              <div className="bg-muted/50 rounded-lg p-4">
+                <h3 className="font-semibold text-sm mb-2">Troubleshooting</h3>
+                <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                  <li><strong>ODBC Connection Failed:</strong> Ensure Tally is running as Administrator and ODBC is enabled</li>
+                  <li><strong>No Data Fetched:</strong> Verify the correct company file is loaded in Tally</li>
+                  <li><strong>Mismatches Found:</strong> Review the Excel report to identify which ledgers need adjustment</li>
+                  <li><strong>Name Mismatches:</strong> These may be due to renamed ledgers or new/removed accounts</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowOpeningBalanceHelpDialog(false)}>
               Close
             </Button>
           </div>
