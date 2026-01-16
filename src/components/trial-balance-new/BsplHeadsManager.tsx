@@ -24,7 +24,9 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   heads: BsplHeadRow[];
+  defaultHeads: BsplHeadRow[];
   onSave: (rows: BsplHeadRow[]) => void;
+  onRestore: (rows: BsplHeadRow[]) => void;
 }
 
 const emptyDraft: BsplHeadRow = {
@@ -34,7 +36,7 @@ const emptyDraft: BsplHeadRow = {
   Condition: '',
 };
 
-export function BsplHeadsManager({ open, onOpenChange, heads, onSave }: Props) {
+export function BsplHeadsManager({ open, onOpenChange, heads, defaultHeads, onSave, onRestore }: Props) {
   const [rows, setRows] = useState<BsplHeadRow[]>(heads);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState<BsplHeadRow>(emptyDraft);
@@ -124,6 +126,14 @@ export function BsplHeadsManager({ open, onOpenChange, heads, onSave }: Props) {
     onOpenChange(false);
   };
 
+  const handleRestoreDefaults = () => {
+    if (!window.confirm('Restore default BSPL heads? This will replace your current list.')) {
+      return;
+    }
+    setRows(defaultHeads);
+    onRestore(defaultHeads);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
@@ -137,6 +147,9 @@ export function BsplHeadsManager({ open, onOpenChange, heads, onSave }: Props) {
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={startAdd}>
             Add Row
+          </Button>
+          <Button variant="outline" onClick={handleRestoreDefaults}>
+            Restore Defaults
           </Button>
           <Button variant="outline" onClick={handleExport}>
             Export to Excel

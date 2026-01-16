@@ -42,6 +42,13 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate, b
   const [h2, setH2] = useState<string>('');
   const [h3, setH3] = useState<string>('');
 
+  const handleToggleKey = (e: React.KeyboardEvent, toggle: (next: boolean) => void, current: boolean) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      toggle(!current);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -102,7 +109,15 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate, b
                 checked={updateParentGroup}
                 onCheckedChange={(checked) => setUpdateParentGroup(checked === true)}
               />
-              <Label htmlFor="update_parent_group">Update Parent Group</Label>
+              <Label
+                htmlFor="update_parent_group"
+                tabIndex={0}
+                role="button"
+                className="cursor-pointer"
+                onKeyDown={(e) => handleToggleKey(e, setUpdateParentGroup, updateParentGroup)}
+              >
+                Update Parent Group
+              </Label>
             </div>
             {updateParentGroup && (
               <input
@@ -123,7 +138,15 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate, b
                 checked={updatePrimaryGroup}
                 onCheckedChange={(checked) => setUpdatePrimaryGroup(checked === true)}
               />
-              <Label htmlFor="update_primary_group">Update Primary Group</Label>
+              <Label
+                htmlFor="update_primary_group"
+                tabIndex={0}
+                role="button"
+                className="cursor-pointer"
+                onKeyDown={(e) => handleToggleKey(e, setUpdatePrimaryGroup, updatePrimaryGroup)}
+              >
+                Update Primary Group
+              </Label>
             </div>
             {updatePrimaryGroup && (
               <input
@@ -144,7 +167,15 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate, b
                 checked={updateIsRevenue}
                 onCheckedChange={(checked) => setUpdateIsRevenue(checked === true)}
               />
-              <Label htmlFor="update_is_revenue">Update Is Revenue</Label>
+              <Label
+                htmlFor="update_is_revenue"
+                tabIndex={0}
+                role="button"
+                className="cursor-pointer"
+                onKeyDown={(e) => handleToggleKey(e, setUpdateIsRevenue, updateIsRevenue)}
+              >
+                Update Is Revenue
+              </Label>
             </div>
             {updateIsRevenue && (
               <Select value={isRevenue} onValueChange={setIsRevenue}>
@@ -167,7 +198,15 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate, b
                 checked={updateH1}
                 onCheckedChange={(checked) => setUpdateH1(checked === true)}
               />
-              <Label htmlFor="update_h1">Update H1</Label>
+              <Label
+                htmlFor="update_h1"
+                tabIndex={0}
+                role="button"
+                className="cursor-pointer"
+                onKeyDown={(e) => handleToggleKey(e, setUpdateH1, updateH1)}
+              >
+                Update H1
+              </Label>
             </div>
             {updateH1 && (
               <Select
@@ -198,7 +237,15 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate, b
                 checked={updateH2}
                 onCheckedChange={(checked) => setUpdateH2(checked === true)}
               />
-              <Label htmlFor="update_h2">Update H2</Label>
+              <Label
+                htmlFor="update_h2"
+                tabIndex={0}
+                role="button"
+                className="cursor-pointer"
+                onKeyDown={(e) => handleToggleKey(e, setUpdateH2, updateH2)}
+              >
+                Update H2
+              </Label>
             </div>
             {updateH2 && (
               <Select
@@ -229,7 +276,15 @@ export function BulkUpdateDialog({ open, onOpenChange, selectedRows, onUpdate, b
                 checked={updateH3}
                 onCheckedChange={(checked) => setUpdateH3(checked === true)}
               />
-              <Label htmlFor="update_h3">Update H3</Label>
+              <Label
+                htmlFor="update_h3"
+                tabIndex={0}
+                role="button"
+                className="cursor-pointer"
+                onKeyDown={(e) => handleToggleKey(e, setUpdateH3, updateH3)}
+              >
+                Update H3
+              </Label>
             </div>
             {updateH3 && (
               <Select

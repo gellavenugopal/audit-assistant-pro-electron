@@ -61,6 +61,11 @@ interface StockItemsTabProps {
   onSelectionChange?: (count: number) => void;
   bulkUpdateRequestId?: number;
   deleteSelectedRequestId?: number;
+  tableSettings?: {
+    rowHeight: number;
+    widths: Record<string, number>;
+    fonts: Record<string, number>;
+  };
 }
 
 export function StockItemsTab({
@@ -71,8 +76,18 @@ export function StockItemsTab({
   onSelectionChange,
   bulkUpdateRequestId,
   deleteSelectedRequestId,
+  tableSettings,
 }: StockItemsTabProps) {
   const { toast } = useToast();
+  const rowHeight = tableSettings?.rowHeight ?? 28;
+  const getWidth = useCallback((column: string, fallback: number) => {
+    const value = tableSettings?.widths?.[column];
+    return typeof value === 'number' ? value : fallback;
+  }, [tableSettings]);
+  const getFont = useCallback((column: string, fallback: number) => {
+    const value = tableSettings?.fonts?.[column];
+    return typeof value === 'number' ? value : fallback;
+  }, [tableSettings]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editCategory, setEditCategory] = useState<string>('');
   
@@ -460,7 +475,7 @@ export function StockItemsTab({
           text-overflow: ellipsis !important;
         }
         .stock-items-table tbody tr {
-          height: 28px !important;
+          height: ${rowHeight}px !important;
         }
       `}</style>
       {baseStockData.length === 0 ? (
@@ -475,8 +490,8 @@ export function StockItemsTab({
         <div className="border rounded-lg w-full overflow-auto">
           <Table className="stock-items-table table-fixed w-full">
             <TableHeader className="sticky top-0 bg-white">
-              <TableRow className="h-7">
-                <TableHead className="w-10 py-1 text-[11px] font-semibold">
+              <TableRow style={{ height: `${rowHeight}px` }}>
+                <TableHead className="w-10 py-1 font-semibold" style={{ fontSize: `${getFont('Select', 10)}px` }}>
                   <Checkbox
                     checked={selectedIndices.size === filteredData.length && filteredData.length > 0}
                     onCheckedChange={(checked) => {
@@ -485,8 +500,8 @@ export function StockItemsTab({
                     }}
                   />
                 </TableHead>
-                <TableHead>
-                  <div className="flex items-center gap-1">
+                <TableHead style={{ width: getWidth('Item Name', 180) }}>
+                  <div className="flex items-center gap-1" style={{ fontSize: `${getFont('Item Name', 10)}px` }}>
                     Item Name
                     <ColumnFilter
                       column="Item Name"
@@ -498,8 +513,8 @@ export function StockItemsTab({
                     />
                   </div>
                 </TableHead>
-                <TableHead>
-                  <div className="flex items-center gap-1">
+                <TableHead style={{ width: getWidth('Stock Group', 120) }}>
+                  <div className="flex items-center gap-1" style={{ fontSize: `${getFont('Stock Group', 10)}px` }}>
                     Stock Group
                     <ColumnFilter
                       column="Stock Group"
@@ -511,8 +526,8 @@ export function StockItemsTab({
                     />
                   </div>
                 </TableHead>
-                <TableHead>
-                  <div className="flex items-center gap-1">
+                <TableHead style={{ width: getWidth('Primary Group', 120) }}>
+                  <div className="flex items-center gap-1" style={{ fontSize: `${getFont('Primary Group', 10)}px` }}>
                     Primary Group
                     <ColumnFilter
                       column="Primary Group"
@@ -524,8 +539,8 @@ export function StockItemsTab({
                     />
                   </div>
                 </TableHead>
-                <TableHead className="text-right">
-                  <div className="flex items-center justify-end gap-1">
+                <TableHead className="text-right" style={{ width: getWidth('Opening Value', 100) }}>
+                  <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getFont('Opening Value', 10)}px` }}>
                     Opening Value
                     <ColumnFilter
                       column="Opening Value"
@@ -538,8 +553,8 @@ export function StockItemsTab({
                     />
                   </div>
                 </TableHead>
-                <TableHead className="text-right">
-                  <div className="flex items-center justify-end gap-1">
+                <TableHead className="text-right" style={{ width: getWidth('Closing Value', 100) }}>
+                  <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getFont('Closing Value', 10)}px` }}>
                     Closing Value
                     <ColumnFilter
                       column="Closing Value"
@@ -552,8 +567,8 @@ export function StockItemsTab({
                     />
                   </div>
                 </TableHead>
-                <TableHead>
-                  <div className="flex items-center gap-1">
+                <TableHead style={{ width: getWidth('Stock Category', 140) }}>
+                  <div className="flex items-center gap-1" style={{ fontSize: `${getFont('Stock Category', 10)}px` }}>
                     Stock Category
                     <ColumnFilter
                       column="Stock Category"
@@ -565,7 +580,7 @@ export function StockItemsTab({
                     />
                   </div>
                 </TableHead>
-                <TableHead></TableHead>
+                <TableHead style={{ width: getWidth('Actions', 80) }}></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -585,6 +600,7 @@ export function StockItemsTab({
                       isSelected && "bg-blue-50",
                       isFocused && "ring-2 ring-blue-400 ring-inset"
                     )}
+                    style={{ height: `${rowHeight}px` }}
                     onClick={(e) => toggleSelection(originalIndex, e)}
                     onDoubleClick={() => handleDoubleClick(item, originalIndex)}
                   >
@@ -594,12 +610,12 @@ export function StockItemsTab({
                         onCheckedChange={() => toggleSelection(originalIndex)}
                       />
                     </TableCell>
-                    <TableCell className="font-medium text-sm">{item['Item Name']}</TableCell>
-                    <TableCell className="text-xs text-gray-600">{item['Stock Group'] || '-'}</TableCell>
-                    <TableCell className="text-xs text-gray-600">{item['Primary Group'] || '-'}</TableCell>
-                    <TableCell className="text-right text-sm">{formatNumber(item['Opening Value'])}</TableCell>
-                    <TableCell className="text-right text-sm font-medium">{formatNumber(item['Closing Value'])}</TableCell>
-                    <TableCell>
+                    <TableCell className="font-medium" style={{ width: getWidth('Item Name', 180), fontSize: `${getFont('Item Name', 10)}px` }}>{item['Item Name']}</TableCell>
+                    <TableCell className="text-gray-600" style={{ width: getWidth('Stock Group', 120), fontSize: `${getFont('Stock Group', 10)}px` }}>{item['Stock Group'] || '-'}</TableCell>
+                    <TableCell className="text-gray-600" style={{ width: getWidth('Primary Group', 120), fontSize: `${getFont('Primary Group', 10)}px` }}>{item['Primary Group'] || '-'}</TableCell>
+                    <TableCell className="text-right" style={{ width: getWidth('Opening Value', 100), fontSize: `${getFont('Opening Value', 10)}px` }}>{formatNumber(item['Opening Value'])}</TableCell>
+                    <TableCell className="text-right font-medium" style={{ width: getWidth('Closing Value', 100), fontSize: `${getFont('Closing Value', 10)}px` }}>{formatNumber(item['Closing Value'])}</TableCell>
+                    <TableCell style={{ width: getWidth('Stock Category', 140), fontSize: `${getFont('Stock Category', 10)}px` }}>
                       {isEditing ? (
                         <Select value={editCategory} onValueChange={setEditCategory}>
                           <SelectTrigger className="w-[200px]">
@@ -613,14 +629,14 @@ export function StockItemsTab({
                         </Select>
                       ) : (
                         <span className={cn(
-                          "px-2 py-1 rounded text-xs font-medium",
+                          "px-2 py-1 rounded font-medium",
                           item['Stock Category'] ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"
-                        )}>
+                        )} style={{ fontSize: `${getFont('Stock Category', 10)}px` }}>
                           {item['Stock Category'] || 'Unclassified'}
                         </span>
                       )}
                     </TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
+                    <TableCell onClick={(e) => e.stopPropagation()} style={{ width: getWidth('Actions', 80), fontSize: `${getFont('Actions', 10)}px` }}>
                       {isEditing ? (
                         <div className="flex gap-2">
                           <Button size="sm" variant="outline" onClick={handleSaveEdit}>
