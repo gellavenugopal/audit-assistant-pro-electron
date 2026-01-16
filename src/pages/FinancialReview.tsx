@@ -384,6 +384,7 @@ export default function FinancialReview() {
   const [isRulesBotOpen, setIsRulesBotOpen] = useState(false);
   const [isTableSettingsOpen, setIsTableSettingsOpen] = useState(false);
   const [tableSettings, setTableSettings] = useState(DEFAULT_TABLE_SETTINGS);
+  const [externalConfigActive, setExternalConfigActive] = useState(false);
   const actualColumns = useMemo(() => ([
     'Ledger Name',
     'Parent Group',
@@ -440,6 +441,56 @@ export default function FinancialReview() {
   }, [odbcPort]);
 
   useEffect(() => {
+    let cancelled = false;
+    const loadExternalConfig = async () => {
+      try {
+        const response = await fetch('/classification_logics.xlsx', { cache: 'no-store' });
+        if (!response.ok) return;
+        const buffer = await response.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const bsplSheet = workbook.Sheets['BSPL Heads'];
+        const tallySheet = workbook.Sheets['Tally Default Groups'];
+
+        let nextBspl: BsplHeadRow[] | null = null;
+        let nextTally: string[] | null = null;
+
+        if (bsplSheet) {
+          const rows = XLSX.utils.sheet_to_json(bsplSheet);
+          const mapped = rows
+            .map((row: any) => ({
+              H1: String(row.H1 || '').trim(),
+              H2: String(row.H2 || '').trim(),
+              H3: String(row.H3 || '').trim(),
+              Condition: row.Condition ? String(row.Condition).trim() : undefined,
+            }))
+            .filter((row: BsplHeadRow) => row.H1 && row.H2 && row.H3);
+          if (mapped.length > 0) nextBspl = mapped;
+        }
+
+        if (tallySheet) {
+          const rows = XLSX.utils.sheet_to_json(tallySheet, { header: 1 }) as any[];
+          const flat = rows.flat().map((cell: any) => String(cell || '').trim()).filter((value: string) => value);
+          if (flat.length > 0) nextTally = Array.from(new Set(flat));
+        }
+
+        if (cancelled) return;
+        if (nextBspl || nextTally) {
+          if (nextBspl) setBsplHeads(nextBspl);
+          if (nextTally) setTallyGroups(nextTally);
+          setExternalConfigActive(true);
+        }
+      } catch {
+        // Ignore external config errors
+      }
+    };
+    loadExternalConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (externalConfigActive) return;
     const clientKey = currentEngagement?.id ? `tb_bspl_heads_${currentEngagement.id}` : null;
     const clientValue = clientKey ? localStorage.getItem(clientKey) : null;
     const globalValue = localStorage.getItem('tb_bspl_heads_global');
@@ -458,9 +509,10 @@ export default function FinancialReview() {
       }
     }
     setBsplHeads(fallback);
-  }, [currentEngagement?.id]);
+  }, [currentEngagement?.id, externalConfigActive]);
 
   useEffect(() => {
+    if (externalConfigActive) return;
     const clientKey = currentEngagement?.id ? `tb_tally_groups_${currentEngagement.id}` : null;
     const clientValue = clientKey ? localStorage.getItem(clientKey) : null;
     const globalValue = localStorage.getItem('tb_tally_groups_global');
@@ -478,7 +530,7 @@ export default function FinancialReview() {
       }
     }
     setTallyGroups(TALLY_DEFAULT_GROUPS);
-  }, [currentEngagement?.id]);
+  }, [currentEngagement?.id, externalConfigActive]);
 
   const handleSaveBsplHeads = useCallback((rows: BsplHeadRow[]) => {
     const applyGlobal = window.confirm('Apply BSPL Heads for all clients?\n\nOK = All Clients\nCancel = This Client Only');
@@ -584,9 +636,9 @@ export default function FinancialReview() {
   const handleApplyClassificationRules = useCallback((rules: ClassificationRule[]) => {
     setClassificationRules(rules);
     setCurrentData(prev =>
-      prev.map(row => applyClassificationRules(row, rules, { businessType }))
+      prev.map(row => applyClassificationRules(row, rules, { businessType, entityType }))
     );
-  }, [businessType]);
+  }, [businessType, entityType]);
 
   const handleAddTallyGroup = useCallback((value: string, scope: 'client' | 'global') => {
     const trimmed = value.trim();
@@ -619,6 +671,9 @@ export default function FinancialReview() {
     };
 
     setCurrentData(prev => prev.map(row => {
+      if (row.Auto === 'Manual') {
+        return row;
+      }
       const primary = (row['Primary Group'] || '').toLowerCase();
       const parent = (row['Parent Group'] || '').toLowerCase();
       const group = primary || parent;
@@ -630,13 +685,13 @@ export default function FinancialReview() {
       const cleared = shouldClear
         ? { ...row, 'H2': '', 'H3': '', Auto: undefined, 'Auto Reason': undefined }
         : { ...row, Auto: undefined, 'Auto Reason': undefined };
-      return applyClassificationRules(cleared, classificationRules, { businessType, force: true });
+      return applyClassificationRules(cleared, classificationRules, { businessType, entityType, force: true });
     }));
     toast({
       title: 'Auto classification updated',
       description: 'Reapplied auto rules to classified rows.',
     });
-  }, [classificationRules, businessType, toast]);
+  }, [classificationRules, businessType, entityType, toast]);
 
   useEffect(() => {
     if (currentData.length === 0) return;
@@ -649,13 +704,16 @@ export default function FinancialReview() {
 
     let changed = false;
     const next = currentData.map(row => {
+      if (row.Auto === 'Manual') {
+        return row;
+      }
       const primary = normalizeValue(row['Primary Group']);
       const parent = normalizeValue(row['Parent Group']);
       const group = primary || parent;
       const shouldAuto = (group.includes('indirect expenses') || group.includes('direct expenses')) &&
         (isPlaceholder(row['H3']) || isGeneric(row['H2']));
       if (!shouldAuto) return row;
-      const updated = applyClassificationRules({ ...row, Auto: undefined, 'Auto Reason': undefined }, classificationRules, { businessType, force: true });
+      const updated = applyClassificationRules({ ...row, Auto: undefined, 'Auto Reason': undefined }, classificationRules, { businessType, entityType, force: true });
       if (row['H1'] !== updated['H1'] || row['H2'] !== updated['H2'] || row['H3'] !== updated['H3'] || row['Auto'] !== updated['Auto']) {
         changed = true;
       }
@@ -664,7 +722,7 @@ export default function FinancialReview() {
     if (changed) {
       setCurrentData(next);
     }
-  }, [currentData, classificationRules, businessType]);
+  }, [currentData, classificationRules, businessType, entityType]);
   
   // Compute stock item counts and totals directly via useMemo (avoids infinite loop from callbacks)
   const { stockItemCount, stockTotals } = useMemo(() => {
@@ -1101,7 +1159,7 @@ export default function FinancialReview() {
             'H2': row['H2'] || '',
             'H3': row['H3'] || '',
           };
-          return applyClassificationRules(baseRow, classificationRules, { businessType });
+          return applyClassificationRules(baseRow, classificationRules, { businessType, entityType });
         });
       
       // Store actual data (unclassified) - FILTERED DATA (no completely inactive ledgers)
@@ -1288,7 +1346,7 @@ export default function FinancialReview() {
     const classified = [applyClassificationRules({
       ...newLine,
       'H1': deriveH1FromRevenueAndBalance(newLine),
-    }, classificationRules, { businessType })];
+    }, classificationRules, { businessType, entityType })];
     
     if (newLineForm.periodType === 'current') {
       setCurrentData(prev => [...prev, classified[0]]);
@@ -1312,7 +1370,7 @@ export default function FinancialReview() {
       periodType: 'current'
     });
     setIsAddLineDialogOpen(false);
-  }, [newLineForm, toast, classificationRules, deriveH1FromRevenueAndBalance]);
+  }, [newLineForm, toast, classificationRules, deriveH1FromRevenueAndBalance, businessType, entityType]);
 
   // Handle bulk update
   const handleBulkUpdate = useCallback((updates: Partial<LedgerRow>) => {
@@ -1548,7 +1606,7 @@ export default function FinancialReview() {
           'Sheet Name': 'TB CY'
         };
         row['H1'] = deriveH1FromRevenueAndBalance(row);
-        return applyClassificationRules(row, classificationRules, { businessType });
+        return applyClassificationRules(row, classificationRules, { businessType, entityType });
       });
       
       setActualData(loadedData);
@@ -1932,7 +1990,7 @@ export default function FinancialReview() {
             if (!mapped['H1']) {
               mapped['H1'] = deriveH1FromRevenueAndBalance(mapped);
             }
-            return applyClassificationRules(mapped, classificationRules, { businessType });
+            return applyClassificationRules(mapped, classificationRules, { businessType, entityType });
           })
           .filter(row => {
             // Filter out rows where both opening and closing balances are 0
