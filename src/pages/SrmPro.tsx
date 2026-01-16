@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle, Upload, Trash2, Save, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { processAccountingData, summarizeData, deepClean } from '@/utils/srmProcessor';
 
@@ -29,7 +30,37 @@ const SRMPro = () => {
   const [selectedYear, setSelectedYear] = useState('');
   const [sortColumn, setSortColumn] = useState<string>('');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string | string[]>>({});
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [savedTBData, setSavedTBData] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [data2, setData2] = useState<any[]>([]);
+  const [summary2, setSummary2] = useState<Record<string, number>>({});
+  const [currentYearData2, setCurrentYearData2] = useState<Record<string, number>>({});
+  const [previousYearData2, setPreviousYearData2] = useState<Record<string, number>>({});
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [rowNotes, setRowNotes] = useState<Record<number, string>>({});
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [rowEvidence, setRowEvidence] = useState<Record<number, any[]>>({});
+  const [rowToDelete, setRowToDelete] = useState<number | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [currentPageMapped, setCurrentPageMapped] = useState(1);
+  const [pageSizeMapped, setPageSizeMapped] = useState(100);
+  const [currentPageMapped2, setCurrentPageMapped2] = useState(1);
+  const [pageSizeMapped2, setPageSizeMapped2] = useState(100);
+  const [filterSearches, setFilterSearches] = useState<Record<string, string>>({});
+  const [selectedColumns, setSelectedColumns] = useState<Record<string, string[]>>({});
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [editingRow, setEditingRow] = useState<any>(null);
+  const [noteNumberDialogOpen, setNoteNumberDialogOpen] = useState(false);
+  const [skipEmptyNoteNumbers, setSkipEmptyNoteNumbers] = useState(true);
+  const [noteNumbers, setNoteNumbers] = useState<Record<string, string>>({});
+  const [startingNoteNumber, setStartingNoteNumber] = useState(1);
+  const [selectedMappingConfig, setSelectedMappingConfig] = useState('');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [savedMappings, setSavedMappings] = useState<any[]>([]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -112,33 +143,33 @@ const SRMPro = () => {
           toast.success(`Trial Balance loaded: ${processed.length} items`, { duration: 3000 });
         }
 
-        // Process with mapping data 2 (with priority) for BS2/PL2
-        const processed2 = processAccountingData(wb, mappingData2, assesseeType, true);
-        console.log('Processed data (Mapping 2 with priority):', processed2.length, 'rows');
+        // TODO: Process with mapping data 2 (with priority) for BS2/PL2
+        // const processed2 = processAccountingData(wb, mappingData2, assesseeType, true);
+        // console.log('Processed data (Mapping 2 with priority):', processed2.length, 'rows');
         
-        setData2(processed2);
+        // setData2(processed2);
         
         // Create merged dataset for Summary2/BS2/PL2:
         // Use Mapped Category 2 when present, otherwise use Mapped Category from original
-        const mergedData = processed.map((row, index) => {
-          const row2 = processed2[index];
-          const mappedCategory2 = row2?.['Mapped Category'];
-          
-          // If Mapped Category 2 exists and is not 'NOT MAPPED', use it; otherwise use original
-          if (mappedCategory2 && mappedCategory2 !== 'NOT MAPPED') {
-            return { ...row, 'Mapped Category': mappedCategory2 };
-          }
-          return row;
-        });
+        // const mergedData = processed.map((row, index) => {
+        //   const row2 = processed2[index];
+        //   const mappedCategory2 = row2?.['Mapped Category'];
+        //   
+        //   // If Mapped Category 2 exists and is not 'NOT MAPPED', use it; otherwise use original
+        //   if (mappedCategory2 && mappedCategory2 !== 'NOT MAPPED') {
+        //     return { ...row, 'Mapped Category': mappedCategory2 };
+        //   }
+        //   return row;
+        // });
         
-        const summarized2 = summarizeData(mergedData);
-        setSummary2(summarized2);
+        // const summarized2 = summarizeData(mergedData);
+        // setSummary2(summarized2);
 
-        if (selectedPeriod === 'current') {
-          setCurrentYearData2(summarized2);
-        } else {
-          setPreviousYearData2(summarized2);
-        }
+        // if (selectedPeriod === 'current') {
+        //   setCurrentYearData2(summarized2);
+        // } else {
+        //   setPreviousYearData2(summarized2);
+        // }
 
         setActiveTab('results');
         toast.success(`${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully`);
@@ -292,6 +323,159 @@ const SRMPro = () => {
     }));
   };
 
+  const handleAddNote = (index: number, note: string) => {
+    setRowNotes((prev) => ({
+      ...prev,
+      [index]: note,
+    }));
+  };
+
+  const handleUploadEvidence = (index: number, files: FileList | null) => {
+    if (files) {
+      setRowEvidence((prev) => ({
+        ...prev,
+        [index]: Array.from(files),
+      }));
+    }
+  };
+
+  const handleEditRow = (index: number) => {
+    toast.info(`Edit functionality for row ${index + 1} coming soon`);
+  };
+
+  const handleBulkAddNote = () => {
+    toast.info('Bulk add note functionality coming soon');
+  };
+
+  const handleBulkUploadEvidence = (files: FileList | null) => {
+    if (files) {
+      toast.success(`${files.length} file(s) uploaded for selected rows`);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    const indices = Array.from(selectedRows);
+    const newData = data.filter((_, i) => !indices.includes(i));
+    setData(newData);
+    setSelectedRows(new Set());
+    toast.success(`${indices.length} row(s) deleted`);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedRows.size === filteredAndSortedData.length) {
+      setSelectedRows(new Set());
+    } else {
+      setSelectedRows(new Set(filteredAndSortedData.map((_, i) => i)));
+    }
+  };
+
+  const handleSelectRow = (index: number) => {
+    const newSelected = new Set(selectedRows);
+    if (newSelected.has(index)) {
+      newSelected.delete(index);
+    } else {
+      newSelected.add(index);
+    }
+    setSelectedRows(newSelected);
+  };
+
+  const handleExportToExcel = () => {
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Data");
+    XLSX.writeFile(wb, `export-${Date.now()}.xlsx`);
+    toast.success('Data exported successfully');
+  };
+
+  const getUniqueColumnValues = useMemo(() => {
+    const values: Record<string, string[]> = {};
+    data.forEach((row) => {
+      Object.keys(row).forEach((key) => {
+        if (!values[key]) values[key] = [];
+        const val = String(row[key] || '');
+        if (!values[key].includes(val)) {
+          values[key].push(val);
+        }
+      });
+    });
+    return values;
+  }, [data]);
+
+  const handleDeleteConfirm = () => {
+    if (rowToDelete !== null) {
+      const newData = data.filter((_, i) => i !== rowToDelete);
+      setData(newData);
+      setRowToDelete(null);
+      setDeleteDialogOpen(false);
+      toast.success('Row deleted successfully');
+    }
+  };
+
+  const handleSaveEdit = () => {
+    if (editingRow && rowToDelete !== null) {
+      const newData = [...data];
+      newData[rowToDelete] = editingRow;
+      setData(newData);
+      setEditDialogOpen(false);
+      setEditingRow(null);
+      toast.success('Row updated successfully');
+    }
+  };
+
+  const handleClearSavedTBData = () => {
+    setSavedTBData([]);
+    localStorage.removeItem('srmPro_savedTBData');
+    toast.success('Saved trial balance data cleared');
+  };
+
+  const handleSaveMappingConfiguration = () => {
+    const configName = prompt('Enter configuration name:');
+    if (configName) {
+      const config = {
+        id: Date.now().toString(),
+        name: configName,
+        mappings: columnFilters,
+        date: new Date().toISOString()
+      };
+      const newMappings = [...savedMappings, config];
+      setSavedMappings(newMappings);
+      localStorage.setItem('srmPro_savedMappings', JSON.stringify(newMappings));
+      toast.success('Mapping configuration saved');
+    }
+  };
+
+  const handleLoadMappingConfiguration = (configId: string) => {
+    const config = savedMappings.find((m) => m.id === configId);
+    if (config) {
+      setColumnFilters(config.mappings);
+      toast.success('Mapping configuration loaded');
+    }
+  };
+
+  const handleDeleteMappingConfiguration = (configId: string) => {
+    const newMappings = savedMappings.filter((m) => m.id !== configId);
+    setSavedMappings(newMappings);
+    localStorage.setItem('srmPro_savedMappings', JSON.stringify(newMappings));
+    toast.success('Mapping configuration deleted');
+  };
+
+  const handleGenerateNoteNumbers = () => {
+    const newNoteNumbers: Record<string, string> = {};
+    let noteNumber = startingNoteNumber;
+    
+    Object.keys(summary).forEach((key) => {
+      if (skipEmptyNoteNumbers && summary[key] === 0) {
+        return; // Skip empty values
+      }
+      newNoteNumbers[key] = noteNumber.toString();
+      noteNumber++;
+    });
+    
+    setNoteNumbers(newNoteNumbers);
+    setNoteNumberDialogOpen(false);
+    toast.success(`Generated note numbers for ${Object.keys(newNoteNumbers).length} items`);
+  };
+
   const filteredAndSortedData = useMemo(() => {
     let result = [...data];
 
@@ -300,7 +484,10 @@ const SRMPro = () => {
       if (filterValue) {
         result = result.filter((row) => {
           const cellValue = String(row[column] || '').toLowerCase();
-          return cellValue.includes(filterValue.toLowerCase());
+          if (Array.isArray(filterValue)) {
+            return filterValue.some(fv => String(fv).toLowerCase() === cellValue);
+          }
+          return cellValue.includes(String(filterValue).toLowerCase());
         });
       }
     });
@@ -785,8 +972,8 @@ const SRMPro = () => {
                       <p className="mt-2 text-xs text-muted-foreground">Processing...</p>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -998,8 +1185,8 @@ const SRMPro = () => {
                                 <Input
                                   type="text"
                                   placeholder="Add note..."
-                                  value={rowNotes[originalIndex] || ''}
-                                  onChange={(e) => handleAddNote(originalIndex, e.target.value)}
+                                  value={rowNotes[i] || ''}
+                                  onChange={(e) => handleAddNote(i, e.target.value)}
                                   className="min-w-[150px] h-8 text-xs"
                                 />
                               </td>
@@ -1008,11 +1195,11 @@ const SRMPro = () => {
                                   <Input
                                     type="file"
                                     multiple
-                                    onChange={(e) => handleUploadEvidence(originalIndex, e.target.files)}
+                                    onChange={(e) => handleUploadEvidence(i, e.target.files)}
                                     className="hidden"
-                                    id={`evidence-${originalIndex}`}
+                                    id={`evidence-${i}`}
                                   />
-                                  <label htmlFor={`evidence-${originalIndex}`}>
+                                  <label htmlFor={`evidence-${i}`}>
                                     <Button
                                       type="button"
                                       variant="outline"
@@ -1020,16 +1207,16 @@ const SRMPro = () => {
                                       className="gap-1 h-8 text-xs cursor-pointer"
                                       onClick={(e) => {
                                         e.preventDefault();
-                                        document.getElementById(`evidence-${originalIndex}`)?.click();
+                                        document.getElementById(`evidence-${i}`)?.click();
                                       }}
                                     >
                                       <Upload className="h-3 w-3" />
                                       Upload
                                     </Button>
                                   </label>
-                                  {rowEvidence[originalIndex] && rowEvidence[originalIndex].length > 0 && (
+                                  {rowEvidence[i] && rowEvidence[i].length > 0 && (
                                     <span className="text-xs text-green-600">
-                                      {rowEvidence[originalIndex].length} file(s)
+                                      {rowEvidence[i].length} file(s)
                                     </span>
                                   )}
                                 </div>
@@ -1040,7 +1227,7 @@ const SRMPro = () => {
                                     variant="outline"
                                     size="sm"
                                     className="gap-1 h-8 text-xs px-2"
-                                    onClick={() => handleEditRow(originalIndex)}
+                                    onClick={() => handleEditRow(i)}
                                   >
                                     Edit
                                   </Button>
@@ -1049,7 +1236,7 @@ const SRMPro = () => {
                                     size="sm"
                                     className="gap-1 h-8 text-xs px-2"
                                     onClick={() => {
-                                      setRowToDelete(originalIndex);
+                                      setRowToDelete(i);
                                       setDeleteDialogOpen(true);
                                     }}
                                   >
@@ -1059,8 +1246,7 @@ const SRMPro = () => {
                                 </div>
                               </td>
                           </tr>
-                        );
-                      })}
+                        ))}
                     </tbody>
                     <tfoot className="bg-slate-100 font-bold sticky bottom-0">
                       <tr>
@@ -1249,7 +1435,7 @@ const SRMPro = () => {
                     </div>
                   </div>
                   <Button 
-                    onClick={() => handleExportToExcel('tb2')} 
+                    onClick={handleExportToExcel} 
                     variant="outline" 
                     size="sm"
                     className="gap-2"
@@ -2820,7 +3006,7 @@ const SRMPro = () => {
                 type="number"
                 min="1"
                 value={startingNoteNumber}
-                onChange={(e) => setStartingNoteNumber(e.target.value)}
+                onChange={(e) => setStartingNoteNumber(parseInt(e.target.value) || 1)}
                 placeholder="e.g., 1"
               />
             </div>
