@@ -142,6 +142,67 @@ function getOtherIncomeH3(ledger: string, parent: string): string {
   return 'Miscellaneous non-operating Income';
 }
 
+function getPpeH3(ledger: string, parent: string): string {
+  const rules: Array<{ label: string; keywords: string[] }> = [
+    { label: 'Gross Block - Freehold Land', keywords: ['freehold land', 'land freehold', 'owned land', 'plot', 'land asset', 'land property'] },
+    { label: 'Gross Block - Leasehold Land', keywords: ['leasehold land', 'land leasehold', 'leased land', 'land on lease', 'long term lease land'] },
+    { label: 'Gross Block - Leasehold Improvement', keywords: ['leasehold improvement', 'lease improvement', 'lease renovation', 'lease fit out', 'lease interior', 'tenant improvement'] },
+    { label: 'Gross Block - Buildings', keywords: ['office building', 'factory building', 'warehouse', 'godown', 'commercial building', 'civil construction', 'structure', 'building'] },
+    { label: 'Gross Block - Plant and Machinery', keywords: ['production machinery', 'manufacturing equipment', 'tools and machinery', 'equipment industrial', 'machinery', 'machine', 'plant'] },
+    { label: 'Gross Block - Furniture and Fixtures', keywords: ['office furniture', 'furniture', 'fixtures', 'desk', 'table', 'chair', 'workstation', 'cabinet', 'cupboard', 'rack', 'shelf'] },
+    { label: 'Gross Block - Electrical Installations', keywords: ['electrical installation', 'electrical fitting', 'wiring', 'cabling', 'switchboard', 'panel board', 'transformer', 'generator', 'dg set', 'power installation'] },
+    { label: 'Gross Block - Office Equipment', keywords: ['office equipment', 'printer', 'scanner', 'photocopier', 'copier machine', 'xerox', 'projector', 'shredder', 'laminator', 'biometric machine', 'attendance machine'] },
+    { label: 'Gross Block - Computers', keywords: ['computer', 'desktop', 'laptop', 'notebook', 'server', 'workstation', 'cpu', 'monitor', 'ups', 'router', 'switch', 'networking equipment'] },
+    { label: 'Gross Block - Vehicles', keywords: ['commercial vehicle', 'vehicle', 'car', 'truck', 'lorry', 'van', 'bus', 'two wheeler', 'scooter', 'bike'] },
+    { label: 'Gross Block - Capital Work-in-Progress (CWIP)', keywords: ['capital work in progress', 'cwip', 'capital wip', 'asset under construction', 'project under construction', 'work in progress capital', 'incomplete asset'] },
+  ];
+
+  const matched = rules.find(rule => hasAnyInLedgerOrParent(ledger, parent, rule.keywords));
+  return matched ? matched.label : '';
+}
+
+function getCashBankH3(primary: string, ledger: string, parent: string): string {
+  if (matchesGroup(primary, 'cash-in-hand')) {
+    if (hasAnyInLedgerOrParent(ledger, parent, ['cash'])) {
+      return 'Cash on hand';
+    }
+    return '';
+  }
+
+  if (!matchesGroup(primary, 'bank accounts')) {
+    return '';
+  }
+
+  if (hasAnyInLedgerOrParent(ledger, parent, ['eefc', 'exchange earners foreign currency'])) {
+    return 'EEFC Account';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['margin money', 'margin', 'lien', 'lien marked'])) {
+    return 'Bank balances held as margin money';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['security', 'secured', 'collateral', 'against borrowing', 'against loan', 'loan security'])) {
+    return 'Bank balances held as security against borrowings';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['cheque', 'draft', 'dd'])) {
+    return 'Cheques, drafts on hand';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['fd', 'fdr', 'fixed deposit', 'term deposit', 'td', 'deposit']) &&
+    hasAnyInLedgerOrParent(ledger, parent, ['3 months', '90 days', 'upto 3 months', 'short term', 'st'])) {
+    return 'Bank deposits with upto three months maturity';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['fd', 'fdr', 'fixed deposit', 'term deposit', 'td', 'deposit']) &&
+    hasAnyInLedgerOrParent(ledger, parent, ['12 months', '365 days', '1 year', 'upto 12 months'])) {
+    return 'Bank deposits with upto twelve months maturity';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['saving', 'sb'])) {
+    return 'Balances with banks in savings accounts';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['current', 'ca'])) {
+    return 'Balances with banks in current accounts';
+  }
+
+  return 'Other bank balances';
+}
+
 function isUserDefined(value?: string): boolean {
   return normalize(value) === 'user_defined' || normalize(value) === 'user defined';
 }
@@ -175,16 +236,193 @@ export function applyClassificationRules(
     return row;
   }
   const allowAutoOverride = forceAuto || !hasMeaningfulH2 || !hasMeaningfulH3 || isGenericH2(row['H2']);
+  const primary = normalize(row['Primary Group']);
+  const parent = normalize(row['Parent Group']);
+  const group = primary || parent;
+  const ledger = normalize(row['Ledger Name']);
+  const businessType = normalize(context.businessType);
+  const entityType = context.entityType;
+  const isTrading = businessType.includes('trading');
+  const isCompany = isCompanyEntity(entityType);
+  const isPartnership = isPartnershipEntity(entityType);
+
   if (allowAutoOverride) {
-    const primary = normalize(row['Primary Group']);
-    const parent = normalize(row['Parent Group']);
-    const group = primary || parent;
-    const ledger = normalize(row['Ledger Name']);
-    const businessType = normalize(context.businessType);
-    const entityType = context.entityType;
-    const isTrading = businessType.includes('trading');
-    const isCompany = isCompanyEntity(entityType);
-    const isPartnership = isPartnershipEntity(entityType);
+    const reservesMatch = [
+      'reserves and surplus',
+      'reserve and surplus',
+      'reserves & surplus',
+      'reserve & surplus',
+    ].some(phrase =>
+      matchesGroup(primary, phrase) ||
+      matchesGroup(parent, phrase) ||
+      matchesGroup(group, phrase) ||
+      matchesGroup(ledger, phrase)
+    );
+    const capitalMatch = matchesGroup(primary, 'capital account') ||
+      matchesGroup(parent, 'capital account') ||
+      matchesGroup(group, 'capital account');
+
+    if (capitalMatch && reservesMatch) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['capital reserve'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': 'Reserves and Surplus',
+          'H3': 'Capital Reserve',
+        }, 'Reserves & Surplus - Capital Reserve');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['securities premium'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': 'Reserves and Surplus',
+          'H3': 'Securities Premium',
+        }, 'Reserves & Surplus - Securities Premium');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['capital redemption'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': 'Reserves and Surplus',
+          'H3': 'Capital Redemption Reserve',
+        }, 'Reserves & Surplus - Capital Redemption');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['debenture'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': 'Reserves and Surplus',
+          'H3': 'Debenture Redemption Reserve',
+        }, 'Reserves & Surplus - Debenture Redemption');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['revaluation'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': 'Reserves and Surplus',
+          'H3': 'Revaluation Reserve',
+        }, 'Reserves & Surplus - Revaluation');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['share option'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': 'Reserves and Surplus',
+          'H3': 'Share Option Outstanding Account',
+        }, 'Reserves & Surplus - Share Option');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['general'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': 'Reserves and Surplus',
+          'H3': 'General Reserve',
+        }, 'Reserves & Surplus - General');
+      }
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Reserves and Surplus',
+        'H3': 'Surplus in Statement of Profit and Loss',
+      }, 'Reserves & Surplus - Surplus');
+    }
+
+    if ((matchesGroup(parent, 'primary') || matchesGroup(group, 'primary')) &&
+      hasAnyInLedgerOrParent(ledger, parent, ['profit', 'loss', 'profit & loss'])) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Reserves and Surplus',
+        'H3': 'Surplus in Statement of Profit and Loss',
+      }, 'Profit & Loss A/c');
+    }
+  }
+
+  if (allowAutoOverride && rules.length > 0) {
+    const matched = rules.find(rule => {
+      const primaryNeedle = normalize(rule.primaryGroupContains);
+      const parentNeedle = normalize(rule.parentGroupContains);
+      const ledgerNeedle = normalize(rule.ledgerNameContains);
+      const primaryMatch = primaryNeedle ? matchesPhrase(primary, primaryNeedle) : true;
+      const parentMatch = parentNeedle ? matchesPhrase(parent, parentNeedle) : true;
+      const ledgerMatch = ledgerNeedle ? (matchesPhrase(ledger, ledgerNeedle) || matchesPhrase(parent, ledgerNeedle)) : true;
+      return primaryMatch && parentMatch && ledgerMatch;
+    });
+
+    if (matched) {
+      const nextRow: LedgerRow = {
+        ...row,
+        'H1': matched.h1 || row['H1'] || '',
+        'H2': matched.h2 || row['H2'] || '',
+        'H3': matched.h3 || row['H3'] || '',
+      };
+      return addAutoNote(nextRow, 'User Rule');
+    }
+  }
+
+  if (allowAutoOverride) {
+    const isCapitalAccount = normalize(row['H1']) === 'liability' && matchesGroup(group, 'capital account');
+    if (isCapitalAccount) {
+      if (isCompany) {
+        if (hasAnyInLedgerOrParent(ledger, parent, ['share capital'])) {
+          return addAutoNote({
+            ...row,
+            'H1': 'Liability',
+            'H2': 'Share Capital',
+            'H3': 'Equity - fully paid up',
+          }, 'Capital Account - Share Capital');
+        }
+        if (hasAnyInLedgerOrParent(ledger, parent, ['preference'])) {
+          return addAutoNote({
+            ...row,
+            'H1': 'Liability',
+            'H2': 'Share Capital',
+            'H3': 'Preference - fully paid up',
+          }, 'Capital Account - Preference');
+        }
+      } else if (isPartnership) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': "Partners' Capital Account",
+          'H3': "Partners' Capital Account",
+        }, 'Capital Account - Partnership');
+      } else {
+        return addAutoNote({
+          ...row,
+          'H1': 'Liability',
+          'H2': "Owners' Capital Account",
+          'H3': "Owners' Capital Account",
+        }, 'Capital Account - Owner');
+      }
+    }
+
+    const isPpeGroup = normalize(row['H1']) === 'asset' && [
+      'fixed assets',
+      'ppe',
+      'property plant and equipment',
+      'property plant & equipment',
+    ].some(phrase => matchesGroup(primary, phrase));
+    if (isPpeGroup) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Property, Plant and Equipment',
+        'H3': getPpeH3(ledger, parent),
+      }, 'Fixed Assets - PPE');
+    }
+
+    if (normalize(row['H1']) === 'asset' && (matchesGroup(primary, 'cash-in-hand') || matchesGroup(primary, 'bank accounts'))) {
+      const h3 = getCashBankH3(primary, ledger, parent);
+      if (h3) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Asset',
+          'H2': 'Cash and Bank Balances',
+          'H3': h3,
+        }, 'Cash & Bank Balances');
+      }
+    }
 
     if (matchesGroup(group, 'sales accounts')) {
       return addAutoNote({
@@ -321,13 +559,13 @@ export function applyClassificationRules(
           'H3': "Partners' Remuneration",
         }, 'Indirect Expenses - Partners Remuneration');
       }
-      if (hasAnyInLedgerOrParent(ledger, parent, ['salary', 'salaries', 'wages', 'wage', 'stipend'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['esi'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
           'H2': 'Employee Benefits Expense',
-          'H3': 'Salaries and wages',
-        }, 'Indirect Expenses - Salaries');
+          'H3': 'Contribution to provident and other funds',
+        }, 'Indirect Expenses - Employee Benefits (ESI/PF)');
       }
       if (hasAnyInLedgerOrParent(ledger, parent, ['pf', 'provident', 'esic', 'employee state', 'gratuity'])) {
         return addAutoNote({
@@ -336,6 +574,22 @@ export function applyClassificationRules(
           'H2': 'Employee Benefits Expense',
           'H3': 'Contribution to provident and other funds',
         }, 'Indirect Expenses - Provident/Gratuity');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['salary', 'salaries', 'wages', 'wage', 'stipend'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Employee Benefits Expense',
+          'H3': 'Salaries and wages',
+        }, 'Indirect Expenses - Salaries');
+      }
+      if (hasAnyInLedgerOrParent(ledger, parent, ['employee'])) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Employee Benefits Expense',
+          'H3': 'Salaries and wages',
+        }, 'Indirect Expenses - Employee Benefits (Salaries)');
       }
       if ((hasAnyInLedgerOrParent(ledger, parent, ['income tax', 'tax']) && hasAnyInLedgerOrParent(ledger, parent, ['current', 'current year']))) {
         return addAutoNote({
@@ -659,37 +913,8 @@ export function applyClassificationRules(
     }
   }
 
-  if (!allowAutoOverride || rules.length === 0) return row;
-
-  const primary = normalize(row['Primary Group']);
-  const parent = normalize(row['Parent Group']);
-  const ledger = normalize(row['Ledger Name']);
-
-  const matched = rules.find(rule => {
-    const primaryNeedle = normalize(rule.primaryGroupContains);
-    const parentNeedle = normalize(rule.parentGroupContains);
-    const ledgerNeedle = normalize(rule.ledgerNameContains);
-    const primaryMatch = primaryNeedle ? matchesPhrase(primary, primaryNeedle) : true;
-    const parentMatch = parentNeedle ? matchesPhrase(parent, parentNeedle) : true;
-    const ledgerMatch = ledgerNeedle ? (matchesPhrase(ledger, ledgerNeedle) || matchesPhrase(parent, ledgerNeedle)) : true;
-    return primaryMatch && parentMatch && ledgerMatch;
-  });
-
-  if (!matched) return row;
-
-  const nextRow: LedgerRow = {
-    ...row,
-    'H1': row['H1'] || matched.h1 || '',
-    'H2': row['H2'] || matched.h2 || '',
-    'H3': row['H3'] || matched.h3 || '',
-  };
-
-  if (isUserDefined(nextRow['H2']) || isUserDefined(nextRow['H3'])) {
-    nextRow['H2'] = isUserDefined(nextRow['H2']) ? '' : nextRow['H2'];
-    nextRow['H3'] = isUserDefined(nextRow['H3']) ? '' : nextRow['H3'];
-    nextRow['Notes'] = nextRow['Notes'] || 'User_Defined - set H2/H3 manually';
-  }
-
-  return nextRow;
+  return row;
 }
+
+
 
