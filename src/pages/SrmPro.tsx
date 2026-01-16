@@ -1194,46 +1194,6 @@ const SRMPro = () => {
                             <td className="px-3 py-2">
                               <div className="flex items-center gap-2">
                                 <Input
-                                  type="text"
-                                  placeholder="Add note..."
-                                  value={rowNotes[i] || ''}
-                                  onChange={(e) => handleAddNote(i, e.target.value)}
-                                  className="min-w-[150px] h-8 text-xs"
-                                />
-                              </td>
-                              <td className="px-3 py-2">
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    type="file"
-                                    multiple
-                                    onChange={(e) => handleUploadEvidence(i, e.target.files)}
-                                    className="hidden"
-                                    id={`evidence-${i}`}
-                                  />
-                                  <label htmlFor={`evidence-${i}`}>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="gap-1 h-8 text-xs cursor-pointer"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        document.getElementById(`evidence-${i}`)?.click();
-                                      }}
-                                    >
-                                      <Upload className="h-3 w-3" />
-                                      Upload
-                                    </Button>
-                                  </label>
-                                  {rowEvidence[i] && rowEvidence[i].length > 0 && (
-                                    <span className="text-xs text-green-600">
-                                      {rowEvidence[i].length} file(s)
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2 whitespace-nowrap">
-                                <div className="flex gap-1 flex-nowrap">
                                   type="file"
                                   multiple
                                   onChange={(e) => handleUploadEvidence(originalIndex, e.target.files)}
@@ -1245,18 +1205,6 @@ const SRMPro = () => {
                                     type="button"
                                     variant="outline"
                                     size="sm"
-                                    className="gap-1 h-8 text-xs px-2"
-                                    onClick={() => handleEditRow(i)}
-                                  >
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    className="gap-1 h-8 text-xs px-2"
-                                    onClick={() => {
-                                      setRowToDelete(i);
-                                      setDeleteDialogOpen(true);
                                     className="gap-1 h-8 text-xs cursor-pointer"
                                     onClick={(e) => {
                                       e.preventDefault();
@@ -1299,7 +1247,8 @@ const SRMPro = () => {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                        );
+                      })}
                     </tbody>
                     <tfoot className="bg-slate-100 font-bold sticky bottom-0">
                       <tr>
