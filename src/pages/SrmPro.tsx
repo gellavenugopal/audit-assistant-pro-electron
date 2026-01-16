@@ -81,7 +81,7 @@ const SRMPro = () => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
         const processed = await processAccountingData(wb, assesseeType);
-        if (processed.length === 0) throw new Error('No ledgers found. Check Sheet 2 column headers.');
+        if (processed.length === 0) throw new Error('No ledgers found. Please check the Trial Balance sheet format.');
 
         // Check for duplicates and merge with existing data
         if (savedTBData.length > 0) {
@@ -912,7 +912,7 @@ const SRMPro = () => {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-lg">Upload Tally Excel</CardTitle>
-              <CardDescription className="text-xs">Required sheets: Mapping | Trial Balance | Hierarchy</CardDescription>
+              <CardDescription className="text-xs">Upload Trial Balance sheet with hierarchy columns</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">

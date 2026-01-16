@@ -135,13 +135,14 @@ export const processAccountingData = async (workbook: XLSX.WorkBook, assesseeTyp
   // Find column indices
   const findColumnIndex = (keywords: string[]) => {
     return headers.findIndex((h: string) => {
+      if (!h) return false;
       const clean = deepClean(h);
       return keywords.some(kw => clean.includes(kw));
     });
   };
 
   const nameIdx = findColumnIndex(['name', 'ledger', 'particulars']);
-  const parentIdx = findColumnIndex(['parent']) !== -1 ? findColumnIndex(['parent']) : 11; // Default to column 11
+  const parentIdx = findColumnIndex(['parent']);
   const openingIdx = findColumnIndex(['opening', 'openingbalance']);
   const debitIdx = findColumnIndex(['debit']);
   const creditIdx = findColumnIndex(['credit']);
@@ -151,24 +152,35 @@ export const processAccountingData = async (workbook: XLSX.WorkBook, assesseeTyp
 
   console.log('Column indices:', { nameIdx, parentIdx, openingIdx, debitIdx, creditIdx, closingIdx, isDeemedPositiveIdx, trailBalanceIdx });
 
+  // Validate required columns
+  if (nameIdx === -1) {
+    console.error('Name column not found. Headers:', headers);
+    throw new Error('Name/Ledger column not found in the sheet');
+  }
+
   // Process each row
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const results: any[] = [];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  dataRows.forEach((row: any[]) => {
-    if (!row || row.length === 0 || !row[nameIdx]) return;
+  dataRows.forEach((row: any[], rowIndex: number) => {
+    if (!row || row.length === 0) return;
 
     const name = String(row[nameIdx] || '').trim();
     if (!name) return;
 
-    const parent = String(row[parentIdx] || '').trim();
-    const openingBalance = parseFloat(String(row[openingIdx] || 0).replace(/,/g, '')) || 0;
-    const debit = parseFloat(String(row[debitIdx] || 0).replace(/,/g, '')) || 0;
-    const credit = parseFloat(String(row[creditIdx] || 0).replace(/,/g, '')) || 0;
-    const closingBalance = parseFloat(String(row[closingIdx] || 0).replace(/,/g, '')) || 0;
-    const isDeemedPositive = row[isDeemedPositiveIdx] === 1 || row[isDeemedPositiveIdx] === '1';
-    const trailBalance = String(row[trailBalanceIdx] || '').trim();
+    const parent = parentIdx !== -1 ? String(row[parentIdx] || '').trim() : '';
+    const openingBalance = openingIdx !== -1 ? (parseFloat(String(row[openingIdx] || 0).replace(/,/g, '')) || 0) : 0;
+    const debit = debitIdx !== -1 ? (parseFloat(String(row[debitIdx] || 0).replace(/,/g, '')) || 0) : 0;
+    const credit = creditIdx !== -1 ? (parseFloat(String(row[creditIdx] || 0).replace(/,/g, '')) || 0) : 0;
+    const closingBalance = closingIdx !== -1 ? (parseFloat(String(row[closingIdx] || 0).replace(/,/g, '')) || 0) : 0;
+    const isDeemedPositive = isDeemedPositiveIdx !== -1 ? (row[isDeemedPositiveIdx] === 1 || row[isDeemedPositiveIdx] === '1') : true;
+    const trailBalance = trailBalanceIdx !== -1 ? String(row[trailBalanceIdx] || '').trim() : '';
+
+    // Debug first few rows
+    if (rowIndex < 3) {
+      console.log(`Row ${rowIndex}:`, { name, parent, openingBalance, debit, credit, closingBalance, isDeemedPositive, trailBalance });
+    }
 
     // Build hierarchy path from Group.$Parent columns (12 onwards)
     const hierarchyParts: string[] = [];
