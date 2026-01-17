@@ -1580,7 +1580,10 @@ export default function FinancialReview() {
         setCurrentData(sortedClassifiedRows);
         const userDefinedCount = sortedClassifiedRows.filter(row => (row['Notes'] || '').toLowerCase().includes('user_defined')).length;
       } else {
-        setPreviousData(processedData);
+        const classifiedRows = filterClassifiedRows(processedData);
+        const sortedClassifiedRows = sortClassifiedByDefaultH2(classifiedRows);
+        setPreviousData(sortedClassifiedRows);
+        setCurrentData(sortedClassifiedRows);
       }
       
       // Fetch stock items if required
@@ -1682,7 +1685,10 @@ export default function FinancialReview() {
       const classifiedRows = filterClassifiedRows(pendingImportData);
       setCurrentData(sortClassifiedByDefaultH2(classifiedRows));
     } else {
-      setPreviousData(pendingImportData);
+      const classifiedRows = filterClassifiedRows(pendingImportData);
+      const sortedClassifiedRows = sortClassifiedByDefaultH2(classifiedRows);
+      setPreviousData(sortedClassifiedRows);
+      setCurrentData(sortedClassifiedRows);
     }
     
     // Save to database
@@ -3072,14 +3078,14 @@ export default function FinancialReview() {
         </div>
 
         {/* Content Area - Maximized for table display */}
-        <div className="flex-1 overflow-auto" style={{ height: 'calc(100vh - 160px)' }}>
+        <div className="flex-1 overflow-hidden" style={{ height: 'calc(100vh - 160px)' }}>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             
             {/* ACTUAL TRIAL BALANCE TAB */}
             <TabsContent value="actual-tb" className="mt-0 p-1">
-              <div className="border rounded overflow-y-auto" style={{ height: 'calc(100vh - 180px)' }}>
+              <div className="border rounded overflow-y-auto relative" style={{ height: 'calc(100vh - 180px)' }}>
             <Table className="table-fixed">
-              <TableHeader className="sticky top-0 bg-white z-10">
+              <TableHeader className="sticky top-0 bg-white z-20 shadow-sm">
                 <TableRow>
                   <TableHead className="w-8 sticky top-0 bg-white p-0" style={{ left: actualStickyOffsets.selection, zIndex: 20 }}>
                     <input
@@ -3117,7 +3123,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="top-0 bg-white relative" style={{ width: getActualColumnWidth('Parent Group') }}>
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Parent Group') }}>
                     <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Parent Group')}px` }}>
                       Parent Group
                       <ColumnFilter
@@ -3136,7 +3142,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="top-0 bg-white relative" style={{ width: getActualColumnWidth('Primary Group') }}>
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Primary Group') }}>
                     <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Primary Group')}px` }}>
                       Primary Group
                       <ColumnFilter
@@ -3155,7 +3161,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getActualColumnWidth('Opening Balance') }}>
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Opening Balance') }}>
                     <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Opening Balance')}px` }}>
                       Opening
                       <ColumnFilter
@@ -3175,7 +3181,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getActualColumnWidth('Debit') }}>
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Debit') }}>
                     <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Debit')}px` }}>
                       Debit
                       <ColumnFilter
@@ -3195,7 +3201,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getActualColumnWidth('Credit') }}>
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Credit') }}>
                     <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Credit')}px` }}>
                       Credit
                       <ColumnFilter
@@ -3215,7 +3221,7 @@ export default function FinancialReview() {
                       title="Drag to resize column"
                     />
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getActualColumnWidth('Closing Balance') }}>
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Closing Balance') }}>
                     <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Closing Balance')}px` }}>
                       Closing
                       <ColumnFilter
@@ -3338,9 +3344,9 @@ export default function FinancialReview() {
 
             {/* CLASSIFIED TRIAL BALANCE TAB */}
             <TabsContent value="classified-tb" className="mt-0 p-1">
-              <div className="border rounded-lg overflow-x-auto h-[calc(100vh-300px)]">
+              <div className="border rounded-lg overflow-auto relative h-[calc(100vh-300px)]">
             <Table className="table-fixed w-full border-collapse">
-              <TableHeader className="sticky top-0 bg-white z-10">
+              <TableHeader className="sticky top-0 bg-white z-20 shadow-sm">
                 <TableRow>
                   <TableHead className="w-8 sticky top-0 bg-white p-0" style={{ zIndex: 20 }}>
                     <input
@@ -3376,7 +3382,7 @@ export default function FinancialReview() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="top-0 bg-white relative" style={{ width: getColumnWidth('Parent Group') }}>
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('Parent Group') }}>
                     <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Parent Group')}px` }}>
                       Parent Group
                       <ColumnFilter
@@ -3389,7 +3395,7 @@ export default function FinancialReview() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="top-0 bg-white relative" style={{ width: getColumnWidth('Primary Group') }}>
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('Primary Group') }}>
                     <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Primary Group')}px` }}>
                       Primary Group
                       <ColumnFilter
@@ -3402,7 +3408,7 @@ export default function FinancialReview() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getColumnWidth('Opening Balance') }}>
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getColumnWidth('Opening Balance') }}>
                     <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getColumnFontSize('Opening Balance')}px` }}>
                       Opening
                       <ColumnFilter
@@ -3416,7 +3422,7 @@ export default function FinancialReview() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="text-right top-0 bg-white relative" style={{ width: getColumnWidth('Closing Balance') }}>
+                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getColumnWidth('Closing Balance') }}>
                     <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getColumnFontSize('Closing Balance')}px` }}>
                       Closing
                       <ColumnFilter
