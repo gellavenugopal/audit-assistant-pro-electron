@@ -64,6 +64,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useTallyODBC } from '@/hooks/useTallyODBC';
 import { useEngagement } from '@/contexts/EngagementContext';
+import { useClient } from '@/hooks/useClient';
 import { useTrialBalance, TrialBalanceLineInput } from '@/hooks/useTrialBalance';
 import { LedgerRow, generateLedgerKey } from '@/services/trialBalanceNewClassification';
 import { cn } from '@/lib/utils';
@@ -107,6 +108,87 @@ const BUSINESS_TYPES = [
 
 // Disabled entity types (not supported in this phase)
 const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
+
+const parseFinancialYearRange = (yearCode?: string | null) => {
+  if (!yearCode) return null;
+  const match = yearCode.trim().match(/^(\d{4})-(\d{2}|\d{4})$/);
+  if (!match) return null;
+  const startYear = parseInt(match[1], 10);
+  const endRaw = match[2];
+  const endYear = endRaw.length === 2 ? parseInt(`${String(startYear).slice(0, 2)}${endRaw}`, 10) : parseInt(endRaw, 10);
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return null;
+  return {
+    fromDate: `${startYear}-04-01`,
+    toDate: `${endYear}-03-31`,
+  };
+};
+
+const shiftDateByYears = (dateStr: string, years: number) => {
+  if (!dateStr) return '';
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const year = parseInt(match[1], 10);
+  const month = match[2];
+  const day = match[3];
+  return `${year + years}-${month}-${day}`;
+};
+
+const mapConstitutionToEntityType = (constitution?: string | null) => {
+  const normalized = (constitution || '').toLowerCase();
+  switch (normalized) {
+    case 'company':
+      return 'Private Limited Company';
+    case 'llp':
+      return 'Limited Liability Partnership (LLP)';
+    case 'partnership':
+      return 'Partnership';
+    case 'proprietorship':
+      return 'Individual / Sole Proprietorship';
+    case 'trust':
+      return 'Trust';
+    case 'society':
+      return 'Society';
+    default:
+      return 'Others';
+  }
+};
+
+const mapIndustryToBusinessType = (industry?: string | null) => {
+  const normalized = (industry || '').toLowerCase();
+  if (normalized.includes('manufactur')) return 'Manufacturing';
+  if (normalized.includes('trading') || normalized.includes('retail') || normalized.includes('wholesale')) {
+    return 'Trading - Wholesale and Retail';
+  }
+  if (normalized.includes('construct')) return 'Construction';
+  if (normalized.includes('service')) return 'Service';
+  return 'Others';
+};
+
+const formatDateIndianShort = (dateStr?: string) => {
+  if (!dateStr) return '';
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const year = match[1];
+  const month = parseInt(match[2], 10);
+  const day = match[3];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const mon = months[month - 1] || '';
+  const yy = year.slice(-2);
+  if (!mon) return '';
+  return `${day}-${mon}-${yy}`;
+};
+
+const formatFyLabel = (yearCode?: string | null) => {
+  if (!yearCode) return '';
+  const match = yearCode.trim().match(/^(\d{4})-(\d{2}|\d{4})$/);
+  if (!match) return '';
+  const startYear = parseInt(match[1], 10);
+  const endRaw = match[2];
+  const endYear = endRaw.length === 2 ? parseInt(`${String(startYear).slice(0, 2)}${endRaw}`, 10) : parseInt(endRaw, 10);
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return '';
+  const endShort = String(endYear).slice(-2);
+  return `FY ${startYear}-${endShort}`;
+};
 
 type InlineComboboxProps = {
   value: string;
@@ -285,6 +367,7 @@ export default function FinancialReview() {
   const { toast } = useToast();
   const odbcConnection = useTallyODBC();
   const trialBalanceDB = useTrialBalance(currentEngagement?.id);
+  const { client } = useClient(currentEngagement?.client_id || null);
   
   // Entity and Business Info
   const [entityType, setEntityType] = useState<string>('');
@@ -424,12 +507,57 @@ export default function FinancialReview() {
   const [stockSelectedCount, setStockSelectedCount] = useState(0);
   const [stockBulkUpdateRequestId, setStockBulkUpdateRequestId] = useState(0);
   const [stockDeleteRequestId, setStockDeleteRequestId] = useState(0);
+  const previousFromDate = useMemo(() => shiftDateByYears(fromDate, -1), [fromDate]);
+  const previousToDate = useMemo(() => shiftDateByYears(toDate, -1), [toDate]);
+  const currentFyLabel = useMemo(() => formatFyLabel(currentEngagement?.financial_year), [currentEngagement?.financial_year]);
+  const previousFyLabel = useMemo(() => {
+    if (!currentEngagement?.financial_year) return '';
+    const match = currentEngagement.financial_year.trim().match(/^(\d{4})-(\d{2}|\d{4})$/);
+    if (!match) return '';
+    const startYear = parseInt(match[1], 10);
+    const endRaw = match[2];
+    const endYear = endRaw.length === 2 ? parseInt(`${String(startYear).slice(0, 2)}${endRaw}`, 10) : parseInt(endRaw, 10);
+    if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return '';
+    const prevStart = startYear - 1;
+    const prevEndShort = String(endYear - 1).slice(-2);
+    return `FY ${prevStart}-${prevEndShort}`;
+  }, [currentEngagement?.financial_year]);
+  const visiblePeriodLabel = useMemo(() => {
+    if (activeTab === 'stock-items') return '';
+    const isPrevious = importPeriodType === 'previous';
+    const prefix = isPrevious ? 'Previous' : 'Current';
+    const fyLabel = isPrevious ? previousFyLabel : currentFyLabel;
+    if (fyLabel) return `${prefix} ${fyLabel}`;
+    return `${prefix} Period`;
+  }, [
+    activeTab,
+    importPeriodType,
+    currentFyLabel,
+    previousFyLabel,
+  ]);
+
   // Keep draft entity type in sync when dialog opens
   useEffect(() => {
     if (isEntityDialogOpen) {
       setEntityTypeDraft(entityType);
     }
   }, [isEntityDialogOpen, entityType]);
+
+  useEffect(() => {
+    const range = parseFinancialYearRange(currentEngagement?.financial_year);
+    if (!range) return;
+    setFromDate(range.fromDate);
+    setToDate(range.toDate);
+    setImportPeriodType('current');
+  }, [currentEngagement?.financial_year]);
+
+  useEffect(() => {
+    if (!client) return;
+    const mappedEntityType = mapConstitutionToEntityType(client.constitution);
+    const mappedBusinessType = mapIndustryToBusinessType(client.industry);
+    if (mappedEntityType) setEntityType(mappedEntityType);
+    if (mappedBusinessType) setBusinessType(mappedBusinessType);
+  }, [client?.id, client?.constitution, client?.industry]);
 
   useEffect(() => {
     const savedPort = localStorage.getItem('tb_odbc_port');
@@ -1378,7 +1506,19 @@ export default function FinancialReview() {
     
     setIsFetching(true);
     try {
-      const { data: lines, companyName } = await odbcConnection.fetchTrialBalance(fromDate, toDate);
+    const effectiveFromDate = importPeriodType === 'previous' ? previousFromDate : fromDate;
+    const effectiveToDate = importPeriodType === 'previous' ? previousToDate : toDate;
+    if (!effectiveFromDate || !effectiveToDate) {
+      toast({
+        title: 'Period required',
+        description: 'Please set a valid financial year period before importing.',
+        variant: 'destructive'
+      });
+      setIsFetching(false);
+      return;
+    }
+
+    const { data: lines, companyName } = await odbcConnection.fetchTrialBalance(effectiveFromDate, effectiveToDate);
       
       // Set company name
       if (companyName) {
@@ -1478,7 +1618,7 @@ export default function FinancialReview() {
           engagement_id: currentEngagement.id,
           user_id: currentEngagement.created_by || '',
           period: importPeriodType,
-          period_end_date: toDate,
+          period_end_date: effectiveToDate,
           sheet_name: 'TB CY'
         }));
 
@@ -1512,7 +1652,7 @@ export default function FinancialReview() {
       setIsFetching(false);
       setIsEntityDialogOpen(false);
     }
-  }, [entityType, businessType, fromDate, toDate, odbcConnection, importPeriodType, currentEngagement, trialBalanceDB, toast, classificationRules, deriveH1FromRevenueAndBalance, filterClassifiedRows, sortClassifiedByDefaultH2, userDefinedExpenseThreshold]);
+  }, [entityType, businessType, fromDate, toDate, previousFromDate, previousToDate, odbcConnection, importPeriodType, currentEngagement, trialBalanceDB, toast, classificationRules, deriveH1FromRevenueAndBalance, filterClassifiedRows, sortClassifiedByDefaultH2, userDefinedExpenseThreshold]);
 
   // Save only entity type override
   const handleSaveEntityType = useCallback(async () => {
@@ -1547,6 +1687,7 @@ export default function FinancialReview() {
     
     // Save to database
     if (currentEngagement?.id) {
+      const effectiveToDate = importPeriodType === 'previous' ? previousToDate : toDate;
       const dbLines: TrialBalanceLineInput[] = pendingImportData.map(row => ({
         account_code: row['Composite Key'] || '',
         account_name: row['Ledger Name'] || '',
@@ -1559,7 +1700,7 @@ export default function FinancialReview() {
         balance_type: getActualBalanceSign(row),
         note: row['Notes'] || null,
         period_type: importPeriodType,
-        period_ending: toDate || null,
+        period_ending: effectiveToDate || null,
       }));
       
       await trialBalanceDB.importLines(dbLines, false);
@@ -1591,7 +1732,7 @@ export default function FinancialReview() {
     
     setPendingImportData(null);
     setIsPeriodDialogOpen(false);
-  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, includeStockItems, businessType, odbcConnection, trialBalanceDB, toast, filterClassifiedRows, sortClassifiedByDefaultH2]);
+  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, previousToDate, includeStockItems, businessType, odbcConnection, trialBalanceDB, toast, filterClassifiedRows, sortClassifiedByDefaultH2]);
   
   // Handle adding a new line item
   const handleAddLineItem = useCallback(() => {
@@ -2574,13 +2715,10 @@ export default function FinancialReview() {
   const formatDateRange = useCallback(() => {
     try {
       if (!fromDate || !toDate) return 'Set Date Range';
-      
-      const from = new Date(fromDate);
-      const to = new Date(toDate);
-      
-      const fromStr = from.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
-      const toStr = to.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-      
+
+      const fromStr = formatDateIndianShort(fromDate);
+      const toStr = formatDateIndianShort(toDate);
+
       return `${fromStr} - ${toStr}`;
     } catch (error) {
       console.error('Date formatting error:', error);
@@ -2711,6 +2849,33 @@ export default function FinancialReview() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {activeTab !== 'stock-items' && (
+            <div className="flex items-center gap-1 rounded border bg-white p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={importPeriodType === 'current' ? 'default' : 'ghost'}
+                className="h-6 px-2 text-[10px]"
+                onClick={() => setImportPeriodType('current')}
+              >
+                Current
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={importPeriodType === 'previous' ? 'default' : 'ghost'}
+                className="h-6 px-2 text-[10px]"
+                onClick={() => setImportPeriodType('previous')}
+              >
+                Previous
+              </Button>
+            </div>
+          )}
+          {visiblePeriodLabel && (
+            <Badge variant="secondary" className="h-6 px-2 text-[10px]">
+              {visiblePeriodLabel}
+            </Badge>
+          )}
         </div>
 
         {/* Center: Date Range */}
@@ -3847,6 +4012,11 @@ export default function FinancialReview() {
             {/* Import Period Selection */}
             <div className="space-y-3">
               <label className="text-sm font-medium">Import Period *</label>
+              {(currentFyLabel || previousFyLabel) && (
+                <div className="text-xs text-muted-foreground">
+                  {currentFyLabel}{currentFyLabel && previousFyLabel ? ' / ' : ''}{previousFyLabel}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div
                   onClick={() => setImportPeriodType('current')}
@@ -3859,7 +4029,7 @@ export default function FinancialReview() {
                 >
                   <p className="font-semibold text-sm">Current Period</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {fromDate && toDate ? `${fromDate} to ${toDate}` : 'Set date range first'}
+                    {fromDate && toDate ? `${formatDateIndianShort(fromDate)} to ${formatDateIndianShort(toDate)}` : 'Set date range first'}
                   </p>
                 </div>
                 <div
@@ -3872,7 +4042,9 @@ export default function FinancialReview() {
                   )}
                 >
                   <p className="font-semibold text-sm">Previous Period</p>
-                  <p className="text-xs text-muted-foreground mt-1">For comparison</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {previousFromDate && previousToDate ? `${formatDateIndianShort(previousFromDate)} to ${formatDateIndianShort(previousToDate)}` : 'For comparison'}
+                  </p>
                 </div>
               </div>
             </div>
