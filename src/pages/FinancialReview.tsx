@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Switch } from '@/components/ui/switch';
 import {
   Command,
   CommandEmpty,
@@ -385,6 +386,7 @@ export default function FinancialReview() {
   const [isTableSettingsOpen, setIsTableSettingsOpen] = useState(false);
   const [tableSettings, setTableSettings] = useState(DEFAULT_TABLE_SETTINGS);
   const [externalConfigActive, setExternalConfigActive] = useState(false);
+  const [saveManualRulesToDefault, setSaveManualRulesToDefault] = useState(false);
   const actualColumns = useMemo(() => ([
     'Ledger Name',
     'Parent Group',
@@ -590,6 +592,52 @@ export default function FinancialReview() {
     setClassificationRules(rules);
   }, [currentEngagement?.id]);
 
+  const handleSaveManualRules = useCallback(() => {
+    const scope: RuleScope = saveManualRulesToDefault ? 'global' : 'client';
+
+    const sourceRows = selectedRowIndices.size > 0
+      ? Array.from(selectedRowIndices).map(index => currentData[index]).filter(Boolean)
+      : currentData.filter(row => row?.Auto === 'Manual');
+
+    if (sourceRows.length === 0) {
+      toast({
+        title: 'No Manual Rows',
+        description: 'Edit at least one row manually or select rows to save rules.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const newRules = sourceRows
+      .filter(row => row['H1'] && row['H2'] && row['H3'])
+      .map(row => ({
+        id: `rule_${Date.now()}_${row['Composite Key'] || row['Ledger Name']}`,
+        scope,
+        ledgerNameContains: String(row['Ledger Name'] || '').trim(),
+        primaryGroupContains: String(row['Primary Group'] || '').trim(),
+        parentGroupContains: String(row['Parent Group'] || '').trim(),
+        h1: String(row['H1'] || '').trim(),
+        h2: String(row['H2'] || '').trim(),
+        h3: String(row['H3'] || '').trim(),
+      }));
+
+    if (newRules.length === 0) {
+      toast({
+        title: 'Nothing to Save',
+        description: 'Selected rows must have H1, H2, and H3 filled.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const merged = [...classificationRules, ...newRules];
+    handleSaveClassificationRules(merged);
+    toast({
+      title: 'Rules Saved',
+      description: `Saved ${newRules.length} manual rule${newRules.length !== 1 ? 's' : ''}.`,
+    });
+  }, [classificationRules, selectedRowIndices, currentData, handleSaveClassificationRules, toast, saveManualRulesToDefault]);
+
   // Helper to get safe column settings with defaults
   const getColumnWidth = useCallback((columnName: string) => {
     const locked = tableSettings.classified.widths[columnName];
@@ -633,6 +681,10 @@ export default function FinancialReview() {
     return tableSettings.classified.rowHeight || 28;
   }, [tableSettings]);
 
+  const hasManualRows = useMemo(() => {
+    return currentData.some(row => row?.Auto === 'Manual');
+  }, [currentData]);
+
   const handleApplyClassificationRules = useCallback((rules: ClassificationRule[]) => {
     setClassificationRules(rules);
     setCurrentData(prev =>
@@ -656,35 +708,11 @@ export default function FinancialReview() {
   }, [currentEngagement?.id]);
 
   const handleReapplyAutoClassification = useCallback(() => {
-    const isPlaceholderValue = (value?: string) => {
-      const normalized = (value || '').toLowerCase().trim();
-      return !normalized ||
-        normalized === 'h2' ||
-        normalized === 'h3' ||
-        normalized === 'select h1' ||
-        normalized === 'select h1/h2' ||
-        normalized === 'select h1 h2';
-    };
-    const isGenericOtherExpense = (value?: string) => {
-      const normalized = (value || '').toLowerCase().trim();
-      return normalized.startsWith('other exp');
-    };
-
     setCurrentData(prev => prev.map(row => {
       if (row.Auto === 'Manual') {
         return row;
       }
-      const primary = (row['Primary Group'] || '').toLowerCase();
-      const parent = (row['Parent Group'] || '').toLowerCase();
-      const group = primary || parent;
-      const forceClear = group.includes('indirect expenses') || group.includes('direct expenses');
-      const shouldClear = forceClear ||
-        isPlaceholderValue(row['H2']) ||
-        isPlaceholderValue(row['H3']) ||
-        isGenericOtherExpense(row['H2']);
-      const cleared = shouldClear
-        ? { ...row, 'H2': '', 'H3': '', Auto: undefined, 'Auto Reason': undefined }
-        : { ...row, Auto: undefined, 'Auto Reason': undefined };
+      const cleared = { ...row, Auto: undefined, 'Auto Reason': undefined };
       return applyClassificationRules(cleared, classificationRules, { businessType, entityType, force: true });
     }));
     toast({
@@ -789,6 +817,73 @@ export default function FinancialReview() {
   const bsplOptions = useMemo(() => {
     return buildBsplOptions(mergedBsplHeads);
   }, [mergedBsplHeads]);
+
+  const isCompanyEntityType = useMemo(() => {
+    const normalized = (entityType || '').toLowerCase();
+    return normalized.includes('private limited') ||
+      normalized.includes('public limited') ||
+      normalized.includes('one person company') ||
+      normalized.includes('opc');
+  }, [entityType]);
+
+  const isPartnershipEntityType = useMemo(() => {
+    const normalized = (entityType || '').toLowerCase();
+    return normalized.includes('partnership') ||
+      normalized.includes('limited liability partnership') ||
+      normalized.includes('llp');
+  }, [entityType]);
+
+  const normalizeOption = useCallback((value: string) => {
+    return (value || '')
+      .toLowerCase()
+      .replace(/[’']/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+  }, []);
+
+  const getFilteredH2Options = useCallback((row: LedgerRow) => {
+    const base = bsplOptions.h2Options[row['H1'] || ''] || [];
+    const primary = normalizeOption(String(row['Primary Group'] || ''));
+    const h1 = normalizeOption(String(row['H1'] || ''));
+    const isCapitalAccount = primary.includes('capital account') && h1 === 'liability';
+    if (!isCapitalAccount) return base;
+
+    const companyHidden = [
+      "partners' capital account",
+      "owners' capital account",
+      "partners' current account",
+      "owners' current account",
+    ];
+    const partnershipHidden = [
+      'share capital',
+      "owners' capital account",
+    ];
+    const otherHidden = [
+      "partners' capital account",
+      'share capital',
+    ];
+
+    const hidden = isCompanyEntityType
+      ? companyHidden
+      : (isPartnershipEntityType ? partnershipHidden : otherHidden);
+    const hiddenSet = new Set(hidden.map(normalizeOption));
+    return base.filter(option => !hiddenSet.has(normalizeOption(option)));
+  }, [bsplOptions.h2Options, isCompanyEntityType, isPartnershipEntityType, normalizeOption]);
+
+  const getFilteredH3Options = useCallback((row: LedgerRow, options: string[]) => {
+    const primary = normalizeOption(String(row['Primary Group'] || ''));
+    const h1 = normalizeOption(String(row['H1'] || ''));
+    const isCapitalAccount = primary.includes('capital account') && h1 === 'liability';
+    if (!isCapitalAccount || !isCompanyEntityType) return options;
+
+    const hidden = new Set([
+      "partners' capital account",
+      "owners' capital account",
+      "partners' current account",
+      "owners' current account",
+    ].map(normalizeOption));
+    return options.filter(option => !hidden.has(normalizeOption(option)));
+  }, [isCompanyEntityType, normalizeOption]);
 
   const resolveH2Key = useCallback((h1: string | undefined, h2: string | undefined) => {
     if (!h1 || !h2) return h2 || '';
@@ -2389,6 +2484,22 @@ export default function FinancialReview() {
           >
             Auto Apply
           </Button>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Switch
+              checked={saveManualRulesToDefault}
+              onCheckedChange={setSaveManualRulesToDefault}
+            />
+            <span>Save Manual Rules to Default</span>
+          </div>
+          <Button
+            variant={hasManualRows ? 'default' : 'outline'}
+            size="sm"
+            onClick={handleSaveManualRules}
+            disabled={!hasManualRows}
+            className="h-8"
+          >
+            Save Manual Rules
+          </Button>
 
           {/* Export Dropdown */}
           <DropdownMenu>
@@ -3129,7 +3240,7 @@ export default function FinancialReview() {
                           <InlineCombobox
                             value={row['H2'] || ''}
                             options={[
-                              ...(bsplOptions.h2Options[row['H1'] || ''] || []),
+                              ...getFilteredH2Options(row),
                               'User_Defined',
                             ]}
                             placeholder={row['H1'] ? 'H2' : 'Select H1'}
@@ -3142,7 +3253,8 @@ export default function FinancialReview() {
                         <TableCell className="px-2 py-1 truncate text-left" style={{ width: getColumnWidth('H3'), fontSize: `${getColumnFontSize('H3')}px` }}>
                           {(() => {
                             const resolvedH2 = resolveH2Key(row['H1'], row['H2']);
-                            const options = (bsplOptions.h3Options[row['H1'] || ''] || {})[resolvedH2 || row['H2'] || ''] || [];
+                            const baseOptions = (bsplOptions.h3Options[row['H1'] || ''] || {})[resolvedH2 || row['H2'] || ''] || [];
+                            const options = getFilteredH3Options(row, baseOptions);
                             return (
                               <>
                                 <InlineCombobox
