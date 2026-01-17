@@ -8,9 +8,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle, Package, Upload, Trash2, Save, Plus, Settings } from 'lucide-react';
+import { FileUp, Search, FileText, TrendingUp, Download, ArrowUpDown, CheckCircle, XCircle, Package, Upload, Trash2, Save, Plus, Settings, Filter } from 'lucide-react';
 import { toast } from 'sonner';
 import { processAccountingData, summarizeData, deepClean } from '@/utils/srmProcessor';
+import { processLastMileMapping } from '@/utils/lastMileMapper';
 
 const SRMPro = () => {
   const [activeTab, setActiveTab] = useState('upload');
@@ -96,6 +97,15 @@ const SRMPro = () => {
   const [currentPageMapped, setCurrentPageMapped] = useState(1);
   const [pageSizeMapped2, setPageSizeMapped2] = useState(50);
   const [currentPageMapped2, setCurrentPageMapped2] = useState(1);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [lastMileMappingData, setLastMileMappingData] = useState<any[]>([]);
+  const [pageSizeLastMile, setPageSizeLastMile] = useState(50);
+  const [currentPageLastMile, setCurrentPageLastMile] = useState(1);
+  const [sortColumnLastMile, setSortColumnLastMile] = useState<string>('');
+  const [sortDirectionLastMile, setSortDirectionLastMile] = useState<'asc' | 'desc'>('asc');
+  const [columnFiltersLastMile, setColumnFiltersLastMile] = useState<Record<string, string[]>>({});
+  const [filterSearchesLastMile, setFilterSearchesLastMile] = useState<Record<string, string>>({});
+  const [openFilterColumnLastMile, setOpenFilterColumnLastMile] = useState<string | null>(null);
 
   const scaleLabels: Record<string, string> = {
     '1': 'Rupees',
@@ -1050,6 +1060,43 @@ const SRMPro = () => {
         const mappedCount2 = processed2.filter(r => r['Mapped Category'] !== 'NOT MAPPED').length;
         const unmappedCount2 = processed2.length - mappedCount2;
         
+        // Last Mile Mapping: Process TB to Schedule III hierarchy
+        try {
+          // Load required sheets for Last Mile Mapping
+          const map1Sheet = wb.Sheets['Map1'];
+          const map2Sheet = wb.Sheets['Map2'];
+          const sch3Sheet = wb.Sheets['Sch3'];
+          const tbSheet = wb.Sheets['TrialBalance'];
+
+          if (map1Sheet && map2Sheet && sch3Sheet && tbSheet) {
+            const map1Data = XLSX.utils.sheet_to_json(map1Sheet);
+            const map2Data = XLSX.utils.sheet_to_json(map2Sheet);
+            const sch3Data = XLSX.utils.sheet_to_json(sch3Sheet);
+            const tbData = XLSX.utils.sheet_to_json(tbSheet);
+
+            console.log('Processing Last Mile Mapping...');
+            const lastMileResults = processLastMileMapping(tbData, sch3Data, map1Data, map2Data);
+            setLastMileMappingData(lastMileResults);
+
+            const okCount = lastMileResults.filter(r => r.MappingStatus === 'OK').length;
+            const partialCount = lastMileResults.filter(r => r.MappingStatus === 'PARTIAL').length;
+            const errorCount = lastMileResults.filter(r => r.MappingStatus === 'ERROR').length;
+
+            console.log(`Last Mile Mapping: OK=${okCount}, PARTIAL=${partialCount}, ERROR=${errorCount}`);
+            toast.success(
+              `Last Mile Mapping: ${okCount} OK (${((okCount/lastMileResults.length)*100).toFixed(1)}%), ` +
+              `${partialCount} PARTIAL, ${errorCount} ERROR`,
+              { duration: 5000 }
+            );
+          } else {
+            console.warn('Last Mile Mapping skipped: Missing required sheets (Map1, Map2, Sch3, or TrialBalance)');
+            setLastMileMappingData([]);
+          }
+        } catch (lmErr) {
+          console.error('Last Mile Mapping error:', lmErr);
+          setLastMileMappingData([]);
+        }
+        
         setActiveTab('results');
         toast.success(
           `${selectedPeriod === 'current' ? 'Current' : 'Previous'} year data uploaded successfully. ` +
@@ -1121,7 +1168,7 @@ const SRMPro = () => {
     { label: '(c) Other operating revenues', key: 'Other operating revenues' },
     { label: 'Uncategorised Revenue from operations', key: 'Uncategorised Revenue from operations', un: true },
     { label: '(2) Other Income', key: 'Other income' },
-    { label: 'Uncategorised Income', key: 'Uncategorised Income', un: true },
+    { label: 'Uncategorised Other Income', key: 'Uncategorised Other Income', un: true },
     { label: 'Total Revenue', sub: true },
     { label: 'EXPENSES', h: true },
     { label: '(3) Cost of materials consumed', key: 'Cost of materials consumed' },
@@ -1151,7 +1198,7 @@ const SRMPro = () => {
     { label: '(j) Bad debts written off', key: 'Bad debts written off' },
     { label: '(k) Provision for doubtful debts', key: 'Provision for doubtful debts' },
     { label: '(l) Miscellaneous expenses', key: 'Miscellaneous expenses' },
-    { label: 'Uncategorised expenses', key: 'Uncategorised expenses', un: true },
+    { label: 'Uncategorised Other Expenses', key: 'Uncategorised Other Expenses', un: true },
     { label: 'Total Expenses', sub: true },
     { label: '(10) Prior period items', key: 'Prior period items' },
     { label: 'Profit/(Loss) before tax', sub: true },
@@ -1269,6 +1316,90 @@ const SRMPro = () => {
 
     return result;
   }, [data, columnFilters, search, sortColumn, sortDirection]);
+
+  // LastMileMapping: Sorting and filtering logic
+  const handleSortLastMile = (column: string) => {
+    if (sortColumnLastMile === column) {
+      setSortDirectionLastMile(sortDirectionLastMile === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumnLastMile(column);
+      setSortDirectionLastMile('asc');
+    }
+  };
+
+  const handleFilterChangeLastMile = (column: string, value: string) => {
+    setColumnFiltersLastMile((prev) => {
+      const currentFilters = prev[column] || [];
+      if (currentFilters.includes(value)) {
+        const newFilters = currentFilters.filter(v => v !== value);
+        return newFilters.length > 0 ? { ...prev, [column]: newFilters } : { ...prev, [column]: [] };
+      } else {
+        return { ...prev, [column]: [...currentFilters, value] };
+      }
+    });
+  };
+
+  const getUniqueColumnValuesLastMile = useMemo(() => {
+    const uniqueValues: Record<string, string[]> = {};
+    if (lastMileMappingData.length > 0) {
+      Object.keys(lastMileMappingData[0]).forEach((key) => {
+        const values = new Set<string>();
+        lastMileMappingData.forEach((row) => {
+          const val = String(row[key] || '').trim();
+          if (val) values.add(val);
+        });
+        uniqueValues[key] = Array.from(values).sort();
+      });
+    }
+    return uniqueValues;
+  }, [lastMileMappingData]);
+
+  const filteredAndSortedLastMileData = useMemo(() => {
+    let result = [...lastMileMappingData];
+
+    // Apply column filters
+    Object.entries(columnFiltersLastMile).forEach(([column, selectedValues]) => {
+      if (selectedValues && selectedValues.length > 0) {
+        result = result.filter((row) => {
+          const cellValue = String(row[column] || '');
+          return selectedValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Apply search filter
+    if (search) {
+      result = result.filter((row) => {
+        const searchLower = search.toLowerCase();
+        return (
+          (row.Name || '').toLowerCase().includes(searchLower) ||
+          (row['Face Note'] || '').toLowerCase().includes(searchLower) ||
+          (row['Face Item'] || '').toLowerCase().includes(searchLower) ||
+          (row.SubNote || '').toLowerCase().includes(searchLower) ||
+          (row.MappingError || '').toLowerCase().includes(searchLower) ||
+          (row.MappingStatus || '').toLowerCase().includes(searchLower)
+        );
+      });
+    }
+
+    // Apply sorting
+    if (sortColumnLastMile) {
+      result.sort((a, b) => {
+        const aVal = a[sortColumnLastMile];
+        const bVal = b[sortColumnLastMile];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortDirectionLastMile === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal || '');
+        const bStr = String(bVal || '');
+        return sortDirectionLastMile === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
+      });
+    }
+
+    return result;
+  }, [lastMileMappingData, columnFiltersLastMile, search, sortColumnLastMile, sortDirectionLastMile]);
 
   // Calculate totals for trial balance
   const trialBalanceTotals = useMemo(() => {
@@ -1681,7 +1812,7 @@ const SRMPro = () => {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-9 bg-white border-b-2 border-gray-200 shadow-sm">
+        <TabsList className="grid w-full grid-cols-10 bg-white border-b-2 border-gray-200 shadow-sm">
           <TabsTrigger 
             value="upload" 
             className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 transition-all duration-200"
@@ -1760,6 +1891,14 @@ const SRMPro = () => {
           >
             <FileText className="h-4 w-4" />
             Notes
+          </TabsTrigger>
+          <TabsTrigger 
+            value="last-mile-mapping" 
+            disabled={!lastMileMappingData.length} 
+            className="flex items-center gap-2 text-gray-700 font-medium data-[state=active]:text-blue-600 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed transition-all duration-200"
+          >
+            <CheckCircle className="h-4 w-4" />
+            LastMileMapping
           </TabsTrigger>
         </TabsList>
 
@@ -2348,6 +2487,29 @@ const SRMPro = () => {
                                     <span className="ml-1">▾</span>
                                   </summary>
                                   <div className="absolute z-50 mt-1 w-64 bg-white border border-slate-300 rounded shadow-lg" onClick={(e) => e.stopPropagation()}>
+                                    {/* Sort Options */}
+                                    <div className="border-b bg-slate-50">
+                                      <button
+                                        onClick={() => {
+                                          setSortColumn(key);
+                                          setSortDirection('asc');
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-xs hover:bg-blue-50 flex items-center gap-2"
+                                      >
+                                        <span className="text-green-600">↑</span>
+                                        <span>{getUniqueColumnValues[key]?.some(v => !isNaN(parseFloat(v))) ? 'Sort Smallest to Largest' : 'Sort A to Z'}</span>
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setSortColumn(key);
+                                          setSortDirection('desc');
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-xs hover:bg-blue-50 flex items-center gap-2 border-t"
+                                      >
+                                        <span className="text-red-600">↓</span>
+                                        <span>{getUniqueColumnValues[key]?.some(v => !isNaN(parseFloat(v))) ? 'Sort Largest to Smallest' : 'Sort Z to A'}</span>
+                                      </button>
+                                    </div>
                                     <div className="sticky top-0 bg-white border-b p-2">
                                       <Input
                                         placeholder="Search..."
@@ -2423,14 +2585,17 @@ const SRMPro = () => {
                                   className="w-4 h-4 cursor-pointer"
                                 />
                               </td>
-                            {Object.entries(row).filter(([key]) => {
+                            {data[0] && Object.keys(data[0]).filter(key => {
                               const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
                               return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
-                            }).map(([key, val]: [string, any], j) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                              <td key={j} className="px-3 py-2 whitespace-nowrap">
-                                {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
-                              </td>
-                            ))}
+                            }).map((key, j) => {
+                              const val = row[key];
+                              return (
+                                <td key={j} className="px-3 py-2 whitespace-nowrap">
+                                  {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (val || '')}
+                                </td>
+                              );
+                            })}
                               <td className="px-3 py-2">
                                 <Input
                                   type="text"
@@ -2785,6 +2950,29 @@ const SRMPro = () => {
                                     <span className="ml-1">▾</span>
                                   </summary>
                                   <div className="absolute z-50 mt-1 w-64 bg-white border border-slate-300 rounded shadow-lg" onClick={(e) => e.stopPropagation()}>
+                                    {/* Sort Options */}
+                                    <div className="border-b bg-slate-50">
+                                      <button
+                                        onClick={() => {
+                                          setSortColumn(key);
+                                          setSortDirection('asc');
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-xs hover:bg-blue-50 flex items-center gap-2"
+                                      >
+                                        <span className="text-green-600">↑</span>
+                                        <span>{getUniqueColumnValues[key]?.some(v => !isNaN(parseFloat(v))) ? 'Sort Smallest to Largest' : 'Sort A to Z'}</span>
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setSortColumn(key);
+                                          setSortDirection('desc');
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-xs hover:bg-blue-50 flex items-center gap-2 border-t"
+                                      >
+                                        <span className="text-red-600">↓</span>
+                                        <span>{getUniqueColumnValues[key]?.some(v => !isNaN(parseFloat(v))) ? 'Sort Largest to Smallest' : 'Sort Z to A'}</span>
+                                      </button>
+                                    </div>
                                     <div className="sticky top-0 bg-white border-b p-2">
                                       <Input
                                         placeholder="Search..."
@@ -2930,14 +3118,17 @@ const SRMPro = () => {
                                   className="w-4 h-4 cursor-pointer"
                                 />
                               </td>
-                            {Object.entries(row).filter(([key]) => {
+                            {data[0] && Object.keys(data[0]).filter(key => {
                               const excludeColumns = ['IsRevenue', 'IsDeemedPositive', 'Ledger', 'Ledger Parent', 'Group', 'AmountValue', '2nd Parent After Primary', 'Logic Trace'];
                               return !key.toLowerCase().includes('amount') && !excludeColumns.includes(key);
-                            }).map(([key, val]: [string, any], j) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                              <td key={j} className="px-3 py-2 whitespace-nowrap">
-                                {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : val}
-                              </td>
-                            ))}
+                            }).map((key, j) => {
+                              const val = row[key];
+                              return (
+                                <td key={j} className="px-3 py-2 whitespace-nowrap">
+                                  {typeof val === 'number' ? val.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (val || '')}
+                                </td>
+                              );
+                            })}
                               <td className="px-3 py-2 whitespace-nowrap bg-blue-50">
                                 {data2[originalIndex] ? data2[originalIndex]['Mapped Category'] || '-' : '-'}
                               </td>
@@ -4027,6 +4218,292 @@ const SRMPro = () => {
               </div>
             </TabsContent>
           </Tabs>
+        </TabsContent>
+
+        {/* Last Mile Mapping Tab */}
+        <TabsContent value="last-mile-mapping" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Last Mile Mapping - Schedule III Classification</CardTitle>
+                  <CardDescription>
+                    Trial Balance ledgers mapped to Schedule III hierarchy (Face Item, Face Note, SubNote levels)
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 text-green-600">
+                    <CheckCircle className="h-5 w-5" />
+                    <span className="font-semibold">{lastMileMappingData.filter(r => r.MappingStatus === 'OK').length} OK</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-yellow-600">
+                    <span className="text-xl">⚠</span>
+                    <span className="font-semibold">{lastMileMappingData.filter(r => r.MappingStatus === 'PARTIAL').length} Partial</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-red-600">
+                    <XCircle className="h-5 w-5" />
+                    <span className="font-semibold">{lastMileMappingData.filter(r => r.MappingStatus === 'ERROR').length} Errors</span>
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {lastMileMappingData.length > 0 ? (
+                <>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2 flex-1">
+                        <Search className="h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Search ledgers, face notes, or errors..."
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          className="max-w-md"
+                        />
+                      </div>
+                      <Select
+                        value={String(pageSizeLastMile)}
+                        onValueChange={(val) => {
+                          setPageSizeLastMile(Number(val));
+                          setCurrentPageLastMile(1);
+                        }}
+                      >
+                        <SelectTrigger className="w-[120px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="25">25 rows</SelectItem>
+                          <SelectItem value="50">50 rows</SelectItem>
+                          <SelectItem value="100">100 rows</SelectItem>
+                          <SelectItem value="200">200 rows</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const ws = XLSX.utils.json_to_sheet(lastMileMappingData);
+                          const wb = XLSX.utils.book_new();
+                          XLSX.utils.book_append_sheet(wb, ws, 'LastMileMapping');
+                          XLSX.writeFile(wb, `LastMileMapping_${new Date().toISOString().split('T')[0]}.xlsx`);
+                          toast.success('Last Mile Mapping exported to Excel');
+                        }}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Export Excel
+                      </Button>
+                    </div>
+
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-800 text-white sticky top-0">
+                          <tr>
+                            {[
+                              { key: 'MappingStatus', label: 'Status' },
+                              { key: 'Name', label: 'Ledger Name' },
+                              { key: 'Opening Balance', label: 'Opening' },
+                              { key: 'Debit', label: 'Debit' },
+                              { key: 'Credit', label: 'Credit' },
+                              { key: 'Closing Balance', label: 'Closing' },
+                              { key: 'Face Note', label: 'Face Note' },
+                              { key: 'Face Item', label: 'Face Item' },
+                              { key: 'SubNote', label: 'SubNote' },
+                              { key: 'SubNote1', label: 'SubNote1' },
+                              { key: 'SubNote2', label: 'SubNote2' },
+                              { key: 'SubNote3', label: 'SubNote3' },
+                              { key: 'UsedKeyword', label: 'Keyword Used' },
+                              { key: 'MappingError', label: 'Error Details' }
+                            ].map(({ key, label }) => (
+                              <th key={key} className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                                <div className="space-y-1">
+                                  <button
+                                    onClick={() => handleSortLastMile(key)}
+                                    className="flex items-center gap-1 hover:text-blue-300 w-full"
+                                    aria-label={`Sort by ${key}`}
+                                  >
+                                    {label}
+                                    <ArrowUpDown className="h-3 w-3" />
+                                  </button>
+                                  <div className="relative">
+                                    <details className="group">
+                                      <summary className="h-7 text-xs bg-blue-600 text-white border border-blue-500 rounded px-2 py-1 cursor-pointer hover:bg-blue-700 list-none flex items-center justify-between">
+                                        <span className="truncate">
+                                          {columnFiltersLastMile[key]?.length > 0 ? `${columnFiltersLastMile[key].length} selected` : 'Filter...'}
+                                        </span>
+                                        <span className="ml-1">▾</span>
+                                      </summary>
+                                    <div className="absolute z-50 mt-1 w-64 bg-white border border-slate-300 rounded shadow-lg" onClick={(e) => e.stopPropagation()}>
+                                      {/* Sort Options */}
+                                      <div className="border-b bg-slate-50">
+                                        <button
+                                          onClick={() => {
+                                            setSortColumnLastMile(key);
+                                            setSortDirectionLastMile('asc');
+                                          }}
+                                          className="w-full px-3 py-2 text-left text-xs hover:bg-blue-50 flex items-center gap-2"
+                                        >
+                                          <span className="text-green-600">↑</span>
+                                          <span>{getUniqueColumnValuesLastMile[key]?.some(v => !isNaN(parseFloat(v))) ? 'Sort Smallest to Largest' : 'Sort A to Z'}</span>
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setSortColumnLastMile(key);
+                                            setSortDirectionLastMile('desc');
+                                          }}
+                                          className="w-full px-3 py-2 text-left text-xs hover:bg-blue-50 flex items-center gap-2 border-t"
+                                        >
+                                          <span className="text-red-600">↓</span>
+                                          <span>{getUniqueColumnValuesLastMile[key]?.some(v => !isNaN(parseFloat(v))) ? 'Sort Largest to Smallest' : 'Sort Z to A'}</span>
+                                        </button>
+                                      </div>
+                                      <div className="sticky top-0 bg-white border-b p-2">
+                                        <Input
+                                          placeholder="Search..."
+                                          value={filterSearchesLastMile[key] || ''}
+                                          onChange={(e) => setFilterSearchesLastMile(prev => ({ ...prev, [key]: e.target.value }))}
+                                          className="h-7 text-xs"
+                                          autoFocus
+                                        />
+                                      </div>
+                                      <div className="max-h-60 overflow-y-auto">
+                                        {getUniqueColumnValuesLastMile[key]
+                                          ?.filter(value => !filterSearchesLastMile[key] || value.toLowerCase().includes(filterSearchesLastMile[key].toLowerCase()))
+                                          .slice(0, 200)
+                                          .map((value) => (
+                                          <label key={value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-100 cursor-pointer text-slate-900">
+                                            <input
+                                              type="checkbox"
+                                              checked={columnFiltersLastMile[key]?.includes(value) || false}
+                                              onChange={() => handleFilterChangeLastMile(key, value)}
+                                              className="rounded border-slate-300"
+                                            />
+                                            <span className="text-xs truncate">{value}</span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                      <div className="sticky bottom-0 bg-white border-t flex">
+                                        {columnFiltersLastMile[key]?.length > 0 && (
+                                          <button
+                                            onClick={() => setColumnFiltersLastMile(prev => ({ ...prev, [key]: [] }))}
+                                            className="flex-1 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                                          >
+                                            Clear All
+                                          </button>
+                                        )}
+                                        <button
+                                          onClick={() => {
+                                            const allValues = getUniqueColumnValuesLastMile[key]?.filter(value => 
+                                              !filterSearchesLastMile[key] || value.toLowerCase().includes(filterSearchesLastMile[key].toLowerCase())
+                                            ) || [];
+                                            setColumnFiltersLastMile(prev => ({ ...prev, [key]: allValues }));
+                                          }}
+                                          className="flex-1 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-50 border-l"
+                                        >
+                                          Select All
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </details>
+                                </div>
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredAndSortedLastMileData
+                            .slice((currentPageLastMile - 1) * pageSizeLastMile, currentPageLastMile * pageSizeLastMile)
+                            .map((row, idx) => (
+                              <tr
+                                key={idx}
+                                className={`border-b hover:bg-opacity-70 transition-colors ${
+                                  row.MappingStatus === 'OK'
+                                    ? 'bg-green-50'
+                                    : row.MappingStatus === 'PARTIAL'
+                                    ? 'bg-yellow-50'
+                                    : 'bg-red-50'
+                                }`}
+                              >
+                                <td className="px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    {row.MappingStatus === 'OK' && (
+                                      <>
+                                        <CheckCircle className="h-4 w-4 text-green-600" />
+                                        <span className="text-xs font-medium text-green-700">OK</span>
+                                      </>
+                                    )}
+                                    {row.MappingStatus === 'PARTIAL' && (
+                                      <>
+                                        <span className="text-yellow-600 text-lg">⚠</span>
+                                        <span className="text-xs font-medium text-yellow-700">PARTIAL</span>
+                                      </>
+                                    )}
+                                    {row.MappingStatus === 'ERROR' && (
+                                      <>
+                                        <XCircle className="h-4 w-4 text-red-600" />
+                                        <span className="text-xs font-medium text-red-700">ERROR</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 font-medium">{row.Name || ''}</td>
+                                <td className="px-3 py-2 text-right">{typeof row['Opening Balance'] === 'number' ? row['Opening Balance'].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (row['Opening Balance'] || '')}</td>
+                                <td className="px-3 py-2 text-right">{typeof row.Debit === 'number' ? row.Debit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (row.Debit || '')}</td>
+                                <td className="px-3 py-2 text-right">{typeof row.Credit === 'number' ? row.Credit.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (row.Credit || '')}</td>
+                                <td className="px-3 py-2 text-right">{typeof row['Closing Balance'] === 'number' ? row['Closing Balance'].toLocaleString('en-IN', { minimumFractionDigits: 2 }) : (row['Closing Balance'] || '')}</td>
+                                <td className="px-3 py-2">{row['Face Note'] || ''}</td>
+                                <td className="px-3 py-2">{row['Face Item'] || ''}</td>
+                                <td className="px-3 py-2">{row.SubNote || ''}</td>
+                                <td className="px-3 py-2">{row.SubNote1 || ''}</td>
+                                <td className="px-3 py-2">{row.SubNote2 || ''}</td>
+                                <td className="px-3 py-2">{row.SubNote3 || ''}</td>
+                                <td className="px-3 py-2 text-xs text-blue-600">{row.UsedKeyword || ''}</td>
+                                <td className="px-3 py-2 text-xs text-red-600">{row.MappingError || ''}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination Controls for Last Mile Mapping */}
+                    <div className="flex items-center justify-between mt-4 px-4 py-3 border-t bg-slate-50 rounded-b-lg">
+                      <div className="text-sm text-muted-foreground">
+                        Showing {filteredAndSortedLastMileData.length === 0 ? 0 : ((currentPageLastMile - 1) * pageSizeLastMile) + 1} to {Math.min(currentPageLastMile * pageSizeLastMile, filteredAndSortedLastMileData.length)} of {filteredAndSortedLastMileData.length} rows
+                        rows
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPageLastMile(currentPageLastMile - 1)}
+                          disabled={currentPageLastMile === 1}
+                          className="h-8 px-3"
+                        >
+                          Previous
+                        </Button>
+                        <span className="text-sm font-medium">
+                          Page {currentPageLastMile} of {Math.ceil(filteredAndSortedLastMileData.length / pageSizeLastMile)}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPageLastMile(currentPageLastMile + 1)}
+                          disabled={currentPageLastMile >= Math.ceil(filteredAndSortedLastMileData.length / pageSizeLastMile)}
+                          className="h-8 px-3"
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  No Last Mile Mapping data. Please upload a trial balance with Map1, Map2, Sch3, and TrialBalance sheets.
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
