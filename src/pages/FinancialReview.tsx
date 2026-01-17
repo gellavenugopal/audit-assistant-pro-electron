@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useResizableColumns } from '@/hooks/useResizableColumns';
@@ -68,10 +68,12 @@ import { useClient } from '@/hooks/useClient';
 import { useTrialBalance, TrialBalanceLineInput } from '@/hooks/useTrialBalance';
 import { LedgerRow, generateLedgerKey } from '@/services/trialBalanceNewClassification';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 import * as XLSX from 'xlsx';
 import { StockItemsTab } from '@/components/trial-balance-new/StockItemsTab';
 import { BulkUpdateDialog } from '@/components/trial-balance-new/BulkUpdateDialog';
 import { FilterModal } from '@/components/trial-balance-new/FilterModal';
+import { Checkbox } from '@/components/ui/checkbox';
 import { getActualBalanceSign } from '@/utils/naturalBalance';
 import { BsplHeadsManager } from '@/components/trial-balance-new/BsplHeadsManager';
 import {
@@ -83,6 +85,8 @@ import {
 import { ClassificationRulesBot } from '@/components/trial-balance-new/ClassificationRulesBot';
 import { applyClassificationRules, ClassificationRule } from '@/utils/classificationRules';
 import { TALLY_DEFAULT_GROUPS } from '@/utils/tallyGroupMaster';
+import { buildNoteStructure, getNoteH2Options, getScaleFactor, isZeroAfterScale } from '@/utils/noteBuilder';
+import { buildFaceFromNotes, buildPreparedNotes } from '@/utils/noteFaceBuilder';
 
 // Entity Types
 const ENTITY_TYPES = [
@@ -206,6 +210,46 @@ type TableTabSettings = {
   rowHeight: number;
   widths: Record<string, number>;
   fonts: Record<string, number>;
+};
+
+type NoteRowOverride = {
+  label?: string;
+  bold?: boolean;
+  italic?: boolean;
+  align?: 'left' | 'center' | 'right';
+  indent?: number;
+  isParent?: boolean;
+  hidden?: boolean;
+  manualParentId?: string;
+};
+
+type NoteLayout = {
+  order: string[];
+  manualRows: Record<string, { label: string }>;
+  overrides: Record<string, NoteRowOverride>;
+};
+
+type FlatNoteRow = {
+  id: string;
+  label: string;
+  amount: number;
+  formattedAmount: string;
+  type: 'parent' | 'child' | 'item';
+  parentLabel?: string;
+};
+
+type DisplayNoteRow = {
+  id: string;
+  label: string;
+  amount: number;
+  formattedAmount: string;
+  indent: number;
+  bold: boolean;
+  italic: boolean;
+  align: 'left' | 'center' | 'right';
+  isParent: boolean;
+  isManual: boolean;
+  autoType?: FlatNoteRow['type'];
 };
 
 const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
@@ -470,6 +514,41 @@ export default function FinancialReview() {
   const [externalConfigActive, setExternalConfigActive] = useState(false);
   const [userDefinedExpenseThreshold, setUserDefinedExpenseThreshold] = useState(5000);
   const [numberScale, setNumberScale] = useState<'actual' | 'tens' | 'hundreds' | 'thousands' | 'lakhs' | 'millions' | 'crores'>('actual');
+  const [noteStatementType, setNoteStatementType] = useState<'BS' | 'PL'>('PL');
+  const [selectedNoteH2, setSelectedNoteH2] = useState('');
+  const [showParentNoteTotals, setShowParentNoteTotals] = useState(false);
+  const [noteTableSettings, setNoteTableSettings] = useState({
+    rowHeight: 28,
+    particularsWidth: 420,
+    amountWidth: 160,
+    fontSize: 12,
+  });
+  const [notePreviewZoom, setNotePreviewZoom] = useState(1);
+  const [noteNewRowLabel, setNoteNewRowLabel] = useState('');
+  const [noteSelectedLabel, setNoteSelectedLabel] = useState('');
+  const [noteParentAnchorId, setNoteParentAnchorId] = useState<string | null>(null);
+  const [notePreviewDefaults, setNotePreviewDefaults] = useState({
+    rowHeight: 28,
+    particularsWidth: 420,
+    amountWidth: 160,
+    fontSize: 12,
+    zoom: 1,
+  });
+  const [noteLayouts, setNoteLayouts] = useState<Record<string, NoteLayout>>({});
+  const [noteLayoutPayload, setNoteLayoutPayload] = useState<Record<string, unknown>>({});
+  const [noteLayoutLoaded, setNoteLayoutLoaded] = useState(false);
+  const [noteEditMode, setNoteEditMode] = useState(false);
+  const [selectedNoteRowId, setSelectedNoteRowId] = useState<string | null>(null);
+  const noteListRef = useRef<HTMLDivElement | null>(null);
+  const saveNoteLayoutsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (activeTab === 'notes-pl' || activeTab === 'face-pl') {
+      setNoteStatementType('PL');
+    } else if (activeTab === 'notes-bs' || activeTab === 'face-bs') {
+      setNoteStatementType('BS');
+    }
+  }, [activeTab]);
   const actualColumns = useMemo(() => ([
     'Ledger Name',
     'Parent Group',
@@ -594,6 +673,97 @@ export default function FinancialReview() {
   useEffect(() => {
     localStorage.setItem('tb_number_scale', numberScale);
   }, [numberScale]);
+
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    let cancelled = false;
+    const loadNoteLayouts = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('engagements')
+          .select('notes')
+          .eq('id', currentEngagement.id)
+          .single();
+        if (error) throw error;
+
+        const rawNotes = data?.notes;
+        let payload: Record<string, unknown> = {};
+        if (rawNotes) {
+          try {
+            payload = JSON.parse(rawNotes);
+          } catch {
+            payload = { legacyNotes: rawNotes };
+          }
+        }
+
+        const layouts = (payload.noteLayouts && typeof payload.noteLayouts === 'object')
+          ? payload.noteLayouts as Record<string, NoteLayout>
+          : {};
+        const previewSettings = payload.notePreviewSettings && typeof payload.notePreviewSettings === 'object'
+          ? payload.notePreviewSettings as Record<string, unknown>
+          : null;
+
+        if (!cancelled) {
+          setNoteLayouts(layouts);
+          setNoteLayoutPayload(payload);
+          if (previewSettings) {
+            const nextDefaults = {
+              rowHeight: typeof previewSettings.rowHeight === 'number' ? previewSettings.rowHeight : notePreviewDefaults.rowHeight,
+              particularsWidth: typeof previewSettings.particularsWidth === 'number' ? previewSettings.particularsWidth : notePreviewDefaults.particularsWidth,
+              amountWidth: typeof previewSettings.amountWidth === 'number' ? previewSettings.amountWidth : notePreviewDefaults.amountWidth,
+              fontSize: typeof previewSettings.fontSize === 'number' ? previewSettings.fontSize : notePreviewDefaults.fontSize,
+              zoom: typeof previewSettings.zoom === 'number' ? previewSettings.zoom : notePreviewDefaults.zoom,
+            };
+            setNotePreviewDefaults(nextDefaults);
+            setNoteTableSettings((prev) => ({
+              rowHeight: nextDefaults.rowHeight,
+              particularsWidth: nextDefaults.particularsWidth,
+              amountWidth: nextDefaults.amountWidth,
+              fontSize: nextDefaults.fontSize,
+            }));
+            setNotePreviewZoom(nextDefaults.zoom);
+          }
+          setNoteLayoutLoaded(true);
+        }
+      } catch (error) {
+        console.error('Failed to load note layouts:', error);
+        if (!cancelled) {
+          setNoteLayouts({});
+          setNoteLayoutPayload({});
+          setNoteLayoutLoaded(true);
+        }
+      }
+    };
+
+    loadNoteLayouts();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEngagement?.id]);
+
+  useEffect(() => {
+    if (!noteLayoutLoaded || !currentEngagement?.id) return;
+    if (saveNoteLayoutsRef.current) {
+      clearTimeout(saveNoteLayoutsRef.current);
+    }
+    saveNoteLayoutsRef.current = setTimeout(async () => {
+      try {
+        const payload = { ...noteLayoutPayload, noteLayouts };
+        await supabase
+          .from('engagements')
+          .update({ notes: JSON.stringify(payload) })
+          .eq('id', currentEngagement.id);
+      } catch (error) {
+        console.error('Failed to save note layouts:', error);
+      }
+    }, 800);
+
+    return () => {
+      if (saveNoteLayoutsRef.current) {
+        clearTimeout(saveNoteLayoutsRef.current);
+      }
+    };
+  }, [noteLayouts, noteLayoutPayload, noteLayoutLoaded, currentEngagement?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2258,6 +2428,732 @@ export default function FinancialReview() {
     }).format(scaled);
   };
 
+  const availableNoteH2 = useMemo(() => {
+    if (noteEditMode) {
+      const allowedH1 = noteStatementType === 'BS'
+        ? new Set(['Asset', 'Liability'])
+        : new Set(['Income', 'Expense']);
+      const ordered: string[] = [];
+      filteredBsplHeads.forEach((row) => {
+        if (!allowedH1.has(row.H1)) return;
+        if (!ordered.includes(row.H2)) ordered.push(row.H2);
+      });
+      return ordered;
+    }
+    return getNoteH2Options(noteStatementType, currentData, numberScale);
+  }, [noteStatementType, currentData, numberScale, noteEditMode, filteredBsplHeads]);
+
+  const noteTolerance = useMemo(() => getScaleFactor(numberScale) * 0.005, [numberScale]);
+
+  const bsNoteH2Order = useMemo(() => {
+    const order: string[] = [];
+    const seen = new Set<string>();
+    filteredBsplHeads.forEach((row) => {
+      if (!row?.H2) return;
+      if (row.H1 !== 'Asset' && row.H1 !== 'Liability') return;
+      if (seen.has(row.H2)) return;
+      seen.add(row.H2);
+      order.push(row.H2);
+    });
+    return order;
+  }, [filteredBsplHeads]);
+
+  const plNoteH2Order = useMemo(() => {
+    const order: string[] = [];
+    const seen = new Set<string>();
+    filteredBsplHeads.forEach((row) => {
+      if (!row?.H2) return;
+      if (row.H1 !== 'Income' && row.H1 !== 'Expense') return;
+      if (seen.has(row.H2)) return;
+      seen.add(row.H2);
+      order.push(row.H2);
+    });
+    return order;
+  }, [filteredBsplHeads]);
+
+  const preparedNotesBS = useMemo(() => {
+    return buildPreparedNotes({
+      classifiedRows: currentData,
+      statementType: 'BS',
+      tolerance: noteTolerance,
+      h2Order: bsNoteH2Order,
+    });
+  }, [currentData, noteTolerance, bsNoteH2Order]);
+
+  const preparedNotesPL = useMemo(() => {
+    return buildPreparedNotes({
+      classifiedRows: currentData,
+      statementType: 'PL',
+      tolerance: noteTolerance,
+      h2Order: plNoteH2Order,
+    });
+  }, [currentData, noteTolerance, plNoteH2Order]);
+
+  const preparedNotes = useMemo(() => {
+    return noteStatementType === 'PL' ? preparedNotesPL : preparedNotesBS;
+  }, [noteStatementType, preparedNotesPL, preparedNotesBS]);
+
+  const noteNumberMap = useMemo(() => {
+    return new Map(preparedNotes.map((note) => [note.H2, note.noteNo]));
+  }, [preparedNotes]);
+
+  const faceSummaryBS = useMemo(() => buildFaceFromNotes(preparedNotesBS, 'BS'), [preparedNotesBS]);
+  const faceSummaryPL = useMemo(() => buildFaceFromNotes(preparedNotesPL, 'PL'), [preparedNotesPL]);
+
+  const noteH3Order = useMemo(() => {
+    if (!selectedNoteH2) return [];
+    const allowedH1 = noteStatementType === 'BS'
+      ? new Set(['Asset', 'Liability'])
+      : new Set(['Income', 'Expense']);
+    const ordered: string[] = [];
+    filteredBsplHeads.forEach((row) => {
+      if (!allowedH1.has(row.H1)) return;
+      if (row.H2 !== selectedNoteH2) return;
+      if (!ordered.includes(row.H3)) {
+        ordered.push(row.H3);
+      }
+    });
+    return ordered;
+  }, [filteredBsplHeads, noteStatementType, selectedNoteH2]);
+
+  useEffect(() => {
+    if (availableNoteH2.length === 0) {
+      if (selectedNoteH2) setSelectedNoteH2('');
+      return;
+    }
+    if (!availableNoteH2.includes(selectedNoteH2)) {
+      setSelectedNoteH2(availableNoteH2[0]);
+    }
+  }, [availableNoteH2, selectedNoteH2]);
+
+  useEffect(() => {
+    if (!selectedNoteH2 || !noteListRef.current) return;
+    const target = noteListRef.current.querySelector(`[data-note-h2="${CSS.escape(selectedNoteH2)}"]`);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ block: 'nearest' });
+    }
+  }, [selectedNoteH2, noteStatementType]);
+
+  const activeNote = useMemo(() => {
+    if (!selectedNoteH2) return null;
+    return buildNoteStructure({
+      statementType: noteStatementType,
+      selectedH2: selectedNoteH2,
+      rows: currentData,
+      numberScale,
+      formatNumber,
+      hideEmpty: !noteEditMode,
+      h3Order: noteH3Order,
+      includeParentTotals: showParentNoteTotals,
+      includeZeroRows: noteEditMode,
+    });
+  }, [noteStatementType, selectedNoteH2, currentData, numberScale, formatNumber, noteH3Order, showParentNoteTotals, noteEditMode]);
+
+  const noteKey = useMemo(() => {
+    if (!selectedNoteH2) return '';
+    return `${noteStatementType}|${selectedNoteH2}`;
+  }, [noteStatementType, selectedNoteH2]);
+
+  const autoFlatRows = useMemo<FlatNoteRow[]>(() => {
+    if (!activeNote) return [];
+    const flattened: FlatNoteRow[] = [];
+    activeNote.rows.forEach((row) => {
+      if (row.type === 'parent' && row.children && row.children.length > 0) {
+        flattened.push({
+          id: row.id,
+          label: row.label,
+          amount: row.amount,
+          formattedAmount: row.formattedAmount,
+          type: row.type,
+        });
+        row.children.forEach((child) => {
+          flattened.push({
+            id: child.id,
+            label: child.label,
+            amount: child.amount,
+            formattedAmount: child.formattedAmount,
+            type: child.type,
+            parentLabel: row.label,
+          });
+        });
+      } else {
+        flattened.push({
+          id: row.id,
+          label: row.label,
+          amount: row.amount,
+          formattedAmount: row.formattedAmount,
+          type: row.type,
+        });
+      }
+    });
+    return flattened;
+  }, [activeNote]);
+
+  const noteLayout = useMemo(() => {
+    if (!noteKey) return undefined;
+    return noteLayouts[noteKey];
+  }, [noteKey, noteLayouts]);
+
+  const resolveRowLabel = useCallback((rowId: string) => {
+    const layout = noteLayout;
+    if (!layout) return '';
+    if (layout.manualRows[rowId]) return layout.manualRows[rowId].label;
+    if (layout.overrides[rowId]?.label) return layout.overrides[rowId].label as string;
+    const autoRow = autoFlatRows.find((row) => row.id === rowId);
+    return autoRow?.label || '';
+  }, [noteLayout, autoFlatRows]);
+
+  useEffect(() => {
+    if (!selectedNoteRowId) {
+      setNoteSelectedLabel('');
+      return;
+    }
+    setNoteSelectedLabel(resolveRowLabel(selectedNoteRowId));
+  }, [selectedNoteRowId, resolveRowLabel]);
+
+  const ensureNoteLayout = useCallback(() => {
+    if (!noteKey || !activeNote) return;
+    setNoteLayouts((prev) => {
+      if (prev[noteKey]) return prev;
+      const layout: NoteLayout = {
+        order: autoFlatRows.map((row) => row.id),
+        manualRows: {},
+        overrides: {},
+      };
+      return { ...prev, [noteKey]: layout };
+    });
+  }, [noteKey, activeNote, autoFlatRows]);
+
+  const updateNoteLayout = useCallback((updater: (layout: NoteLayout) => NoteLayout) => {
+    if (!noteKey) return;
+    setNoteLayouts((prev) => {
+      const baseLayout = prev[noteKey] || {
+        order: autoFlatRows.map((row) => row.id),
+        manualRows: {},
+        overrides: {},
+      };
+      const nextLayout = updater(baseLayout);
+      return { ...prev, [noteKey]: nextLayout };
+    });
+  }, [noteKey, autoFlatRows]);
+
+  useEffect(() => {
+    setSelectedNoteRowId(null);
+    setNoteParentAnchorId(null);
+  }, [noteKey]);
+
+  useEffect(() => {
+    if (noteEditMode) {
+      ensureNoteLayout();
+    }
+  }, [noteEditMode, noteKey, ensureNoteLayout]);
+
+  useEffect(() => {
+    if (!noteEditMode || !noteKey) return;
+    setNoteLayouts((prev) => {
+      const layout = prev[noteKey];
+      if (!layout) return prev;
+      const autoIds = autoFlatRows.map((row) => row.id);
+      const autoMap = new Map(autoFlatRows.map((row) => [row.id, row]));
+      const baseOrder = layout.order.filter((id) => layout.manualRows[id] || autoIds.includes(id));
+      const nextOrder = [...baseOrder];
+      const resolveLabel = (id: string) => {
+        return layout.manualRows[id]?.label
+          || layout.overrides[id]?.label
+          || autoMap.get(id)?.label
+          || '';
+      };
+      const isParentRow = (id: string) => {
+        const override = layout.overrides[id];
+        if (override && override.isParent) return true;
+        const autoRow = autoMap.get(id);
+        return Boolean(autoRow && autoRow.type === 'parent');
+      };
+
+      autoIds.forEach((id) => {
+        if (nextOrder.includes(id)) return;
+        const autoRow = autoMap.get(id);
+        if (!autoRow?.parentLabel) {
+          nextOrder.push(id);
+          return;
+        }
+        const parentIndex = nextOrder.findIndex((orderId) => {
+          if (!isParentRow(orderId)) return false;
+          return resolveLabel(orderId) === autoRow.parentLabel;
+        });
+        if (parentIndex === -1) {
+          nextOrder.push(id);
+          return;
+        }
+        let insertAt = parentIndex + 1;
+        while (insertAt < nextOrder.length) {
+          const candidateId = nextOrder[insertAt];
+          const candidateRow = autoMap.get(candidateId);
+          const candidateLabel = resolveLabel(candidateId);
+          if (candidateRow?.parentLabel === autoRow.parentLabel) {
+            insertAt += 1;
+            continue;
+          }
+          if (candidateLabel === autoRow.parentLabel && isParentRow(candidateId)) {
+            break;
+          }
+          if (candidateRow && candidateRow.parentLabel && candidateRow.parentLabel === autoRow.parentLabel) {
+            insertAt += 1;
+            continue;
+          }
+          break;
+        }
+        nextOrder.splice(insertAt, 0, id);
+      });
+      if (nextOrder.length === layout.order.length && nextOrder.every((id, idx) => id === layout.order[idx])) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [noteKey]: {
+          ...layout,
+          order: nextOrder,
+        },
+      };
+    });
+  }, [noteEditMode, noteKey, autoFlatRows]);
+
+  const displayNoteRows = useMemo<DisplayNoteRow[]>(() => {
+    if (!activeNote) return [];
+    const layout = noteLayout;
+    const overrides = layout?.overrides || {};
+    const manualRows = layout?.manualRows || {};
+    const scaleFactor = getScaleFactor(numberScale);
+
+    const autoMap = new Map(autoFlatRows.map((row) => [row.id, row]));
+    const autoIds = autoFlatRows.map((row) => row.id);
+
+    const buildDisplayRow = (row: FlatNoteRow, isManual: boolean, manualLabel?: string): DisplayNoteRow => {
+      const override = overrides[row.id] || {};
+      const label = isManual ? (manualLabel || row.label) : (override.label ?? row.label);
+      const isManualChild = Boolean(override.manualParentId);
+      const indent = typeof override.indent === 'number'
+        ? override.indent
+        : (isManualChild || row.type === 'child' ? 1 : 0);
+      return {
+        id: row.id,
+        label,
+        amount: row.amount,
+        formattedAmount: row.formattedAmount,
+        indent,
+        bold: Boolean(override.bold),
+        italic: Boolean(override.italic),
+        align: override.align || 'left',
+        isParent: Boolean(override.isParent) || row.type === 'parent',
+        isManual,
+        autoType: isManual ? undefined : row.type,
+      };
+    };
+
+    if (!layout) {
+      return autoFlatRows.map((row) => buildDisplayRow(row, false));
+    }
+
+    const order = layout.order.filter((id) => manualRows[id] || autoMap.has(id));
+    autoIds.forEach((id) => {
+      if (!order.includes(id)) order.push(id);
+    });
+
+    const rows: DisplayNoteRow[] = [];
+    const manualChildrenMap = new Map<string, string[]>();
+    const isManualChild = (rowId: string) => {
+      return Boolean(overrides[rowId]?.manualParentId);
+    };
+
+    order.forEach((rowId) => {
+      const override = overrides[rowId];
+      if (override?.hidden) return;
+      if (override?.manualParentId) {
+        if (!manualChildrenMap.has(override.manualParentId)) {
+          manualChildrenMap.set(override.manualParentId, []);
+        }
+        manualChildrenMap.get(override.manualParentId)?.push(rowId);
+        return;
+      }
+      if (manualRows[rowId]) {
+        return;
+      }
+      if (autoMap.has(rowId)) {
+        return;
+      }
+    });
+
+    order.forEach((rowId) => {
+      if (overrides[rowId]?.hidden) return;
+      if (isManualChild(rowId)) return;
+      if (manualRows[rowId]) {
+        const manualRow = manualRows[rowId];
+        rows.push(buildDisplayRow({
+          id: rowId,
+          label: manualRow.label,
+          amount: 0,
+          formattedAmount: '',
+          type: 'item',
+        }, true, manualRow.label));
+      } else {
+        const autoRow = autoMap.get(rowId);
+        if (autoRow) {
+          rows.push(buildDisplayRow(autoRow, false));
+        }
+      }
+
+      const childIds = manualChildrenMap.get(rowId) || [];
+      childIds.forEach((childId) => {
+        if (overrides[childId]?.hidden) return;
+        if (manualRows[childId]) {
+          const manualRow = manualRows[childId];
+          rows.push(buildDisplayRow({
+            id: childId,
+            label: manualRow.label,
+            amount: 0,
+            formattedAmount: '',
+            type: 'item',
+          }, true, manualRow.label));
+        } else {
+          const autoRow = autoMap.get(childId);
+          if (autoRow) {
+            rows.push(buildDisplayRow(autoRow, false));
+          }
+        }
+      });
+    });
+
+    if (noteEditMode) {
+      return rows;
+    }
+
+    const isNonZero = (value: number) => !isZeroAfterScale(value, scaleFactor);
+    const isManualHeader = (row: DisplayNoteRow) => row.isManual;
+    const isAutoParentHeader = (row: DisplayNoteRow) => row.autoType === 'parent';
+    const isIndentHeader = (row: DisplayNoteRow, index: number) => {
+      const nextRow = rows[index + 1];
+      return row.indent === 0 && nextRow && nextRow.indent > row.indent;
+    };
+    const isHeaderRow = (row: DisplayNoteRow, index: number) => {
+      return isManualHeader(row) || isAutoParentHeader(row) || isIndentHeader(row, index);
+    };
+    const filtered: DisplayNoteRow[] = [];
+    let i = 0;
+    while (i < rows.length) {
+      const row = rows[i];
+      if (overrides[row.id]?.hidden) {
+        i += 1;
+        continue;
+      }
+
+      const isGroupHeader = isHeaderRow(row, i);
+
+      if (!isGroupHeader) {
+        if (isNonZero(row.amount)) {
+          filtered.push(row);
+        }
+        i += 1;
+        continue;
+      }
+
+      const group: DisplayNoteRow[] = [];
+      let j = i + 1;
+      const useIndentGrouping = !isManualHeader(row) && (isAutoParentHeader(row) || isIndentHeader(row, i));
+      if (useIndentGrouping) {
+        while (j < rows.length && rows[j].indent > row.indent) {
+          if (!overrides[rows[j].id]?.hidden) {
+            group.push(rows[j]);
+          }
+          j += 1;
+        }
+      } else {
+        while (j < rows.length) {
+          if (isHeaderRow(rows[j], j)) {
+            break;
+          }
+          if (!overrides[rows[j].id]?.hidden) {
+            group.push(rows[j]);
+          }
+          j += 1;
+        }
+      }
+
+      const groupSum = group.reduce((sum, child) => sum + Math.abs(child.amount), 0);
+      if (groupSum > 0) {
+        filtered.push(row);
+        group.forEach((child) => {
+          if (isNonZero(child.amount)) {
+            filtered.push(child);
+          }
+        });
+      }
+      i = j;
+    }
+
+    return filtered;
+  }, [activeNote, autoFlatRows, noteLayout, noteEditMode, numberScale]);
+
+  const handleAddManualRow = useCallback((position: 'above' | 'below' | 'top' | 'bottom') => {
+    if (!noteKey || !activeNote) {
+      toast({ title: 'Select a note before adding rows' });
+      return;
+    }
+    if (!noteNewRowLabel.trim()) {
+      toast({ title: 'Enter a row label first' });
+      return;
+    }
+    const label = noteNewRowLabel.trim();
+
+    ensureNoteLayout();
+    const newId = `manual:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    updateNoteLayout((layout) => {
+      const order = [...layout.order];
+      let index = 0;
+      if (position === 'top') {
+        index = 0;
+      } else if (position === 'bottom') {
+        index = order.length;
+      } else {
+        const currentIndex = selectedNoteRowId ? order.indexOf(selectedNoteRowId) : -1;
+        if (currentIndex === -1) {
+          index = position === 'above' ? 0 : order.length;
+        } else {
+          index = position === 'above' ? currentIndex : currentIndex + 1;
+        }
+      }
+      order.splice(index, 0, newId);
+      return {
+        ...layout,
+        order,
+        manualRows: { ...layout.manualRows, [newId]: { label } },
+      };
+    });
+    setSelectedNoteRowId(newId);
+    setNoteNewRowLabel('');
+  }, [noteKey, activeNote, ensureNoteLayout, updateNoteLayout, selectedNoteRowId, noteNewRowLabel, toast]);
+
+  const handleMoveSelectedRow = useCallback((direction: 'up' | 'down') => {
+    if (!selectedNoteRowId) return;
+    updateNoteLayout((layout) => {
+      const order = [...layout.order];
+      const index = order.indexOf(selectedNoteRowId);
+      if (index === -1) return layout;
+      const nextIndex = direction === 'up' ? index - 1 : index + 1;
+      if (nextIndex < 0 || nextIndex >= order.length) return layout;
+      [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
+      return { ...layout, order };
+    });
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleDeleteSelectedRow = useCallback(() => {
+    if (!selectedNoteRowId) return;
+    updateNoteLayout((layout) => {
+      const isManual = Boolean(layout.manualRows[selectedNoteRowId]);
+      const order = layout.order.filter((id) => id !== selectedNoteRowId);
+      const manualRows = { ...layout.manualRows };
+      const overrides = { ...layout.overrides };
+
+      if (isManual) {
+        delete manualRows[selectedNoteRowId];
+        delete overrides[selectedNoteRowId];
+      } else {
+        overrides[selectedNoteRowId] = { ...overrides[selectedNoteRowId], hidden: true };
+      }
+
+      return { ...layout, order, manualRows, overrides };
+    });
+    setSelectedNoteRowId(null);
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleRenameSelectedRow = useCallback(() => {
+    if (!selectedNoteRowId) return;
+    const label = window.prompt('Row label');
+    if (!label || !label.trim()) return;
+    updateNoteLayout((layout) => {
+      const manualRows = { ...layout.manualRows };
+      const overrides = { ...layout.overrides };
+      if (manualRows[selectedNoteRowId]) {
+        manualRows[selectedNoteRowId] = { label: label.trim() };
+      } else {
+        overrides[selectedNoteRowId] = { ...overrides[selectedNoteRowId], label: label.trim() };
+      }
+      return { ...layout, manualRows, overrides };
+    });
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleToggleStyle = useCallback((field: 'bold' | 'italic') => {
+    if (!selectedNoteRowId) return;
+    updateNoteLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedNoteRowId] || {};
+      overrides[selectedNoteRowId] = { ...current, [field]: !current[field] };
+      return { ...layout, overrides };
+    });
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleAlignSelectedRow = useCallback((align: 'left' | 'center' | 'right') => {
+    if (!selectedNoteRowId) return;
+    updateNoteLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedNoteRowId] || {};
+      overrides[selectedNoteRowId] = { ...current, align };
+      return { ...layout, overrides };
+    });
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleSelectedLabelChange = useCallback((value: string) => {
+    setNoteSelectedLabel(value);
+    if (!selectedNoteRowId) return;
+    updateNoteLayout((layout) => {
+      const manualRows = { ...layout.manualRows };
+      const overrides = { ...layout.overrides };
+      const nextLabel = value.trim();
+      if (!nextLabel) return layout;
+      if (manualRows[selectedNoteRowId]) {
+        manualRows[selectedNoteRowId] = { label: nextLabel };
+      } else {
+        overrides[selectedNoteRowId] = { ...overrides[selectedNoteRowId], label: nextLabel };
+      }
+      return { ...layout, manualRows, overrides };
+    });
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleSetParentState = useCallback((isParent: boolean) => {
+    if (!selectedNoteRowId) return;
+    updateNoteLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedNoteRowId] || {};
+      overrides[selectedNoteRowId] = { ...current, isParent, indent: isParent ? 0 : 1 };
+      if (!isParent) {
+        return { ...layout, overrides };
+      }
+
+      const autoMap = new Map(autoFlatRows.map((row) => [row.id, row]));
+      const manualRows = layout.manualRows || {};
+      const rowLabel = manualRows[selectedNoteRowId]?.label
+        || overrides[selectedNoteRowId]?.label
+        || autoMap.get(selectedNoteRowId)?.label
+        || '';
+
+      if (!rowLabel) {
+        return { ...layout, overrides };
+      }
+
+      const currentIndex = layout.order.indexOf(selectedNoteRowId);
+      const order = layout.order.filter((id) => id !== selectedNoteRowId);
+      const children = autoFlatRows
+        .filter((row) => row.parentLabel === rowLabel)
+        .map((row) => row.id);
+      const orderWithoutChildren = order.filter((id) => !children.includes(id));
+      const insertIndex = currentIndex === -1 ? -1 : Math.min(currentIndex, orderWithoutChildren.length);
+      const finalOrder = [...orderWithoutChildren];
+      if (insertIndex === -1) {
+        finalOrder.push(selectedNoteRowId, ...children);
+      } else {
+        finalOrder.splice(insertIndex + 1, 0, ...children);
+      }
+
+      return { ...layout, overrides, order: finalOrder };
+    });
+  }, [selectedNoteRowId, updateNoteLayout, autoFlatRows]);
+
+  const handleSetParentAnchor = useCallback(() => {
+    if (!selectedNoteRowId) return;
+    setNoteParentAnchorId(selectedNoteRowId);
+    updateNoteLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedNoteRowId] || {};
+      overrides[selectedNoteRowId] = { ...current, isParent: true, indent: 0 };
+      return { ...layout, overrides };
+    });
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleAttachToParent = useCallback(() => {
+    if (!selectedNoteRowId || !noteParentAnchorId) return;
+    if (selectedNoteRowId === noteParentAnchorId) return;
+    updateNoteLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedNoteRowId] || {};
+      overrides[selectedNoteRowId] = { ...current, manualParentId: noteParentAnchorId, indent: current.indent ?? 1 };
+      return { ...layout, overrides };
+    });
+  }, [selectedNoteRowId, noteParentAnchorId, updateNoteLayout]);
+
+  const handleClearParentLink = useCallback(() => {
+    if (!selectedNoteRowId) return;
+    updateNoteLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedNoteRowId] || {};
+      const next = { ...current };
+      delete next.manualParentId;
+      overrides[selectedNoteRowId] = next;
+      return { ...layout, overrides };
+    });
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleAdjustIndent = useCallback((delta: number) => {
+    if (!selectedNoteRowId) return;
+    updateNoteLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedNoteRowId] || {};
+      const nextIndent = Math.max(0, Math.min(4, (current.indent ?? 0) + delta));
+      overrides[selectedNoteRowId] = { ...current, indent: nextIndent };
+      return { ...layout, overrides };
+    });
+  }, [selectedNoteRowId, updateNoteLayout]);
+
+  const handleSaveNotePreviewDefaults = useCallback(() => {
+    setNoteLayoutPayload((prev) => ({
+      ...prev,
+      notePreviewSettings: {
+        rowHeight: noteTableSettings.rowHeight,
+        particularsWidth: noteTableSettings.particularsWidth,
+        amountWidth: noteTableSettings.amountWidth,
+        fontSize: noteTableSettings.fontSize,
+        zoom: notePreviewZoom,
+      },
+    }));
+    setNotePreviewDefaults({
+      rowHeight: noteTableSettings.rowHeight,
+      particularsWidth: noteTableSettings.particularsWidth,
+      amountWidth: noteTableSettings.amountWidth,
+      fontSize: noteTableSettings.fontSize,
+      zoom: notePreviewZoom,
+    });
+    toast({ title: 'Note preview defaults saved' });
+  }, [noteTableSettings, notePreviewZoom, toast]);
+
+  const handleResetNotePreview = useCallback(() => {
+    setNoteTableSettings({
+      rowHeight: notePreviewDefaults.rowHeight,
+      particularsWidth: notePreviewDefaults.particularsWidth,
+      amountWidth: notePreviewDefaults.amountWidth,
+      fontSize: notePreviewDefaults.fontSize,
+    });
+    setNotePreviewZoom(notePreviewDefaults.zoom);
+  }, [notePreviewDefaults]);
+
+  const handleNoteLinkClick = useCallback((statementType: 'BS' | 'PL', h2: string) => {
+    setActiveTab(statementType === 'PL' ? 'notes-pl' : 'notes-bs');
+    setSelectedNoteH2(h2);
+  }, [setActiveTab, setSelectedNoteH2]);
+
+  const handleSaveNoteEdits = useCallback(async () => {
+    if (!currentEngagement?.id) return;
+    try {
+      const payload = { ...noteLayoutPayload, noteLayouts };
+      await supabase
+        .from('engagements')
+        .update({ notes: JSON.stringify(payload) })
+        .eq('id', currentEngagement.id);
+      toast({ title: 'Note edits saved' });
+    } catch (error) {
+      console.error('Failed to save note edits:', error);
+      toast({ title: 'Failed to save note edits', variant: 'destructive' });
+    }
+  }, [currentEngagement?.id, noteLayoutPayload, noteLayouts, toast]);
+
   // Export Template for Excel Import
   const handleExportTemplate = useCallback(() => {
     try {
@@ -2731,6 +3627,455 @@ export default function FinancialReview() {
       return 'Invalid Date Range';
     }
   }, [fromDate, toDate]);
+
+  const notesTabBody = currentData.length === 0 ? (
+    <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+      Import classified trial balance data to view notes.
+    </div>
+  ) : (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="text-xs font-semibold">
+          {noteStatementType === 'PL' ? 'Profit & Loss Notes' : 'Balance Sheet Notes'}
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="show-parent-totals"
+            checked={showParentNoteTotals}
+            onCheckedChange={(value) => setShowParentNoteTotals(Boolean(value))}
+          />
+          <Label htmlFor="show-parent-totals" className="text-xs">
+            Show parent totals
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="edit-notes-layout"
+            checked={noteEditMode}
+            onCheckedChange={(value) => {
+              const nextValue = Boolean(value);
+              setNoteEditMode(nextValue);
+              if (nextValue) {
+                ensureNoteLayout();
+              } else {
+                setSelectedNoteRowId(null);
+              }
+            }}
+          />
+          <Label htmlFor="edit-notes-layout" className="text-xs">
+            Edit notes
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs">Row Height</Label>
+          <Input
+            type="number"
+            min={18}
+            max={80}
+            value={noteTableSettings.rowHeight}
+            onChange={(e) => setNoteTableSettings(prev => ({
+              ...prev,
+              rowHeight: Math.max(18, Math.min(80, parseInt(e.target.value, 10) || prev.rowHeight)),
+            }))}
+            className="h-8 w-20 text-xs"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs">Particulars Width</Label>
+          <Input
+            type="number"
+            min={200}
+            max={900}
+            value={noteTableSettings.particularsWidth}
+            onChange={(e) => setNoteTableSettings(prev => ({
+              ...prev,
+              particularsWidth: Math.max(200, Math.min(900, parseInt(e.target.value, 10) || prev.particularsWidth)),
+            }))}
+            className="h-8 w-24 text-xs"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs">Amount Width</Label>
+          <Input
+            type="number"
+            min={120}
+            max={400}
+            value={noteTableSettings.amountWidth}
+            onChange={(e) => setNoteTableSettings(prev => ({
+              ...prev,
+              amountWidth: Math.max(120, Math.min(400, parseInt(e.target.value, 10) || prev.amountWidth)),
+            }))}
+            className="h-8 w-24 text-xs"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs">Font Size</Label>
+          <Input
+            type="number"
+            min={10}
+            max={18}
+            value={noteTableSettings.fontSize}
+            onChange={(e) => setNoteTableSettings(prev => ({
+              ...prev,
+              fontSize: Math.max(10, Math.min(18, parseInt(e.target.value, 10) || prev.fontSize)),
+            }))}
+            className="h-8 w-20 text-xs"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="text-xs">Zoom</Label>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs px-2"
+            onClick={() => setNotePreviewZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
+          >
+            -
+          </Button>
+          <div className="text-xs w-10 text-center">{Math.round(notePreviewZoom * 100)}%</div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs px-2"
+            onClick={() => setNotePreviewZoom((prev) => Math.min(1.6, Math.round((prev + 0.1) * 10) / 10))}
+          >
+            +
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs px-2"
+            onClick={() => setNotePreviewZoom(1)}
+          >
+            Reset
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs px-2"
+            onClick={handleResetNotePreview}
+          >
+            Reset Preview
+          </Button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
+        <div className="border rounded-md p-2 max-h-[520px] overflow-auto">
+          {noteEditMode && (
+            <div className="flex flex-col gap-2 mb-3">
+              <Input
+                value={noteNewRowLabel}
+                onChange={(e) => setNoteNewRowLabel(e.target.value)}
+                placeholder="New row label"
+                className="h-7 text-xs"
+              />
+              <Input
+                value={noteSelectedLabel}
+                onChange={(e) => handleSelectedLabelChange(e.target.value)}
+                placeholder="Selected row label"
+                className="h-7 text-xs"
+                disabled={!selectedNoteRowId}
+              />
+              <div className="flex flex-wrap gap-1">
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('top')}>
+                  Add Top
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('above')} disabled={!selectedNoteRowId}>
+                  Add Above
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('below')} disabled={!selectedNoteRowId}>
+                  Add Below
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('bottom')}>
+                  Add Bottom
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleMoveSelectedRow('up')} disabled={!selectedNoteRowId}>
+                  Move Up
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleMoveSelectedRow('down')} disabled={!selectedNoteRowId}>
+                  Move Down
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleSetParentAnchor} disabled={!selectedNoteRowId}>
+                  Set Parent
+                </Button>
+                {noteParentAnchorId && (
+                  <span className="text-[10px] text-muted-foreground self-center">
+                    Parent: {resolveRowLabel(noteParentAnchorId) || 'Selected'}
+                  </span>
+                )}
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleAttachToParent} disabled={!selectedNoteRowId || !noteParentAnchorId}>
+                  Attach to Parent
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleClearParentLink} disabled={!selectedNoteRowId}>
+                  Clear Parent
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleSetParentState(false)} disabled={!selectedNoteRowId}>
+                  Make Child
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleSetParentState(true)} disabled={!selectedNoteRowId}>
+                  Make Parent
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAdjustIndent(-1)} disabled={!selectedNoteRowId}>
+                  Indent -
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAdjustIndent(1)} disabled={!selectedNoteRowId}>
+                  Indent +
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleToggleStyle('bold')} disabled={!selectedNoteRowId}>
+                  Bold
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleToggleStyle('italic')} disabled={!selectedNoteRowId}>
+                  Italic
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAlignSelectedRow('left')} disabled={!selectedNoteRowId}>
+                  Align Left
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAlignSelectedRow('center')} disabled={!selectedNoteRowId}>
+                  Align Center
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAlignSelectedRow('right')} disabled={!selectedNoteRowId}>
+                  Align Right
+                </Button>
+                <Button size="sm" variant="destructive" className="h-7 text-[11px]" onClick={handleDeleteSelectedRow} disabled={!selectedNoteRowId}>
+                  Delete
+                </Button>
+                <Button size="sm" variant="default" className="h-7 text-[11px]" onClick={handleSaveNoteEdits}>
+                  Save Note Edits
+                </Button>
+              </div>
+            </div>
+          )}
+          {availableNoteH2.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No notes available for this statement type.</p>
+          ) : (
+            <div className="flex flex-col gap-1" ref={noteListRef}>
+              {availableNoteH2.map((h2) => (
+                <Button
+                  key={h2}
+                  size="sm"
+                  variant={selectedNoteH2 === h2 ? 'secondary' : 'ghost'}
+                  className="justify-start h-7 text-xs"
+                  data-note-h2={h2}
+                  onClick={() => setSelectedNoteH2(h2)}
+                >
+                  {h2}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="border rounded-md p-2 overflow-auto">
+          {!activeNote ? (
+            <div className="text-xs text-muted-foreground">
+              Select a note to view details.
+            </div>
+          ) : (
+            <div
+              style={{
+                transform: `scale(${notePreviewZoom})`,
+                transformOrigin: 'top left',
+                width: `${100 / notePreviewZoom}%`,
+              }}
+            >
+              <Table key={`${noteTableSettings.rowHeight}-${noteTableSettings.particularsWidth}-${noteTableSettings.amountWidth}-${noteTableSettings.fontSize}`}>
+                <TableHeader>
+                  <TableRow style={{ height: `${noteTableSettings.rowHeight}px` }}>
+                    <TableHead
+                      style={{ width: noteTableSettings.particularsWidth, fontSize: `${noteTableSettings.fontSize}px` }}
+                    >
+                      Particulars
+                    </TableHead>
+                    <TableHead
+                      className="text-right"
+                      style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}
+                    >
+                      Amount
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="font-semibold" style={{ height: `${noteTableSettings.rowHeight}px` }}>
+                    <TableCell
+                      style={{ width: noteTableSettings.particularsWidth, fontSize: `${noteTableSettings.fontSize}px` }}
+                    >
+                      {(() => {
+                        const noteNo = noteNumberMap.get(selectedNoteH2);
+                        return noteNo ? `Note ${noteNo}: ${activeNote.header}` : activeNote.header;
+                      })()}
+                    </TableCell>
+                    <TableCell
+                      className="text-right"
+                      style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}
+                    ></TableCell>
+                  </TableRow>
+                  {displayNoteRows.map((row) => {
+                    const isSelected = noteEditMode && selectedNoteRowId === row.id;
+                    const alignClass = row.align === 'center'
+                      ? 'text-center'
+                      : row.align === 'right'
+                        ? 'text-right'
+                        : 'text-left';
+                    return (
+                      <TableRow
+                        key={row.id}
+                        className={cn(
+                          isSelected && 'bg-blue-50',
+                          noteEditMode && 'cursor-pointer'
+                        )}
+                        style={{ height: `${noteTableSettings.rowHeight}px` }}
+                        onClick={() => {
+                          if (noteEditMode) {
+                            setSelectedNoteRowId(row.id);
+                          }
+                        }}
+                      >
+                        <TableCell
+                          className={cn(
+                            alignClass,
+                            row.bold && 'font-semibold',
+                            row.italic && 'italic'
+                          )}
+                          style={{
+                            width: noteTableSettings.particularsWidth,
+                            fontSize: `${noteTableSettings.fontSize}px`,
+                            paddingLeft: `${row.indent * 24}px`,
+                          }}
+                        >
+                          {row.label}
+                        </TableCell>
+                        <TableCell
+                          className="text-right font-mono"
+                          style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}
+                        >
+                          {row.formattedAmount}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow className="font-semibold border-t" style={{ height: `${noteTableSettings.rowHeight}px` }}>
+                    <TableCell
+                      style={{ width: noteTableSettings.particularsWidth, fontSize: `${noteTableSettings.fontSize}px` }}
+                    >
+                      Total
+                    </TableCell>
+                    <TableCell
+                      className="text-right font-mono"
+                      style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}
+                    >
+                      {activeNote.formattedTotal}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderFaceTab = (statementType: 'BS' | 'PL') => {
+    if (currentData.length === 0) {
+      return (
+        <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+          Import classified trial balance data to view face reports.
+        </div>
+      );
+    }
+
+    const summary = statementType === 'BS' ? faceSummaryBS : faceSummaryPL;
+    const totals = summary.totals || {};
+    const diff = statementType === 'BS' ? (totals.difference || 0) : 0;
+    const profitLoss = statementType === 'PL' ? (totals.profitLoss || 0) : 0;
+    const warnDiff = statementType === 'BS' && Math.abs(diff) > noteTolerance;
+
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="border rounded-md p-2 overflow-auto">
+          <Table>
+            <TableHeader>
+              <TableRow style={{ height: `${noteTableSettings.rowHeight}px` }}>
+                <TableHead style={{ width: noteTableSettings.particularsWidth, fontSize: `${noteTableSettings.fontSize}px` }}>
+                  Particulars
+                </TableHead>
+                <TableHead className="text-center" style={{ width: 90, fontSize: `${noteTableSettings.fontSize}px` }}>
+                  Note No
+                </TableHead>
+                <TableHead className="text-right" style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}>
+                  Amount
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {summary.sections.map((section) => (
+                <React.Fragment key={section.title}>
+                  <TableRow className="font-semibold" style={{ height: `${noteTableSettings.rowHeight}px` }}>
+                    <TableCell style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                      {section.title}
+                    </TableCell>
+                    <TableCell />
+                    <TableCell />
+                  </TableRow>
+                  {section.rows.map((row) => (
+                    <TableRow key={`${section.title}-${row.H2}`} style={{ height: `${noteTableSettings.rowHeight}px` }}>
+                      <TableCell style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                        {row.H2}
+                      </TableCell>
+                      <TableCell className="text-center" style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="h-auto px-0 text-xs"
+                          onClick={() => handleNoteLinkClick(statementType, row.H2)}
+                        >
+                          Note {row.noteNo}
+                        </Button>
+                      </TableCell>
+                      <TableCell className="text-right font-mono" style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                        {formatNumber(row.amount)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="font-semibold border-t" style={{ height: `${noteTableSettings.rowHeight}px` }}>
+                    <TableCell style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                      Total {section.title}
+                    </TableCell>
+                    <TableCell />
+                    <TableCell className="text-right font-mono" style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                      {formatNumber(section.total)}
+                    </TableCell>
+                  </TableRow>
+                </React.Fragment>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="flex flex-wrap gap-6 text-xs">
+          {statementType === 'BS' ? (
+            <>
+              <div>Total Assets: <span className="font-semibold">{formatNumber(totals.totalAssets || 0)}</span></div>
+              <div>Total Liabilities: <span className="font-semibold">{formatNumber(totals.totalLiabilities || 0)}</span></div>
+              <div className={cn(warnDiff && 'text-red-600')}>
+                Difference: <span className="font-semibold">{formatNumber(diff)}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>Total Income: <span className="font-semibold">{formatNumber(totals.totalIncome || 0)}</span></div>
+              <div>Total Expenses: <span className="font-semibold">{formatNumber(totals.totalExpenses || 0)}</span></div>
+              <div>
+                {profitLoss >= 0 ? 'Profit' : 'Loss'}: <span className="font-semibold">{formatNumber(Math.abs(profitLoss))}</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
   
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -2924,6 +4269,10 @@ export default function FinancialReview() {
                 <Save className="w-4 h-4 mr-2" />
                 Save Data
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleSaveNotePreviewDefaults}>
+                <Save className="w-4 h-4 mr-2" />
+                Save Note Preview Defaults
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem 
                 onClick={handleClearWithConfirmation} 
@@ -3060,6 +4409,34 @@ export default function FinancialReview() {
               >
                 <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Classified TB
+              </TabsTrigger>
+              <TabsTrigger 
+                value="face-bs"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
+              >
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
+                Balance Sheet Face
+              </TabsTrigger>
+              <TabsTrigger 
+                value="face-pl"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
+              >
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
+                P&amp;L Face
+              </TabsTrigger>
+              <TabsTrigger 
+                value="notes-bs"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
+              >
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
+                Notes (BS)
+              </TabsTrigger>
+              <TabsTrigger 
+                value="notes-pl"
+                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
+              >
+                <FileSpreadsheet className="w-3 h-3 mr-1" />
+                Notes (PL)
               </TabsTrigger>
               <TabsTrigger 
                 value="stock-items"
@@ -3651,6 +5028,26 @@ export default function FinancialReview() {
               </TableBody>
             </Table>
               </div>
+            </TabsContent>
+
+            {/* BALANCE SHEET FACE TAB */}
+            <TabsContent value="face-bs" className="mt-0 p-2">
+              {renderFaceTab('BS')}
+            </TabsContent>
+
+            {/* PROFIT & LOSS FACE TAB */}
+            <TabsContent value="face-pl" className="mt-0 p-2">
+              {renderFaceTab('PL')}
+            </TabsContent>
+
+            {/* NOTES TAB - BALANCE SHEET */}
+            <TabsContent value="notes-bs" className="mt-0 p-2">
+              {notesTabBody}
+            </TabsContent>
+
+            {/* NOTES TAB - PROFIT & LOSS */}
+            <TabsContent value="notes-pl" className="mt-0 p-2">
+              {notesTabBody}
             </TabsContent>
             
             <TabsContent value="stock-items" className="mt-0 p-1">
