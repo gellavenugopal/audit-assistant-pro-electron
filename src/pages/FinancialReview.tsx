@@ -2878,43 +2878,6 @@ export default function FinancialReview() {
           )}
         </div>
 
-        {/* Center: Date Range */}
-        <div className="flex items-center gap-2 px-2 py-0.5 bg-gray-50 rounded border text-xs">
-          <Calendar className="w-3 h-3 text-gray-500" />
-          <Dialog>
-            <DialogTrigger asChild>
-              <button className="font-medium text-gray-700 hover:text-blue-600 text-xs">
-                {formatDateRange()}
-              </button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Financial Year Period</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="from-date">From Date</Label>
-                  <Input
-                    id="from-date"
-                    type="date"
-                    value={fromDate}
-                    onChange={(e) => setFromDate(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="to-date">To Date</Label>
-                  <Input
-                    id="to-date"
-                    type="date"
-                    value={toDate}
-                    onChange={(e) => setToDate(e.target.value)}
-                  />
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-
         {/* Right: Tally Status + Settings */}
         <div className="flex items-center gap-2">
           <div className={cn(
