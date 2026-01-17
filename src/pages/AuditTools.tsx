@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { PDFDocument } from "pdf-lib";
@@ -15,6 +15,8 @@ import { useTabShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEngagement } from "@/contexts/EngagementContext";
 import { useTallyODBC } from "@/hooks/useTallyODBC";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 // Type definitions (moved from TallyContext)
 export interface TallyTrialBalanceLine {
@@ -2405,6 +2407,215 @@ const TallyTools = () => {
 const GSTTools = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { currentEngagement } = useEngagement();
+  const { user } = useAuth();
+  const [gstinDialogOpen, setGstinDialogOpen] = useState(false);
+  const [gstinInput, setGstinInput] = useState("");
+  const [gstins, setGstins] = useState<{ id: string; gstin: string; created_at: string }[]>([]);
+  const [isLoadingGstins, setIsLoadingGstins] = useState(false);
+  const [isSavingGstin, setIsSavingGstin] = useState(false);
+  const [editingGstinId, setEditingGstinId] = useState<string | null>(null);
+  const [editingGstinValue, setEditingGstinValue] = useState("");
+  const [isUpdatingGstin, setIsUpdatingGstin] = useState(false);
+  const [isDeletingGstinId, setIsDeletingGstinId] = useState<string | null>(null);
+
+  const clientId = currentEngagement?.client_id;
+
+  const fetchClientGstins = useCallback(async () => {
+    if (!clientId) {
+      setGstins([]);
+      return;
+    }
+
+    setIsLoadingGstins(true);
+    try {
+      const { data, error } = await supabase
+        .from('client_gstins')
+        .select('id, gstin, created_at')
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setGstins(data || []);
+    } catch (error) {
+      console.error('Error fetching GSTINs:', error);
+      toast({
+        title: 'Failed to load GST numbers',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingGstins(false);
+    }
+  }, [clientId, toast]);
+
+  useEffect(() => {
+    fetchClientGstins();
+  }, [fetchClientGstins]);
+
+  const handleOpenGstinDialog = () => {
+    if (!clientId) {
+      toast({
+        title: 'Client not linked',
+        description: 'This engagement is not linked to a client. Link a client in Admin Settings → Clients.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setGstinDialogOpen(true);
+  };
+
+  const handleAddGstin = async () => {
+    const normalized = gstinInput.trim().toUpperCase();
+    if (!clientId) {
+      toast({
+        title: 'Client not linked',
+        description: 'Please link a client before adding GST numbers.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (!normalized) {
+      toast({ title: 'GSTIN required', description: 'Enter a GST number to continue.' });
+      return;
+    }
+    if (!/^[0-9A-Z]{15}$/.test(normalized)) {
+      toast({
+        title: 'Invalid GSTIN',
+        description: 'GSTIN must be 15 characters (A-Z, 0-9).',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (gstins.some((gstin) => gstin.gstin === normalized)) {
+      toast({ title: 'GSTIN already added', description: 'This GSTIN already exists for this client.' });
+      return;
+    }
+    if (!user?.id) {
+      toast({ title: 'Login required', description: 'Please sign in again to add GST numbers.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingGstin(true);
+    try {
+      const { data, error } = await supabase
+        .from('client_gstins')
+        .insert({
+          client_id: clientId,
+          gstin: normalized,
+          created_by: user.id,
+        })
+        .select('id, gstin, created_at')
+        .single();
+
+      if (error) throw error;
+
+      setGstins((prev) => [data, ...prev]);
+      setGstinInput('');
+      toast({
+        title: 'GST number added',
+        description: `${normalized} linked to ${currentEngagement?.client_name || 'client'}.`,
+      });
+    } catch (error) {
+      console.error('Error adding GSTIN:', error);
+      toast({
+        title: 'Failed to add GST number',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingGstin(false);
+    }
+  };
+
+  const startEditGstin = (gstinId: string, gstinValue: string) => {
+    setEditingGstinId(gstinId);
+    setEditingGstinValue(gstinValue);
+  };
+
+  const cancelEditGstin = () => {
+    setEditingGstinId(null);
+    setEditingGstinValue("");
+  };
+
+  const handleUpdateGstin = async () => {
+    if (!clientId || !editingGstinId) return;
+    const normalized = editingGstinValue.trim().toUpperCase();
+
+    if (!normalized) {
+      toast({ title: 'GSTIN required', description: 'Enter a GST number to continue.' });
+      return;
+    }
+    if (!/^[0-9A-Z]{15}$/.test(normalized)) {
+      toast({
+        title: 'Invalid GSTIN',
+        description: 'GSTIN must be 15 characters (A-Z, 0-9).',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (gstins.some((gstin) => gstin.gstin === normalized && gstin.id !== editingGstinId)) {
+      toast({ title: 'GSTIN already added', description: 'This GSTIN already exists for this client.' });
+      return;
+    }
+
+    setIsUpdatingGstin(true);
+    try {
+      const { data, error } = await supabase
+        .from('client_gstins')
+        .update({ gstin: normalized })
+        .eq('id', editingGstinId)
+        .eq('client_id', clientId)
+        .select('id, gstin, created_at')
+        .single();
+
+      if (error) throw error;
+
+      setGstins((prev) => prev.map((item) => (item.id === data.id ? data : item)));
+      toast({ title: 'GST number updated', description: `${normalized} updated.` });
+      cancelEditGstin();
+    } catch (error) {
+      console.error('Error updating GSTIN:', error);
+      toast({
+        title: 'Failed to update GST number',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdatingGstin(false);
+    }
+  };
+
+  const handleDeleteGstin = async (gstinId: string, gstinValue: string) => {
+    if (!clientId) return;
+    if (!confirm(`Delete GSTIN ${gstinValue}?`)) return;
+
+    setIsDeletingGstinId(gstinId);
+    try {
+      const { error } = await supabase
+        .from('client_gstins')
+        .delete()
+        .eq('id', gstinId)
+        .eq('client_id', clientId);
+
+      if (error) throw error;
+
+      setGstins((prev) => prev.filter((item) => item.id !== gstinId));
+      if (editingGstinId === gstinId) {
+        cancelEditGstin();
+      }
+      toast({ title: 'GST number deleted', description: `${gstinValue} removed.` });
+    } catch (error) {
+      console.error('Error deleting GSTIN:', error);
+      toast({
+        title: 'Failed to delete GST number',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeletingGstinId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -2432,6 +2643,13 @@ const GSTTools = () => {
       </Alert>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <ToolCard
+          title="GST Number Master"
+          description="Add GST numbers linked to this client. Numbers are scoped per client."
+          icon={<FilePlus className="h-5 w-5 text-primary" />}
+          status="available"
+          onClick={handleOpenGstinDialog}
+        />
         <ToolCard
           title="GSTR1 Data Download"
           description="Download GSTR1 reports directly from GST portal for audit and reconciliation purposes."
@@ -2464,6 +2682,98 @@ const GSTTools = () => {
           status="coming-soon"
         />
       </div>
+
+      <Dialog open={gstinDialogOpen} onOpenChange={setGstinDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>GST Number Master</DialogTitle>
+            <DialogDescription>
+              Manage GST numbers for {currentEngagement?.client_name || 'this client'}. GST numbers are client-specific.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                value={gstinInput}
+                onChange={(e) => setGstinInput(e.target.value.toUpperCase())}
+                placeholder="Enter GSTIN (15 characters)"
+                maxLength={15}
+                className="font-mono"
+              />
+              <Button onClick={handleAddGstin} disabled={isSavingGstin}>
+                {isSavingGstin ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FilePlus className="h-4 w-4 mr-2" />}
+                Add GSTIN
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              GST numbers saved here will only appear for this client.
+            </div>
+
+            {isLoadingGstins ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading GST numbers...
+              </div>
+            ) : gstins.length === 0 ? (
+              <div className="text-sm text-muted-foreground">
+                No GST numbers added yet.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {gstins.map((gstin) => (
+                  <div key={gstin.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                    <div className="flex-1">
+                      {editingGstinId === gstin.id ? (
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Input
+                            value={editingGstinValue}
+                            onChange={(e) => setEditingGstinValue(e.target.value.toUpperCase())}
+                            maxLength={15}
+                            className="font-mono"
+                          />
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={handleUpdateGstin} disabled={isUpdatingGstin}>
+                              {isUpdatingGstin ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                              Save
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={cancelEditGstin} disabled={isUpdatingGstin}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="font-mono text-sm">{gstin.gstin}</div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {editingGstinId !== gstin.id && (
+                        <div className="text-xs text-muted-foreground">
+                          Added {new Date(gstin.created_at).toLocaleDateString()}
+                        </div>
+                      )}
+                      {editingGstinId !== gstin.id && (
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="outline" onClick={() => startEditGstin(gstin.id, gstin.gstin)}>
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleDeleteGstin(gstin.id, gstin.gstin)}
+                            disabled={isDeletingGstinId === gstin.id}
+                          >
+                            {isDeletingGstinId === gstin.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete'}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

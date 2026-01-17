@@ -1176,6 +1176,38 @@ export type Database = {
         }
         Relationships: []
       }
+      client_gstins: {
+        Row: {
+          client_id: string
+          created_at: string
+          created_by: string
+          gstin: string
+          id: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          created_by: string
+          gstin: string
+          id?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          created_by?: string
+          gstin?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_gstins_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       engagement_assignments: {
         Row: {
           assigned_by: string
