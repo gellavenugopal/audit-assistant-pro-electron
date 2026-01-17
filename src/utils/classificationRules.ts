@@ -161,6 +161,21 @@ function getPpeH3(ledger: string, parent: string): string {
   return matched ? matched.label : '';
 }
 
+function getIntangibleH3(ledger: string, parent: string): string {
+  const rules: Array<{ label: string; keywords: string[] }> = [
+    { label: 'Gross Block - Goodwill', keywords: ['goodwill', 'business goodwill', 'purchased goodwill', 'goodwill asset'] },
+    { label: 'Gross Block - Goodwill on Consolidation', keywords: ['goodwill on consolidation', 'consolidation goodwill', 'goodwill arising on merger', 'merger goodwill', 'amalgamation goodwill', 'acquisition goodwill'] },
+    { label: 'Gross Block - Computer Software', keywords: ['computer software', 'application software', 'system software', 'accounting software', 'licensed software', 'software license', 'software', 'erp', 'saas'] },
+    { label: 'Gross Block - Trademarks and Brands', keywords: ['trademark', 'trade mark', 'brand', 'brand name', 'logo', 'brand rights', 'trademark rights', 'brand license'] },
+    { label: 'Gross Block - Technical Knowhow', keywords: ['technical knowhow', 'technical know-how', 'knowhow', 'process knowhow', 'manufacturing knowhow', 'technology knowhow', 'technical collaboration'] },
+    { label: 'Gross Block - Intangible Assets under Development', keywords: ['intangible under development', 'intangible wip', 'cwip intangible', 'capital work in progress intangible', 'software under development', 'development cost intangible'] },
+    { label: 'Gross Block - Others (Intangible)', keywords: ['intangible asset', 'intangible assets others', 'intellectual property', 'ip rights', 'business rights', 'commercial rights', 'franchise rights', 'license rights'] },
+  ];
+
+  const matched = rules.find(rule => hasAnyInLedgerOrParent(ledger, parent, rule.keywords));
+  return matched ? matched.label : '';
+}
+
 function getCashBankH3(primary: string, ledger: string, parent: string): string {
   if (matchesGroup(primary, 'cash-in-hand')) {
     if (hasAnyInLedgerOrParent(ledger, parent, ['cash'])) {
@@ -196,7 +211,7 @@ function getCashBankH3(primary: string, ledger: string, parent: string): string 
   if (hasAnyInLedgerOrParent(ledger, parent, ['saving', 'sb'])) {
     return 'Balances with banks in savings accounts';
   }
-  if (hasAnyInLedgerOrParent(ledger, parent, ['current', 'ca'])) {
+  if (hasAnyInLedgerOrParent(ledger, parent, ['current', 'ca']) || hasAnyInLedgerOrParent(ledger, parent, ['bank'])) {
     return 'Balances with banks in current accounts';
   }
 
@@ -410,6 +425,21 @@ export function applyClassificationRules(
         'H2': 'Property, Plant and Equipment',
         'H3': getPpeH3(ledger, parent),
       }, 'Fixed Assets - PPE');
+    }
+
+    const isIntangibleGroup = normalize(row['H1']) === 'asset' && [
+      'fixed assets',
+      'intangible',
+      'goodwill',
+      'software',
+    ].some(phrase => matchesGroup(primary, phrase));
+    if (isIntangibleGroup) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Property, Plant and Equipment',
+        'H3': getIntangibleH3(ledger, parent),
+      }, 'Fixed Assets - Intangible');
     }
 
     if (normalize(row['H1']) === 'asset' && (matchesGroup(primary, 'cash-in-hand') || matchesGroup(primary, 'bank accounts'))) {
