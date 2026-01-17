@@ -173,14 +173,19 @@ function registerIpcHandlers() {
         const stockResult = await odbcConnection.query(stockQuery);
         if (stockResult && stockResult.length > 0) {
           stockItems = stockResult;
-          totalOpeningStock = stockResult.reduce((sum, row) => {
+          // In Tally ODBC, stock values are typically negative (representing asset/debit)
+          // We take absolute value of the SUM (not individual items) to get total stock value
+          const sumOpeningStock = stockResult.reduce((sum, row) => {
             const val = parseFloat(row['$OpeningValue']) || 0;
-            return sum + Math.abs(val);
+            return sum + val;
           }, 0);
-          totalClosingStock = stockResult.reduce((sum, row) => {
+          const sumClosingStock = stockResult.reduce((sum, row) => {
             const val = parseFloat(row['$ClosingValue']) || 0;
-            return sum + Math.abs(val);
+            return sum + val;
           }, 0);
+          // Take absolute value of the final sum
+          totalOpeningStock = Math.abs(sumOpeningStock);
+          totalClosingStock = Math.abs(sumClosingStock);
           safeLog(`Trial Balance: Found ${stockResult.length} stock items. Opening Stock: ${totalOpeningStock}, Closing Stock: ${totalClosingStock}`);
         }
       } catch (stockErr) {
@@ -195,35 +200,51 @@ function registerIpcHandlers() {
         return isNaN(num) ? 0 : num;
       };
 
-      const processedData = result.map(row => ({
-        accountHead: row['$Name'] || '',
-        openingBalance: parseNumeric(row['$OpeningBalance']),
-        totalDebit: parseNumeric(row['$DebitTotals']),
-        totalCredit: parseNumeric(row['$CreditTotals']),
-        closingBalance: parseNumeric(row['$ClosingBalance']),
-        accountCode: row['$Code'] || '',
-        branch: row['$Branch'] || 'HO',
-        // Add hierarchy data
-        primaryGroup: row['$_PrimaryGroup'] || '',
-        parent: row['$Parent'] || '',
-        isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
-      }));
+      const processedData = result.map(row => {
+        const accountHead = row['$Name'] || '';
+        const openingBalance = parseNumeric(row['$OpeningBalance']);
+        let closingBalance = parseNumeric(row['$ClosingBalance']);
+        
+        // For Profit & Loss A/c, use opening balance as closing balance
+        // because Tally's TB shows P&L without current year's profit/loss
+        if (accountHead.toLowerCase() === 'profit & loss a/c' || 
+            accountHead.toLowerCase() === 'profit and loss a/c') {
+          closingBalance = openingBalance;
+        }
+        
+        return {
+          accountHead,
+          openingBalance,
+          totalDebit: parseNumeric(row['$DebitTotals']),
+          totalCredit: parseNumeric(row['$CreditTotals']),
+          closingBalance,
+          accountCode: row['$Code'] || '',
+          branch: row['$Branch'] || 'HO',
+          // Add hierarchy data
+          primaryGroup: row['$_PrimaryGroup'] || '',
+          parent: row['$Parent'] || '',
+          isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
+        };
+      });
 
       // Add opening stock as a separate line item if stock items exist
-      // Check if there's already a Stock-in-Hand ledger
-      const hasStockLedger = processedData.some(line => 
-        line.primaryGroup?.toLowerCase().includes('stock') ||
-        line.accountHead?.toLowerCase().includes('stock-in-hand')
+      // Check if there's already an "Opening Stock" ledger
+      const hasOpeningStockLedger = processedData.some(line => 
+        line.accountHead?.toLowerCase() === 'opening stock' ||
+        line.accountHead?.toLowerCase().includes('opening stock') ||
+        line.primaryGroup?.toLowerCase().includes('stock-in-hand')
       );
 
-      if (totalOpeningStock > 0 && !hasStockLedger) {
+      if (totalOpeningStock !== 0 && !hasOpeningStockLedger) {
         // Add opening stock as a ledger entry
+        // Note: Opening Stock is a static account - opening and closing should be SAME
+        // because it represents the stock value at the START of the period only
         processedData.push({
           accountHead: 'Opening Stock (from Stock Items)',
           openingBalance: -totalOpeningStock, // Negative because it's an asset (debit balance in Tally convention)
           totalDebit: 0,
           totalCredit: 0,
-          closingBalance: -totalClosingStock, // Negative because it's an asset
+          closingBalance: -totalOpeningStock, // Use OPENING value for closing too (static account)
           accountCode: 'STOCK-OPENING',
           branch: 'HO',
           primaryGroup: 'Stock-in-Hand',
@@ -231,7 +252,7 @@ function registerIpcHandlers() {
           isRevenue: false,
         });
         safeLog(`Trial Balance: Added opening stock entry: ${totalOpeningStock}`);
-      } else if (totalOpeningStock > 0 && hasStockLedger) {
+      } else if (totalOpeningStock !== 0 && hasOpeningStockLedger) {
         safeLog(`Trial Balance: Stock ledger already exists, opening stock value: ${totalOpeningStock}`);
       }
 
