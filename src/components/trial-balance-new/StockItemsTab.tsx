@@ -61,6 +61,7 @@ interface StockItemsTabProps {
   onSelectionChange?: (count: number) => void;
   bulkUpdateRequestId?: number;
   deleteSelectedRequestId?: number;
+  numberScale?: 'actual' | 'tens' | 'hundreds' | 'thousands' | 'lakhs' | 'millions' | 'crores';
   tableSettings?: {
     rowHeight: number;
     widths: Record<string, number>;
@@ -76,6 +77,7 @@ export function StockItemsTab({
   onSelectionChange,
   bulkUpdateRequestId,
   deleteSelectedRequestId,
+  numberScale = 'actual',
   tableSettings,
 }: StockItemsTabProps) {
   const { toast } = useToast();
@@ -236,10 +238,24 @@ export function StockItemsTab({
   }, [businessType, stockData, onUpdateStockData, toast]);
 
   const formatNumber = (num: number): string => {
+    const scaleFactor = numberScale === 'tens'
+      ? 10
+      : numberScale === 'hundreds'
+        ? 100
+        : numberScale === 'thousands'
+          ? 1000
+          : numberScale === 'lakhs'
+            ? 100000
+            : numberScale === 'millions'
+              ? 1000000
+              : numberScale === 'crores'
+                ? 10000000
+                : 1;
+    const scaled = num / scaleFactor;
     return new Intl.NumberFormat('en-IN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
-    }).format(num);
+    }).format(scaled);
   };
 
   const handleEdit = (index: number) => {

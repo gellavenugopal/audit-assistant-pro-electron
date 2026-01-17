@@ -1064,6 +1064,16 @@ const autoRules = [
     Notes: 'Default bank accounts',
   },
   {
+    Section: 'Trade Receivables',
+    GroupMatch: 'Sundry Debtors | Trade Receivables | Accounts Receivable | Customer/Debtor group',
+    LedgerKeywords: 'sundry debtor | sundry debtors | trade receivable | trade receivables | accounts receivable | account receivable | debtors | customer receivable | customer balance | outstanding receivable | sales receivable | invoice receivable | fees receivable | service receivable | consultancy receivable | professional fees receivable | amc receivable | maintenance receivable | subscription receivable | project billing receivable | flat buyer receivable | flat buyers balance | booking receivable | installment receivable | possession receivable | rent receivable | lease rental receivable | maintenance charges receivable | export receivable | domestic receivable | dealer receivable | distributor receivable | license fee receivable | software service receivable | development charges receivable | freight receivable | transport charges receivable | logistics receivable | patient receivable | hospital charges receivable | tuition fees receivable | student fees receivable',
+    BusinessType: 'Any',
+    H1: 'Asset',
+    H2: 'Trade Receivables',
+    H3: 'Unsecured, considered good',
+    Notes: 'Exclude: advance | prepaid | loan | deposit | security deposit | staff advance',
+  },
+  {
     Section: 'Capital Account - Reserves and Surplus',
     GroupMatch: 'Capital Account + Reserves and Surplus',
     LedgerKeywords: 'capital reserve',
@@ -1076,7 +1086,7 @@ const autoRules = [
   {
     Section: 'Capital Account - Reserves and Surplus',
     GroupMatch: 'Capital Account + Reserves and Surplus',
-    LedgerKeywords: 'securities premium',
+    LedgerKeywords: 'securities premium | premium',
     BusinessType: 'Any',
     H1: 'Liability',
     H2: 'Reserves and Surplus',

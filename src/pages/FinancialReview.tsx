@@ -29,7 +29,6 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Switch } from '@/components/ui/switch';
 import {
   Command,
   CommandEmpty,
@@ -162,7 +161,7 @@ const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
       'H1': 80,
       'H2': 85,
       'H3': 119,
-      'Auto': 60,
+      'Status': 140,
     },
     fonts: {
       'Ledger Name': 10,
@@ -173,7 +172,7 @@ const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
       'H1': 11,
       'H2': 11,
       'H3': 11,
-      'Auto': 10,
+      'Status': 10,
     },
   },
   stock: {
@@ -386,7 +385,8 @@ export default function FinancialReview() {
   const [isTableSettingsOpen, setIsTableSettingsOpen] = useState(false);
   const [tableSettings, setTableSettings] = useState(DEFAULT_TABLE_SETTINGS);
   const [externalConfigActive, setExternalConfigActive] = useState(false);
-  const [saveManualRulesToDefault, setSaveManualRulesToDefault] = useState(false);
+  const [userDefinedExpenseThreshold, setUserDefinedExpenseThreshold] = useState(5000);
+  const [numberScale, setNumberScale] = useState<'actual' | 'tens' | 'hundreds' | 'thousands' | 'lakhs' | 'millions' | 'crores'>('actual');
   const actualColumns = useMemo(() => ([
     'Ledger Name',
     'Parent Group',
@@ -406,7 +406,7 @@ export default function FinancialReview() {
     'H1',
     'H2',
     'H3',
-    'Auto',
+    'Status',
   ]), []);
   const stockColumns = useMemo(() => ([
     'Item Name',
@@ -441,6 +441,31 @@ export default function FinancialReview() {
   useEffect(() => {
     localStorage.setItem('tb_odbc_port', odbcPort);
   }, [odbcPort]);
+
+  useEffect(() => {
+    const savedThreshold = localStorage.getItem('tb_user_defined_expense_threshold');
+    if (savedThreshold) {
+      const parsed = parseFloat(savedThreshold);
+      if (!Number.isNaN(parsed)) {
+        setUserDefinedExpenseThreshold(parsed);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('tb_user_defined_expense_threshold', String(userDefinedExpenseThreshold));
+  }, [userDefinedExpenseThreshold]);
+
+  useEffect(() => {
+    const savedScale = localStorage.getItem('tb_number_scale');
+    if (savedScale) {
+      setNumberScale(savedScale as typeof numberScale);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('tb_number_scale', numberScale);
+  }, [numberScale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -593,7 +618,11 @@ export default function FinancialReview() {
   }, [currentEngagement?.id]);
 
   const handleSaveManualRules = useCallback(() => {
-    const scope: RuleScope = saveManualRulesToDefault ? 'global' : 'client';
+    let scope: RuleScope = currentEngagement?.id ? 'client' : 'global';
+    if (currentEngagement?.id) {
+      const saveForAll = window.confirm('Save manual rules for all clients? Click OK for All Clients, Cancel for This Client.');
+      scope = saveForAll ? 'global' : 'client';
+    }
 
     const sourceRows = selectedRowIndices.size > 0
       ? Array.from(selectedRowIndices).map(index => currentData[index]).filter(Boolean)
@@ -608,18 +637,47 @@ export default function FinancialReview() {
       return;
     }
 
+    const existingKeys = new Set(
+      classificationRules.map(rule => [
+        rule.scope,
+        rule.ledgerNameContains || '',
+        rule.primaryGroupContains || '',
+        rule.parentGroupContains || '',
+        rule.h1,
+        rule.h2,
+        rule.h3,
+      ].join('|').toLowerCase())
+    );
+
     const newRules = sourceRows
       .filter(row => row['H1'] && row['H2'] && row['H3'])
-      .map(row => ({
-        id: `rule_${Date.now()}_${row['Composite Key'] || row['Ledger Name']}`,
-        scope,
-        ledgerNameContains: String(row['Ledger Name'] || '').trim(),
-        primaryGroupContains: String(row['Primary Group'] || '').trim(),
-        parentGroupContains: String(row['Parent Group'] || '').trim(),
-        h1: String(row['H1'] || '').trim(),
-        h2: String(row['H2'] || '').trim(),
-        h3: String(row['H3'] || '').trim(),
-      }));
+      .map(row => {
+        const rule = {
+          id: `rule_${Date.now()}_${row['Composite Key'] || row['Ledger Name']}`,
+          scope,
+          ledgerNameContains: String(row['Ledger Name'] || '').trim(),
+          primaryGroupContains: String(row['Primary Group'] || '').trim(),
+          parentGroupContains: String(row['Parent Group'] || '').trim(),
+          h1: String(row['H1'] || '').trim(),
+          h2: String(row['H2'] || '').trim(),
+          h3: String(row['H3'] || '').trim(),
+        };
+        return rule;
+      })
+      .filter(rule => {
+        const key = [
+          rule.scope,
+          rule.ledgerNameContains || '',
+          rule.primaryGroupContains || '',
+          rule.parentGroupContains || '',
+          rule.h1,
+          rule.h2,
+          rule.h3,
+        ].join('|').toLowerCase();
+        if (existingKeys.has(key)) return false;
+        existingKeys.add(key);
+        return true;
+      });
 
     if (newRules.length === 0) {
       toast({
@@ -636,7 +694,7 @@ export default function FinancialReview() {
       title: 'Rules Saved',
       description: `Saved ${newRules.length} manual rule${newRules.length !== 1 ? 's' : ''}.`,
     });
-  }, [classificationRules, selectedRowIndices, currentData, handleSaveClassificationRules, toast, saveManualRulesToDefault]);
+  }, [classificationRules, selectedRowIndices, currentData, handleSaveClassificationRules, toast, currentEngagement?.id]);
 
   // Helper to get safe column settings with defaults
   const getColumnWidth = useCallback((columnName: string) => {
@@ -688,7 +746,7 @@ export default function FinancialReview() {
   const handleApplyClassificationRules = useCallback((rules: ClassificationRule[]) => {
     setClassificationRules(rules);
     setCurrentData(prev =>
-      prev.map(row => applyClassificationRules(row, rules, { businessType, entityType }))
+      prev.map(row => applyClassificationRules(row, rules, { businessType, entityType, userDefinedExpenseThreshold }))
     );
   }, [businessType, entityType]);
 
@@ -713,13 +771,13 @@ export default function FinancialReview() {
         return row;
       }
       const cleared = { ...row, Auto: undefined, 'Auto Reason': undefined };
-      return applyClassificationRules(cleared, classificationRules, { businessType, entityType, force: true });
+      return applyClassificationRules(cleared, classificationRules, { businessType, entityType, force: true, userDefinedExpenseThreshold });
     }));
     toast({
       title: 'Auto classification updated',
       description: 'Reapplied auto rules to classified rows.',
     });
-  }, [classificationRules, businessType, entityType, toast]);
+  }, [classificationRules, businessType, entityType, toast, userDefinedExpenseThreshold]);
 
   useEffect(() => {
     if (currentData.length === 0) return;
@@ -741,7 +799,11 @@ export default function FinancialReview() {
       const shouldAuto = (group.includes('indirect expenses') || group.includes('direct expenses')) &&
         (isPlaceholder(row['H3']) || isGeneric(row['H2']));
       if (!shouldAuto) return row;
-      const updated = applyClassificationRules({ ...row, Auto: undefined, 'Auto Reason': undefined }, classificationRules, { businessType, entityType, force: true });
+      const updated = applyClassificationRules(
+        { ...row, Auto: undefined, 'Auto Reason': undefined },
+        classificationRules,
+        { businessType, entityType, force: true, userDefinedExpenseThreshold }
+      );
       if (row['H1'] !== updated['H1'] || row['H2'] !== updated['H2'] || row['H3'] !== updated['H3'] || row['Auto'] !== updated['Auto']) {
         changed = true;
       }
@@ -750,7 +812,7 @@ export default function FinancialReview() {
     if (changed) {
       setCurrentData(next);
     }
-  }, [currentData, classificationRules, businessType, entityType]);
+  }, [currentData, classificationRules, businessType, entityType, userDefinedExpenseThreshold]);
   
   // Compute stock item counts and totals directly via useMemo (avoids infinite loop from callbacks)
   const { stockItemCount, stockTotals } = useMemo(() => {
@@ -1027,6 +1089,111 @@ export default function FinancialReview() {
     });
   }, [currentData]);
 
+  const normalizeMappingValue = useCallback((value?: string) => {
+    return (value || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+  }, []);
+
+  const isMappingPlaceholder = useCallback((value?: string) => {
+    const normalized = normalizeMappingValue(value);
+    if (!normalized) return true;
+    return normalized === 'h2' ||
+      normalized === 'h3' ||
+      normalized === 'select h1' ||
+      normalized === 'select h1/h2' ||
+      normalized === 'select h1 h2';
+  }, [normalizeMappingValue]);
+
+  const getMappingStatus = useCallback((row: LedgerRow) => {
+    const h1 = normalizeMappingValue(row['H1']);
+    const h2 = normalizeMappingValue(row['H2']);
+    const h3 = normalizeMappingValue(row['H3']);
+    const hasH1 = !!h1;
+    const hasH2 = !!h2 && !isMappingPlaceholder(row['H2']);
+    const hasH3 = !!h3 && !isMappingPlaceholder(row['H3']);
+    if (hasH1 && hasH2 && hasH3) return 'Mapped';
+    if (hasH1 && hasH2) return 'Partial';
+    if (hasH1) return 'Unmapped';
+    return 'Unmapped';
+  }, [isMappingPlaceholder, normalizeMappingValue]);
+
+  const getConfidenceStatus = useCallback((row: LedgerRow) => {
+    if (row.Auto === 'Manual') return 'Manual';
+    if (row.Auto === 'Yes') {
+      const mapping = getMappingStatus(row);
+      return mapping === 'Mapped' ? 'Confident Auto' : 'Review Auto';
+    }
+    return 'Unmapped';
+  }, [getMappingStatus]);
+
+  const getStatusLabel = useCallback((row: LedgerRow) => {
+    const mapping = getMappingStatus(row);
+    const confidence = getConfidenceStatus(row);
+    if (confidence === 'Unmapped') return mapping;
+    return `${mapping} · ${confidence}`;
+  }, [getConfidenceStatus, getMappingStatus]);
+
+  const defaultH2Order = useMemo(() => ([
+    'Share Capital',
+    "Owners' Capital Account",
+    "Partners' Capital Account",
+    'Reserves and Surplus',
+    'Long-term Borrowings',
+    'Short-term Borrowings',
+    'Trade Payables',
+    'Other Long-term Liabilities',
+    'Other Current Liabilities',
+    'Long-term Provisions',
+    'Short-term Provisions',
+    'Deferred Tax Liabilities (Net)',
+    'Share Application Money Pending Allotment',
+    'Minority Interest',
+    'Property, Plant and Equipment',
+    'Intangible Assets',
+    'Non-current Investments',
+    'Current Investments',
+    'Trade Receivables',
+    'Inventories',
+    'Cash and Bank Balances',
+    'Long-term Loans and Advances',
+    'Short-term Loans and Advances',
+    'Other Non-current Assets',
+    'Other Current Assets',
+    'Deferred Tax Assets (Net)',
+    'Revenue from Operations',
+    'Other Income',
+    'Cost of Materials Consumed',
+    'Purchases of Stock in Trade',
+    'Change in Inventories',
+    'Employee Benefits Expense',
+    'Finance Costs',
+    'Depreciation and Amortisation Expense',
+    'Other Expenses',
+    'User_Defined_Expense - 1',
+    'Prior Period Items',
+    'Exceptional Items',
+    'Extraordinary Items',
+    "Partners' Remuneration",
+    'Tax Expenses',
+    'Share of Profit & Loss in Consolidation',
+  ]), []);
+
+  const defaultH2Rank = useMemo(() => new Map(defaultH2Order.map((value, index) => [value, index])), [defaultH2Order]);
+
+  const sortClassifiedByDefaultH2 = useCallback((rows: LedgerRow[]) => {
+    const getRank = (value?: string) => {
+      if (!value) return Number.MAX_SAFE_INTEGER;
+      return defaultH2Rank.get(value) ?? Number.MAX_SAFE_INTEGER;
+    };
+    return [...rows].sort((a, b) => {
+      const aRank = getRank(a['H2'] as string | undefined);
+      const bRank = getRank(b['H2'] as string | undefined);
+      if (aRank !== bRank) return aRank - bRank;
+      const aLedger = String(a['Ledger Name'] || '');
+      const bLedger = String(b['Ledger Name'] || '');
+      return aLedger.localeCompare(bLedger);
+    });
+  }, [defaultH2Rank]);
+
   // Filtered data for Classified TB
   const filteredData = useMemo(() => {
     let filtered = baseClassifiedData;
@@ -1061,13 +1228,15 @@ export default function FinancialReview() {
     Object.entries(classifiedTbColumnFilters).forEach(([column, selectedValues]) => {
       if (selectedValues.size > 0) {
         filtered = filtered.filter(row => {
-          const value = row[column as keyof LedgerRow];
+          const value = column === 'Status'
+            ? getStatusLabel(row)
+            : row[column as keyof LedgerRow];
           return selectedValues.has(value as string | number);
         });
       }
     });
-    
-    // Apply sorting
+
+    // Apply sorting (only when user explicitly sets a sort column)
     if (classifiedTbSortColumn && classifiedTbSortDirection) {
       filtered = [...filtered].sort((a, b) => {
         const aVal = a[classifiedTbSortColumn as keyof LedgerRow];
@@ -1086,7 +1255,7 @@ export default function FinancialReview() {
     }
     
     return filtered;
-  }, [baseClassifiedData, searchTerm, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection, activeTab]);
+  }, [baseClassifiedData, searchTerm, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection, activeTab, getStatusLabel]);
   
   // Selected rows that are in filtered view (for accurate bulk action count)
   const selectedFilteredCount = useMemo(() => {
@@ -1138,10 +1307,13 @@ export default function FinancialReview() {
   const getActualTbColumnValues = useCallback((column: string) => {
     return actualData.map(row => row[column as keyof LedgerRow]).filter(v => v !== null && v !== undefined) as (string | number)[];
   }, [actualData]);
-  
+
   const getClassifiedTbColumnValues = useCallback((column: string) => {
+    if (column === 'Status') {
+      return baseClassifiedData.map(getStatusLabel);
+    }
     return baseClassifiedData.map(row => row[column as keyof LedgerRow]).filter(v => v !== null && v !== undefined) as (string | number)[];
-  }, [baseClassifiedData]);
+  }, [baseClassifiedData, getStatusLabel]);
   
   // Handlers for actual TB column filter changes
   const handleActualTbFilterChange = useCallback((column: string, values: Set<string | number>) => {
@@ -1254,7 +1426,7 @@ export default function FinancialReview() {
             'H2': row['H2'] || '',
             'H3': row['H3'] || '',
           };
-          return applyClassificationRules(baseRow, classificationRules, { businessType, entityType });
+          return applyClassificationRules(baseRow, classificationRules, { businessType, entityType, userDefinedExpenseThreshold });
         });
       
       // Store actual data (unclassified) - FILTERED DATA (no completely inactive ledgers)
@@ -1264,8 +1436,9 @@ export default function FinancialReview() {
       if (importPeriodType === 'current') {
         setActualData(processedData);
         const classifiedRows = filterClassifiedRows(processedData);
-        setCurrentData(classifiedRows);
-        const userDefinedCount = classifiedRows.filter(row => (row['Notes'] || '').toLowerCase().includes('user_defined')).length;
+        const sortedClassifiedRows = sortClassifiedByDefaultH2(classifiedRows);
+        setCurrentData(sortedClassifiedRows);
+        const userDefinedCount = sortedClassifiedRows.filter(row => (row['Notes'] || '').toLowerCase().includes('user_defined')).length;
       } else {
         setPreviousData(processedData);
       }
@@ -1339,7 +1512,7 @@ export default function FinancialReview() {
       setIsFetching(false);
       setIsEntityDialogOpen(false);
     }
-  }, [entityType, businessType, fromDate, toDate, odbcConnection, importPeriodType, currentEngagement, trialBalanceDB, toast, classificationRules, deriveH1FromRevenueAndBalance, filterClassifiedRows]);
+  }, [entityType, businessType, fromDate, toDate, odbcConnection, importPeriodType, currentEngagement, trialBalanceDB, toast, classificationRules, deriveH1FromRevenueAndBalance, filterClassifiedRows, sortClassifiedByDefaultH2, userDefinedExpenseThreshold]);
 
   // Save only entity type override
   const handleSaveEntityType = useCallback(async () => {
@@ -1366,7 +1539,8 @@ export default function FinancialReview() {
     if (!pendingImportData) return;
     
     if (importPeriodType === 'current') {
-      setCurrentData(filterClassifiedRows(pendingImportData));
+      const classifiedRows = filterClassifiedRows(pendingImportData);
+      setCurrentData(sortClassifiedByDefaultH2(classifiedRows));
     } else {
       setPreviousData(pendingImportData);
     }
@@ -1417,7 +1591,7 @@ export default function FinancialReview() {
     
     setPendingImportData(null);
     setIsPeriodDialogOpen(false);
-  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, includeStockItems, businessType, odbcConnection, trialBalanceDB, toast, filterClassifiedRows]);
+  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, includeStockItems, businessType, odbcConnection, trialBalanceDB, toast, filterClassifiedRows, sortClassifiedByDefaultH2]);
   
   // Handle adding a new line item
   const handleAddLineItem = useCallback(() => {
@@ -1441,7 +1615,7 @@ export default function FinancialReview() {
     const classified = [applyClassificationRules({
       ...newLine,
       'H1': deriveH1FromRevenueAndBalance(newLine),
-    }, classificationRules, { businessType, entityType })];
+    }, classificationRules, { businessType, entityType, userDefinedExpenseThreshold })];
     
     if (newLineForm.periodType === 'current') {
       setCurrentData(prev => [...prev, classified[0]]);
@@ -1465,7 +1639,7 @@ export default function FinancialReview() {
       periodType: 'current'
     });
     setIsAddLineDialogOpen(false);
-  }, [newLineForm, toast, classificationRules, deriveH1FromRevenueAndBalance, businessType, entityType]);
+  }, [newLineForm, toast, classificationRules, deriveH1FromRevenueAndBalance, businessType, entityType, userDefinedExpenseThreshold]);
 
   // Handle bulk update
   const handleBulkUpdate = useCallback((updates: Partial<LedgerRow>) => {
@@ -1484,12 +1658,21 @@ export default function FinancialReview() {
     
     const shouldRecalcH1 = 'Is Revenue' in updates && !('H1' in updates);
     const finalUpdates: Partial<LedgerRow> = { ...updates };
+    const isUpdatingH1 = 'H1' in updates;
+    const isUpdatingH2 = 'H2' in updates;
+    const isUpdatingH3 = 'H3' in updates;
 
-    if ('H1' in updates) {
+    if (isUpdatingH1 || isUpdatingH2 || isUpdatingH3) {
+      finalUpdates['Auto'] = 'Manual';
+      finalUpdates['Auto Reason'] = undefined;
+    }
+    if (isUpdatingH1 && !isUpdatingH2) {
       finalUpdates['H2'] = '';
+    }
+    if (isUpdatingH1 && !isUpdatingH3) {
       finalUpdates['H3'] = '';
     }
-    if ('H2' in updates) {
+    if (isUpdatingH2 && !isUpdatingH3) {
       finalUpdates['H3'] = '';
     }
     if (isUserDefinedValue(finalUpdates['H2']) || isUserDefinedValue(finalUpdates['H3'])) {
@@ -1497,11 +1680,6 @@ export default function FinancialReview() {
       finalUpdates['H3'] = isUserDefinedValue(finalUpdates['H3']) ? '' : finalUpdates['H3'];
       const note = window.prompt('Enter note for User_Defined classification:', baseRow['Notes'] || '');
       finalUpdates['Notes'] = note && note.trim().length > 0 ? note.trim() : 'User_Defined - set H2/H3 manually';
-    }
-    if (isUserDefinedValue(finalUpdates['H2']) || isUserDefinedValue(finalUpdates['H3'])) {
-      finalUpdates['H2'] = isUserDefinedValue(finalUpdates['H2']) ? '' : finalUpdates['H2'];
-      finalUpdates['H3'] = isUserDefinedValue(finalUpdates['H3']) ? '' : finalUpdates['H3'];
-      finalUpdates['Notes'] = 'User_Defined - set H2/H3 manually';
     }
     
     selectedRowIndices.forEach(index => {
@@ -1701,7 +1879,7 @@ export default function FinancialReview() {
           'Sheet Name': 'TB CY'
         };
         row['H1'] = deriveH1FromRevenueAndBalance(row);
-        return applyClassificationRules(row, classificationRules, { businessType, entityType });
+        return applyClassificationRules(row, classificationRules, { businessType, entityType, userDefinedExpenseThreshold });
       });
       
       setActualData(loadedData);
@@ -1913,10 +2091,24 @@ export default function FinancialReview() {
   
   // Format number for display
   const formatNumber = (num: number): string => {
+    const scaleFactor = numberScale === 'tens'
+      ? 10
+      : numberScale === 'hundreds'
+        ? 100
+        : numberScale === 'thousands'
+          ? 1000
+          : numberScale === 'lakhs'
+            ? 100000
+            : numberScale === 'millions'
+              ? 1000000
+              : numberScale === 'crores'
+                ? 10000000
+                : 1;
+    const scaled = num / scaleFactor;
     return new Intl.NumberFormat('en-IN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
-    }).format(num);
+    }).format(scaled);
   };
 
   // Export Template for Excel Import
@@ -2085,7 +2277,7 @@ export default function FinancialReview() {
             if (!mapped['H1']) {
               mapped['H1'] = deriveH1FromRevenueAndBalance(mapped);
             }
-            return applyClassificationRules(mapped, classificationRules, { businessType, entityType });
+            return applyClassificationRules(mapped, classificationRules, { businessType, entityType, userDefinedExpenseThreshold });
           })
           .filter(row => {
             // Filter out rows where both opening and closing balances are 0
@@ -2094,7 +2286,7 @@ export default function FinancialReview() {
         
         setActualData(processedData);
         const classifiedRows = filterClassifiedRows(processedData);
-        setCurrentData(classifiedRows);
+        setCurrentData(sortClassifiedByDefaultH2(classifiedRows));
         const userDefinedCount = classifiedRows.filter(row => (row['Notes'] || '').toLowerCase().includes('user_defined')).length;
         
         // Save to database
@@ -2137,7 +2329,7 @@ export default function FinancialReview() {
       }
     };
     input.click();
-  }, [toast]);
+  }, [toast, entityType, classificationRules, businessType, userDefinedExpenseThreshold, deriveH1FromRevenueAndBalance, currentEngagement?.id, toDate, trialBalanceDB, filterClassifiedRows, sortClassifiedByDefaultH2]);
 
   // Excel Export - Actual TB
   const handleExportActualTB = useCallback(() => {
@@ -2484,13 +2676,6 @@ export default function FinancialReview() {
           >
             Auto Apply
           </Button>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Switch
-              checked={saveManualRulesToDefault}
-              onCheckedChange={setSaveManualRulesToDefault}
-            />
-            <span>Save Manual Rules to Default</span>
-          </div>
           <Button
             variant={hasManualRows ? 'default' : 'outline'}
             size="sm"
@@ -2674,6 +2859,20 @@ export default function FinancialReview() {
                   : `${selectedFilteredCount} of ${filteredData.length} selected`}
               </Badge>
             )}
+            <Select value={numberScale} onValueChange={(value) => setNumberScale(value as typeof numberScale)}>
+              <SelectTrigger className="h-7 px-2 text-xs w-[150px]">
+                <SelectValue placeholder="Scale" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="actual">Actual</SelectItem>
+                <SelectItem value="tens">Tens (0)</SelectItem>
+                <SelectItem value="hundreds">Hundreds (00)</SelectItem>
+                <SelectItem value="thousands">Thousands ('000)</SelectItem>
+                <SelectItem value="lakhs">Lakhs ('00000)</SelectItem>
+                <SelectItem value="millions">Millions (000000)</SelectItem>
+                <SelectItem value="crores">Crores (0000000)</SelectItem>
+              </SelectContent>
+            </Select>
             <Button 
               size="sm" 
               variant="outline" 
@@ -3015,7 +3214,7 @@ export default function FinancialReview() {
             <Table className="table-fixed w-full border-collapse">
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
-                  <TableHead className="w-8 sticky top-0 bg-white p-0" style={{ left: classifiedStickyOffsets.selection, zIndex: 20 }}>
+                  <TableHead className="w-8 sticky top-0 bg-white p-0" style={{ zIndex: 20 }}>
                     <input
                       type="checkbox"
                       checked={selectedFilteredCount === filteredData.length && filteredData.length > 0}
@@ -3035,7 +3234,7 @@ export default function FinancialReview() {
                   </TableHead>
                   <TableHead
                     className="sticky top-0 bg-white relative"
-                    style={{ width: getColumnWidth('Ledger Name'), left: classifiedStickyOffsets.ledger, zIndex: 19 }}
+                    style={{ width: getColumnWidth('Ledger Name'), zIndex: 19 }}
                   >
                     <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Ledger Name')}px` }}>
                       Ledger Name
@@ -3142,9 +3341,17 @@ export default function FinancialReview() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('Auto') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Auto')}px` }}>
-                      Auto
+                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('Status') }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Status')}px` }}>
+                      Status
+                      <ColumnFilter
+                        column="Status"
+                        values={getClassifiedTbColumnValues('Status')}
+                        selectedValues={classifiedTbColumnFilters['Status'] || new Set()}
+                        onFilterChange={(values) => handleClassifiedTbFilterChange('Status', values)}
+                        sortDirection={classifiedTbSortColumn === 'Status' ? classifiedTbSortDirection : null}
+                        onSort={(dir) => handleClassifiedTbSort('Status', dir)}
+                      />
                     </div>
                   </TableHead>
                 </TableRow>
@@ -3166,11 +3373,15 @@ export default function FinancialReview() {
                     );
                     const isSelected = originalIndex !== -1 && selectedRowIndices.has(originalIndex);
                     const isFocused = focusedClassifiedRowIndex === originalIndex;
+                    const mappingStatus = getMappingStatus(row);
                     
                     return (
                       <TableRow 
                         key={row['Composite Key'] || index}
                         className={cn(
+                          !isSelected && mappingStatus === 'Mapped' && "bg-emerald-50",
+                          !isSelected && mappingStatus === 'Partial' && "bg-amber-50",
+                          !isSelected && mappingStatus === 'Unmapped' && "bg-red-50",
                           isSelected && "bg-blue-50",
                           isFocused && "ring-2 ring-blue-400 ring-inset",
                           "cursor-pointer hover:bg-gray-50 transition-colors"
@@ -3183,7 +3394,7 @@ export default function FinancialReview() {
                         tabIndex={0}
                         onFocus={() => setFocusedClassifiedRowIndex(originalIndex)}
                       >
-                        <TableCell onClick={(e) => e.stopPropagation()} className="sticky left-0 bg-white z-10 p-0" style={{ left: classifiedStickyOffsets.selection, width: 28 }}>
+                        <TableCell onClick={(e) => e.stopPropagation()} className="p-0" style={{ width: 28 }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -3195,8 +3406,8 @@ export default function FinancialReview() {
                           />
                         </TableCell>
                         <TableCell
-                          className="font-medium sticky bg-white z-10 truncate px-2 py-1"
-                          style={{ left: classifiedStickyOffsets.ledger, width: getColumnWidth('Ledger Name'), fontSize: `${getColumnFontSize('Ledger Name')}px` }}
+                          className="font-medium truncate px-2 py-1"
+                          style={{ width: getColumnWidth('Ledger Name'), fontSize: `${getColumnFontSize('Ledger Name')}px` }}
                           title={row['Ledger Name']}
                         >
                           {row['Ledger Name']}
@@ -3270,22 +3481,34 @@ export default function FinancialReview() {
                             );
                           })()}
                         </TableCell>
-                        <TableCell className="px-2 py-1" style={{ width: getColumnWidth('Auto'), fontSize: `${getColumnFontSize('Auto')}px` }}>
-                          {row['Auto'] === 'Yes' ? (
-                            <div className="flex items-center gap-1 flex-wrap">
-                              <Badge variant="secondary" title="Auto classified" className="h-4 px-1 text-[10px]">
-                                Auto
-                              </Badge>
-                            </div>
-                          ) : row['Auto'] === 'Manual' ? (
-                            <div className="flex items-center gap-1 flex-wrap">
-                              <Badge variant="outline" title="Manually classified" className="h-4 px-1 text-[10px]">
-                                Manual
-                              </Badge>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
+                        <TableCell className="px-2 py-1" style={{ width: getColumnWidth('Status'), fontSize: `${getColumnFontSize('Status')}px` }}>
+                          {(() => {
+                            const mapping = getMappingStatus(row);
+                            const confidence = getConfidenceStatus(row);
+                            const label = getStatusLabel(row);
+                            if (confidence === 'Confident Auto') {
+                              return (
+                                <Badge variant="secondary" title={`${mapping} - Auto classification looks complete`} className="h-4 px-1 text-[10px]">
+                                  {label}
+                                </Badge>
+                              );
+                            }
+                            if (confidence === 'Review Auto') {
+                              return (
+                                <Badge variant="outline" title={`${mapping} - Auto classification needs review`} className="h-4 px-1 text-[10px]">
+                                  {label}
+                                </Badge>
+                              );
+                            }
+                            if (confidence === 'Manual') {
+                              return (
+                                <Badge variant="outline" title={`${mapping} - Manually classified`} className="h-4 px-1 text-[10px]">
+                                  {label}
+                                </Badge>
+                              );
+                            }
+                            return <span className="text-muted-foreground">{label}</span>;
+                          })()}
                         </TableCell>
                       </TableRow>
                     );
@@ -3305,6 +3528,7 @@ export default function FinancialReview() {
                 onSelectionChange={setStockSelectedCount}
                 bulkUpdateRequestId={stockBulkUpdateRequestId}
                 deleteSelectedRequestId={stockDeleteRequestId}
+                numberScale={numberScale}
                 tableSettings={tableSettings.stock}
               />
             </TabsContent>
@@ -3434,6 +3658,17 @@ export default function FinancialReview() {
                   className="h-6 w-20 rounded border px-2"
                 />
                 <span>px</span>
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-24">User Defined</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={userDefinedExpenseThreshold}
+                  onChange={(e) => setUserDefinedExpenseThreshold(parseFloat(e.target.value) || 0)}
+                  className="h-6 w-20 rounded border px-2"
+                />
+                <span>threshold</span>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {classifiedColumns.map((column) => (

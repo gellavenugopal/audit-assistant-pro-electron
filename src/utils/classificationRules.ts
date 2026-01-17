@@ -17,6 +17,7 @@ export type ClassificationContext = {
   businessType?: string;
   force?: boolean;
   entityType?: string;
+  userDefinedExpenseThreshold?: number;
 };
 
 function normalize(value?: string): string {
@@ -45,12 +46,25 @@ function isPartnershipEntity(entityType?: string): boolean {
 }
 
 function normalizeForMatch(value?: string): string {
-  return (value || '')
+  const normalized = (value || '')
     .toString()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  return normalized.replace(
+    /\b(receivable|recievable|receivble|recievble|recivable|rcvble|rcvbles|rcvbl|recvable|recvables)\b/g,
+    'receivable'
+  ).replace(
+    /\b(cgst|sgst|igst|ugst)\b/g,
+    'gst'
+  ).replace(
+    /\b(provident fund|provident|pf)\b/g,
+    'pf'
+  ).replace(
+    /\b(esi|esic|employee state insurance|employer state insurance)\b/g,
+    'esi'
+  );
 }
 
 function matchesPhrase(value: string, phrase: string): boolean {
@@ -58,8 +72,15 @@ function matchesPhrase(value: string, phrase: string): boolean {
   const haystack = normalizeForMatch(value);
   const needle = normalizeForMatch(phrase);
   if (!needle) return false;
-  const pattern = new RegExp(`(^|\\s)${needle.replace(/\s+/g, '\\s+')}(\\s|$)`, 'i');
-  return pattern.test(haystack);
+  const patternFor = (term: string) => new RegExp(`(^|\\s)${term.replace(/\s+/g, '\\s+')}(\\s|$)`, 'i');
+  const candidates = [needle];
+  if (needle.endsWith('s')) {
+    const singular = needle.slice(0, -1).trim();
+    if (singular) candidates.push(singular);
+  } else {
+    candidates.push(`${needle}s`);
+  }
+  return candidates.some(term => patternFor(term).test(haystack));
 }
 
 function hasAny(value: string, needles: string[]): boolean {
@@ -80,6 +101,10 @@ function matchesGroup(value: string, phrase: string): boolean {
 
 function hasAnyInLedgerOrParent(ledger: string, parent: string, needles: string[]): boolean {
   return hasAny(ledger, needles) || hasAny(parent, needles);
+}
+
+function hasAnyInGroups(ledger: string, parent: string, primary: string, needles: string[]): boolean {
+  return hasAny(ledger, needles) || hasAny(parent, needles) || hasAny(primary, needles);
 }
 
 function matchesPhraseInLedgerOrParent(ledger: string, parent: string, phrase: string): boolean {
@@ -218,6 +243,25 @@ function getCashBankH3(primary: string, ledger: string, parent: string): string 
   return 'Other bank balances';
 }
 
+function getInventoryH3(ledger: string, parent: string): string {
+  if (hasAnyInLedgerOrParent(ledger, parent, ['raw material', 'rm', 'raw'])) {
+    return 'Raw Materials';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['wip', 'work in progress', 'work-in-progress'])) {
+    return 'Work-in-progress';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['fg', 'finished', 'goods'])) {
+    return 'Finished goods';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['stock in trade', 'stock-in-trade', 'stock'])) {
+    return 'Stock-in-Trade';
+  }
+  if (hasAnyInLedgerOrParent(ledger, parent, ['spare', 'spares', 'store', 'stores', 'part', 'parts'])) {
+    return 'Stores and Spares';
+  }
+  return '';
+}
+
 function isUserDefined(value?: string): boolean {
   return normalize(value) === 'user_defined' || normalize(value) === 'user defined';
 }
@@ -286,7 +330,7 @@ export function applyClassificationRules(
           'H3': 'Capital Reserve',
         }, 'Reserves & Surplus - Capital Reserve');
       }
-      if (hasAnyInLedgerOrParent(ledger, parent, ['securities premium'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['securities premium', 'premium'])) {
         return addAutoNote({
           ...row,
           'H1': 'Liability',
@@ -442,6 +486,76 @@ export function applyClassificationRules(
       }, 'Fixed Assets - Intangible');
     }
 
+    const receivableGroupMatch = [
+      'sundry debtors',
+      'trade receivables',
+      'accounts receivable',
+      'account receivable',
+      'customer',
+      'debtor',
+    ].some(phrase => matchesGroup(primary, phrase) || matchesGroup(parent, phrase) || matchesGroup(group, phrase));
+    const isReceivableGroup = normalize(row['H1']) === 'asset' && receivableGroupMatch;
+    const receivableKeywords = [
+      'sundry debtor', 'sundry debtors', 'trade receivable', 'trade receivables', 'accounts receivable', 'account receivable',
+      'debtors', 'customer receivable', 'customer balance', 'outstanding receivable', 'sales receivable', 'invoice receivable',
+      'fees receivable', 'service receivable', 'consultancy receivable', 'professional fees receivable', 'amc receivable',
+      'maintenance receivable', 'subscription receivable', 'project billing receivable',
+      'flat buyer receivable', 'flat buyers balance', 'booking receivable', 'installment receivable', 'possession receivable',
+      'rent receivable', 'lease rental receivable', 'maintenance charges receivable',
+      'export receivable', 'domestic receivable', 'dealer receivable', 'distributor receivable',
+      'license fee receivable', 'software service receivable', 'development charges receivable',
+      'freight receivable', 'transport charges receivable', 'logistics receivable',
+      'patient receivable', 'hospital charges receivable', 'tuition fees receivable', 'student fees receivable',
+    ];
+    const receivableExclusions = ['advance', 'prepaid', 'loan', 'deposit', 'security deposit', 'staff advance'];
+    if (normalize(row['H1']) === 'liability' && receivableGroupMatch && matchesGroup(primary, 'sundry debtors')) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'Advance from Customers',
+      }, 'Sundry Debtors - Credit Balance');
+    }
+
+    if (isReceivableGroup && !hasAnyInLedgerOrParent(ledger, parent, receivableExclusions)) {
+      const keywordMatched = hasAnyInLedgerOrParent(ledger, parent, receivableKeywords);
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Trade Receivables',
+        'H3': 'Unsecured, considered good',
+      }, keywordMatched ? 'Trade Receivables' : 'Trade Receivables (Group)');
+    }
+
+    const employeeLoanKeywords = [
+      'loan to staff', 'loan to employee', 'employee loan', 'staff loan', 'salary loan',
+      'personal loan to employee', 'employee housing loan', 'employee vehicle loan',
+    ];
+    const employeeAdvanceKeywords = [
+      'staff advance', 'employee advance', 'advance to staff', 'advance to employee', 'salary advance',
+      'wage advance', 'payroll advance', 'employee receivable', 'staff receivable', 'tour advance',
+      'travel advance', 'ta advance', 'medical advance',
+    ];
+    if (normalize(row['H1']) === 'asset' &&
+      hasAnyInGroups(ledger, parent, primary, [...employeeLoanKeywords, ...employeeAdvanceKeywords])) {
+      if (hasAnyInGroups(ledger, parent, primary, employeeLoanKeywords)) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Asset',
+          'H2': 'Short-term Loans and Advances',
+          'H3': 'Unsecured - Loans to employees',
+        }, 'Employee Loans');
+      }
+      if (hasAnyInGroups(ledger, parent, primary, employeeAdvanceKeywords)) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Asset',
+          'H2': 'Short-term Loans and Advances',
+          'H3': 'Unsecured - Advances to employees',
+        }, 'Employee Advances');
+      }
+    }
+
     if (normalize(row['H1']) === 'asset' && (matchesGroup(primary, 'cash-in-hand') || matchesGroup(primary, 'bank accounts'))) {
       const h3 = getCashBankH3(primary, ledger, parent);
       if (h3) {
@@ -454,6 +568,401 @@ export function applyClassificationRules(
       }
     }
 
+    if (normalize(row['H1']) === 'asset' &&
+      (matchesGroup(primary, 'stock-in-hand') || matchesGroup(parent, 'stock-in-hand') || matchesGroup(group, 'stock-in-hand'))) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Inventories',
+        'H3': getInventoryH3(ledger, parent),
+      }, 'Stock-in-Hand');
+    }
+
+    const gstInputKeywords = [
+      'gst input', 'input gst', 'input tax credit', 'itc',
+      'cgst input', 'sgst input', 'igst input', 'ugst input',
+      'gst credit', 'eligible itc', 'input credit',
+      'gst receivable', 'gst refundable',
+    ];
+    const gstInputExclusions = ['gst payable', 'output gst', 'output tax', 'gst liability'];
+    if (normalize(row['H1']) === 'asset' &&
+      hasAnyInGroups(ledger, parent, primary, gstInputKeywords) &&
+      !hasAnyInLedgerOrParent(ledger, parent, gstInputExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Short-term Loans and Advances',
+        'H3': 'Unsecured - GST Input Credit',
+      }, 'GST Input Credit');
+    }
+
+    const advanceTaxKeywords = [
+      'advance tax', 'income tax advance', 'advance income tax',
+      'tds receivable', 'tds refund', 'tds refundable', 'tds recoverable',
+      'tax deducted at source', 'tds credit',
+      'tcs receivable', 'tcs refund', 'tcs refundable', 'tcs recoverable',
+      'tax collected at source', 'tcs credit',
+    ];
+    const gstTdsTcsExclusions = [
+      'gst tds', 'gst tcs',
+      'cgst tds', 'sgst tds', 'igst tds',
+      'cgst tcs', 'sgst tcs', 'igst tcs',
+      'gst withholding', 'gst wht',
+    ];
+    const advanceTaxExclusions = ['tds payable', 'tcs payable', 'tax payable', 'income tax payable'];
+    if (normalize(row['H1']) === 'asset' &&
+      hasAnyInGroups(ledger, parent, primary, advanceTaxKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, gstTdsTcsExclusions) &&
+      !hasAnyInLedgerOrParent(ledger, parent, advanceTaxExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Short-term Loans and Advances',
+        'H3': 'Unsecured - Advance Tax and TDS',
+      }, 'Advance Tax/TDS');
+    }
+
+    const govtReceivableKeywords = [
+      'government receivable', 'government authority receivable',
+      'balance with government', 'balances with government authorities',
+      'refund receivable from government', 'government refund',
+      'tax refund receivable', 'income tax refund',
+      'vat refund', 'sales tax refund', 'excise refund',
+      'customs refund', 'duty refund',
+      'cess refund', 'surcharge refund',
+      'municipal tax refund', 'local body refund',
+    ];
+    const govtReceivableExclusions = [
+      'gst input', 'input gst', 'input tax credit', 'itc',
+      'tds receivable', 'tcs receivable',
+      'advance tax', 'security deposit',
+    ];
+    if (normalize(row['H1']) === 'asset' &&
+      hasAnyInGroups(ledger, parent, primary, govtReceivableKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, govtReceivableExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Short-term Loans and Advances',
+        'H3': 'Unsecured - Balances with government authorities',
+      }, 'Government Receivable');
+    }
+
+    const prepaidExpenseKeywords = [
+      'prepaid expense', 'prepaid expenses', 'prepaid',
+      'advance expense', 'expense paid in advance',
+      'rent prepaid', 'insurance prepaid',
+      'maintenance prepaid', 'subscription prepaid',
+      'annual charges prepaid', 'service charges prepaid',
+    ];
+    const prepaidExpenseExclusions = [
+      'staff advance', 'employee advance',
+      'loan', 'deposit', 'security deposit',
+      'advance to supplier', 'supplier advance',
+    ];
+    if (normalize(row['H1']) === 'asset' &&
+      hasAnyInGroups(ledger, parent, primary, prepaidExpenseKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, prepaidExpenseExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Short-term Loans and Advances',
+        'H3': 'Unsecured - Prepaid Expenses',
+      }, 'Prepaid Expenses');
+    }
+
+    const tradeDepositKeywords = [
+      'trade deposit', 'trade deposits',
+      'deposit with supplier', 'deposit with vendor',
+      'supplier deposit', 'vendor deposit',
+      'security deposit', 'sd',
+      'deposit for goods', 'deposit for services',
+      'earnest money deposit', 'emd',
+      'performance deposit',
+    ];
+    const tradeDepositExclusions = [
+      'staff advance', 'employee advance',
+      'loan', 'prepaid', 'expense',
+      'rent deposit', 'lease deposit',
+      'electricity deposit', 'water deposit',
+    ];
+    if (normalize(row['H1']) === 'asset' &&
+      hasAnyInGroups(ledger, parent, primary, tradeDepositKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, tradeDepositExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Long-term Loans and Advances',
+        'H3': 'Unsecured - Trade Deposits',
+      }, 'Trade Deposits');
+    }
+
+    const capitalAdvanceKeywords = [
+      'capital advance', 'capital advances',
+      'advance for capital asset',
+      'advance for fixed asset',
+      'advance for machinery', 'machinery advance',
+      'advance for equipment', 'equipment advance',
+      'advance for plant', 'plant advance',
+      'advance for building', 'building advance',
+      'advance for construction', 'construction advance',
+      'advance for property', 'property advance',
+    ];
+    const capitalAdvanceExclusions = [
+      'staff advance', 'employee advance',
+      'trade deposit', 'supplier deposit',
+      'prepaid expense', 'expense advance',
+      'loan to staff', 'loan to employee',
+    ];
+    if (normalize(row['H1']) === 'asset' &&
+      hasAnyInGroups(ledger, parent, primary, capitalAdvanceKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, capitalAdvanceExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Long-term Loans and Advances',
+        'H3': 'Unsecured - Capital Advances',
+      }, 'Capital Advances');
+    }
+
+    const tdsPayableKeywords = [
+      'tds payable', 'tds liability', 'tds deducted',
+      'tax deducted at source payable',
+      'withholding tax payable',
+      'tds sec', 'tds section', 'u s', 'under section',
+      '194c', '194j', '194h', '194i', '194a', '194q', '194r',
+      '195', '192', '193', '194', '194ia', '194ib', '194ic',
+      'tcs payable', 'tcs liability',
+      'tax collected at source payable',
+      'tcs sec', 'tcs section', '206c',
+    ];
+    const tdsTcsGstExclusions = [
+      'gst tds', 'gst tcs',
+      'cgst tds', 'sgst tds', 'igst tds',
+      'cgst tcs', 'sgst tcs', 'igst tcs',
+      'gst withholding', 'gst wht',
+    ];
+    const tdsPayableExclusions = ['tds advance', 'tds paid', 'tcs advance', 'tcs paid'];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, tdsPayableKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, tdsTcsGstExclusions) &&
+      !hasAnyInLedgerOrParent(ledger, parent, tdsPayableExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'TDS Payable',
+      }, 'TDS Payable');
+    }
+
+    const auditFeesPayableKeywords = [
+      'audit fees payable', 'audit fee payable',
+      'audit charges payable', 'audit expenses payable',
+      'auditor fees payable', 'auditor fee payable',
+      'internal audit fees payable', 'tax audit fees payable',
+      'secretarial audit fees payable', 'cost audit fees payable',
+      'forensic audit fees payable', 'concurrent audit fees payable',
+    ];
+    const auditFeesPayableExclusions = [
+      'audit fees paid', 'audit expenses paid',
+      'audit fee advance', 'advance to auditor',
+    ];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, auditFeesPayableKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, auditFeesPayableExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'Audit Fees Payable',
+      }, 'Audit Fees Payable');
+    }
+
+    const serviceTaxPayableKeywords = [
+      'service tax payable', 'service tax liability',
+      'service tax dues', 'st payable',
+      'svc tax payable', 'srvc tax payable',
+      'tax on services payable',
+    ];
+    const serviceTaxGstExclusions = [
+      'gst payable', 'gst liability',
+      'cgst payable', 'sgst payable', 'igst payable',
+      'gst service tax', 'gst on services',
+    ];
+    const serviceTaxPayableExclusions = ['service tax advance', 'service tax paid'];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, serviceTaxPayableKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, serviceTaxGstExclusions) &&
+      !hasAnyInLedgerOrParent(ledger, parent, serviceTaxPayableExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'Service Tax Payable',
+      }, 'Service Tax Payable');
+    }
+
+    const gstPayableKeywords = [
+      'gst payable', 'gst liability',
+      'output gst', 'output tax',
+      'cgst payable', 'sgst payable', 'igst payable', 'ugst payable',
+      'gst output', 'tax payable under gst',
+    ];
+    const gstPayableExclusions = [
+      'gst input', 'input gst', 'input tax credit', 'itc',
+      'gst receivable', 'gst refundable',
+    ];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, gstPayableKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, gstPayableExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'GST Payable',
+      }, 'GST Payable');
+    }
+
+    const employeeDuesKeywords = [
+      'salary payable', 'salaries payable', 'wages payable', 'wage payable',
+      'employee dues', 'dues to employees',
+      'bonus payable', 'incentive payable', 'commission payable',
+      'leave encashment payable',
+      'arrears payable',
+      'payroll payable',
+    ];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, employeeDuesKeywords)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'Employee Dues Payable',
+      }, 'Employee Dues Payable');
+    }
+
+    const pfPayableKeywords = [
+      'pf payable', 'pf fund payable',
+      'employees pf payable', 'epf payable',
+      'pf dues', 'pf dues payable',
+      'employer pf payable', 'employee pf payable',
+      'pf contribution payable',
+    ];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, pfPayableKeywords)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'PF Dues Payable',
+      }, 'PF Dues Payable');
+    }
+
+    const esiPayableKeywords = [
+      'esi payable', 'esi dues',
+      'esi contribution payable',
+      'employer esi payable', 'employee esi payable',
+      'employees esi payable',
+      'employee state insurance payable', 'employee state insurance dues',
+      'employer state insurance payable',
+    ];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, esiPayableKeywords)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'ESI Dues Payable',
+      }, 'ESI Dues Payable');
+    }
+
+    const lwfPayableKeywords = [
+      'lwf payable', 'labour welfare fund payable',
+      'labour welfare fund dues', 'labor welfare fund payable',
+      'lwf contribution payable',
+      'employer lwf payable', 'employee lwf payable',
+    ];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, lwfPayableKeywords)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'LWF Dues Payable',
+      }, 'LWF Dues Payable');
+    }
+
+    const professionalTaxPayableKeywords = [
+      'professional tax payable', 'profession tax payable',
+      'professional tax dues', 'profession tax dues',
+      'pt payable', 'p tax payable', 'p tax payable', 'p-tax payable',
+      'ptax payable', 'ptx payable',
+      'pro tax payable', 'prof tax payable',
+      'professional tax liability', 'pt liability',
+      'pt dues', 'p tax dues', 'p tax dues',
+    ];
+    const professionalTaxPayableExclusions = [
+      'professional tax advance', 'pt advance', 'p tax advance',
+      'professional tax paid',
+    ];
+    if (normalize(row['H1']) === 'liability' &&
+      hasAnyInGroups(ledger, parent, primary, professionalTaxPayableKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, professionalTaxPayableExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'Professional Tax Payable',
+      }, 'Professional Tax Payable');
+    }
+
+    const payableGroupMatch = [
+      'sundry creditors',
+      'trade payables',
+      'accounts payable',
+      'account payable',
+      'creditors',
+      'supplier',
+      'vendor',
+    ].some(phrase => matchesGroup(primary, phrase) || matchesGroup(parent, phrase) || matchesGroup(group, phrase));
+    const payableKeywords = [
+      'sundry creditor', 'sundry creditors', 'trade payable', 'trade payables', 'accounts payable', 'account payable',
+      'creditors', 'supplier payable', 'vendor payable', 'supplier balance', 'vendor balance',
+      'payable', 'outstanding payable', 'purchase payable', 'invoice payable',
+      'contractor payable', 'professional fees payable', 'service payable', 'consultancy payable', 'amc payable',
+      'rent payable', 'lease payable', 'freight payable', 'transport payable', 'logistics payable',
+      'statutory payable', 'retention payable',
+    ];
+    const payableExclusions = [
+      'loan', 'borrowing', 'bank', 'overdraft', 'interest', 'tax', 'tds', 'gst', 'provident fund', 'esi', 'salary', 'wages',
+    ];
+    if (normalize(row['H1']) === 'asset' && matchesGroup(primary, 'sundry creditors')) {
+      let h3 = 'Unsecured - Advances to Suppliers';
+      if (hasAnyInLedgerOrParent(ledger, parent, ['employee', 'staff', 'labour', 'labor'])) {
+        h3 = 'Unsecured - Advances to employees';
+      } else if (hasAnyInLedgerOrParent(ledger, parent, ['related party', 'related', 'rpt'])) {
+        h3 = 'Unsecured - Advances to related parties';
+      }
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Short-term Loans and Advances',
+        'H3': h3,
+      }, 'Sundry Creditors - Debit Balance');
+    }
+
+    if (normalize(row['H1']) === 'liability' &&
+      payableGroupMatch &&
+      hasAnyInLedgerOrParent(ledger, parent, payableKeywords) &&
+      !hasAnyInLedgerOrParent(ledger, parent, payableExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Trade Payables',
+        'H3': 'Other than MSME',
+      }, 'Trade Payables');
+    }
+
     if (matchesGroup(group, 'sales accounts')) {
       return addAutoNote({
         ...row,
@@ -464,11 +973,14 @@ export function applyClassificationRules(
     }
 
     if (matchesGroup(group, 'direct incomes') || matchesGroup(group, 'indirect incomes')) {
+      const threshold = context.userDefinedExpenseThreshold ?? 5000;
+      const closing = Math.abs(row['Closing Balance'] || 0);
+      const h3 = getOtherIncomeH3(ledger, parent);
       return addAutoNote({
         ...row,
         'H1': 'Income',
         'H2': 'Other Income',
-        'H3': getOtherIncomeH3(ledger, parent),
+        'H3': h3 === 'Miscellaneous non-operating Income' && closing > threshold ? 'User_Defined - 1' : h3,
       }, 'Direct/Indirect Incomes');
     }
 
@@ -501,6 +1013,39 @@ export function applyClassificationRules(
     }
 
     if (matchesGroup(group, 'indirect expenses')) {
+      if (matchesPhrase(ledger, 'professional tax') || matchesPhrase(ledger, 'profession tax') || matchesPhrase(ledger, 'p tax') || matchesPhrase(ledger, 'ptax')) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Other Expenses',
+          'H3': 'Rates and Taxes',
+        }, 'Indirect Expenses - Professional Tax');
+      }
+      if ((matchesPhrase(ledger, 'gst late') || matchesPhrase(ledger, 'late filing fee') || matchesPhrase(ledger, 'late fees')) &&
+        matchesPhrase(parent, 'interest and late fees on statutory dues')) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Other Expenses',
+          'H3': 'Rates and Taxes',
+        }, 'Indirect Expenses - GST Late Fees');
+      }
+      if (matchesPhrase(ledger, 'printing')) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Other Expenses',
+          'H3': 'Printing and stationery',
+        }, 'Indirect Expenses - Printing');
+      }
+      if (matchesPhrase(ledger, 'retainership')) {
+        return addAutoNote({
+          ...row,
+          'H1': 'Expense',
+          'H2': 'Other Expenses',
+          'H3': 'Professional and consultancy charges',
+        }, 'Indirect Expenses - Retainership');
+      }
       if (hasAnyInLedgerOrParent(ledger, parent, ['interest', 'int', 'int.']) || matchesWord(ledger, 'int') || matchesWord(parent, 'int')) {
         if (hasAnyInLedgerOrParent(ledger, parent, ['bank', 'loan', 'cash credit', 'cc', 'overdraft', 'od'])) {
           return addAutoNote({
@@ -661,7 +1206,7 @@ export function applyClassificationRules(
           'H3': "Auditor's Remuneration",
         }, 'Indirect Expenses - Audit');
       }
-      if (hasAnyInLedgerOrParent(ledger, parent, ['bad debt', 'write off', 'written off'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['bad debt', 'bad debts', 'write off', 'written off'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -829,7 +1374,7 @@ export function applyClassificationRules(
           'H3': 'Provision for Other Expenses',
         }, 'Indirect Expenses - Provision Other');
       }
-      if (hasAnyInLedgerOrParent(ledger, parent, ['rates', 'taxes', 'professional tax', 'ptax', 'trade licence', 'municipal tax', 'late fee'])) {
+      if (hasAnyInLedgerOrParent(ledger, parent, ['rates', 'taxes', 'professional tax', 'ptax', 'trade licence', 'municipal tax', 'late fee', 'challan', 'roc'])) {
         return addAutoNote({
           ...row,
           'H1': 'Expense',
@@ -917,11 +1462,14 @@ export function applyClassificationRules(
           'H3': 'Travelling expenses',
         }, 'Indirect Expenses - Travel');
       }
+      const threshold = context.userDefinedExpenseThreshold ?? 5000;
+      const closing = Math.abs(row['Closing Balance'] || 0);
+      const h3 = closing > threshold ? 'User_Defined - 1' : 'Miscellaneous other expenses';
       return addAutoNote({
         ...row,
         'H1': 'Expense',
         'H2': 'Other Expenses',
-        'H3': 'Miscellaneous other expenses',
+        'H3': h3,
       }, 'Indirect Expenses - Other');
     }
 
