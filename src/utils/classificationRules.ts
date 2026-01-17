@@ -112,6 +112,7 @@ function matchesPhraseInLedgerOrParent(ledger: string, parent: string, phrase: s
 }
 
 function getSalesAccountsH3(ledger: string, parent: string): string {
+  if (hasAnyInLedgerOrParent(ledger, parent, ['flat'])) return 'Sale of real estate properties';
   if (hasAnyInLedgerOrParent(ledger, parent, ['professional', 'service', 'services'])) return 'Sale of services';
   if (hasAnyInLedgerOrParent(ledger, parent, ['scrap'])) return 'Scrap sales';
   if (hasAnyInLedgerOrParent(ledger, parent, ['export'])) return 'Export incentives';
@@ -304,8 +305,104 @@ export function applyClassificationRules(
   const isTrading = businessType.includes('trading');
   const isCompany = isCompanyEntity(entityType);
   const isPartnership = isPartnershipEntity(entityType);
+  const effectiveBalance = (row['Closing Balance'] || 0) !== 0
+    ? (row['Closing Balance'] || 0)
+    : (row['Opening Balance'] || 0);
+  const isCreditBalance = effectiveBalance > 0;
+  const securityDepositKeywords = [
+    'security deposit', 'security deposits',
+    'refundable security deposit',
+    'caution deposit', 'caution money',
+    'deposit held as security',
+  ];
+  const gstInputOverrideKeywords = [
+    'input gst', 'gst input', 'itc',
+    'input cgst', 'input sgst', 'input igst', 'input ugst',
+  ];
+  const gstInputOverrideExclusions = ['payable', 'output'];
+  if (hasAnyInGroups(ledger, parent, primary, gstInputOverrideKeywords) &&
+    !hasAnyInGroups(ledger, parent, primary, gstInputOverrideExclusions) &&
+    (forceAuto || row.Auto !== 'Manual')) {
+    if (isCreditBalance) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'GST Payable',
+      }, 'GST Input Credit (Credit Balance)');
+    }
+    return addAutoNote({
+      ...row,
+      'H1': 'Asset',
+      'H2': 'Short-term Loans and Advances',
+      'H3': 'Unsecured - GST Input Credit',
+    }, 'GST Input Credit');
+  }
+  const gstPreDepositKeywords = ['pre deposit', 'pre-deposit', 'appeal'];
+  if (hasAnyInGroups(ledger, parent, primary, gstPreDepositKeywords) && (forceAuto || row.Auto !== 'Manual')) {
+    if (isCreditBalance) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'GST Payable',
+      }, 'GST Pre-Deposit (Credit Balance)');
+    }
+    return addAutoNote({
+      ...row,
+      'H1': 'Asset',
+      'H2': 'Short-term Loans and Advances',
+      'H3': 'Unsecured - Balances with government authorities',
+    }, 'GST Pre-Deposit (Appeal)');
+  }
+  const gstAdvanceKeywords = ['gst advance', 'gst payment'];
+  if (hasAnyInGroups(ledger, parent, primary, gstAdvanceKeywords) && (forceAuto || row.Auto !== 'Manual')) {
+    if (isCreditBalance) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'GST Payable',
+      }, 'GST Advance/Payment (Credit Balance)');
+    }
+    return addAutoNote({
+      ...row,
+      'H1': 'Asset',
+      'H2': 'Short-term Loans and Advances',
+      'H3': 'Unsecured - Balances with government authorities',
+    }, 'GST Advance/Payment');
+  }
+
+  if (hasAnyInGroups(ledger, parent, primary, securityDepositKeywords) && (forceAuto || row.Auto !== 'Manual')) {
+    return addAutoNote({
+      ...row,
+      'H1': 'Asset',
+      'H2': 'Other Non-current Assets',
+      'H3': 'Security Deposits',
+    }, 'Security Deposits');
+  }
 
   if (allowAutoOverride) {
+    const realEstateKeywords = [
+      'real estate',
+      'property sale', 'sale of property',
+      'unit', 'apartment', 'flat',
+      'villa', 'plot', 'land', 'land sale',
+      'commercial unit', 'residential unit',
+      'booking', 'installment', 'possession',
+      'construction sale', 'development sale',
+    ];
+    const realEstateExclusions = ['rent', 'rental', 'lease', 'leasing', 'maintenance', 'service', 'charges'];
+    if (hasAnyInGroups(ledger, parent, primary, realEstateKeywords) &&
+      !hasAnyInGroups(ledger, parent, primary, realEstateExclusions)) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Income',
+        'H2': 'Revenue from Operations',
+        'H3': 'Sale of real estate properties',
+      }, 'Real Estate Sales');
+    }
+
     const reservesMatch = [
       'reserves and surplus',
       'reserve and surplus',
@@ -602,6 +699,10 @@ export function applyClassificationRules(
       'tax deducted at source', 'tds credit',
       'tcs receivable', 'tcs refund', 'tcs refundable', 'tcs recoverable',
       'tax collected at source', 'tcs credit',
+      'tds', 'tcs',
+      '194c', '194j', '194h', '194i', '194a', '194q', '194r',
+      '195', '192', '193', '194', '194ia', '194ib', '194ic',
+      '206c',
     ];
     const gstTdsTcsExclusions = [
       'gst tds', 'gst tcs',
@@ -613,7 +714,9 @@ export function applyClassificationRules(
     if (normalize(row['H1']) === 'asset' &&
       hasAnyInGroups(ledger, parent, primary, advanceTaxKeywords) &&
       !hasAnyInGroups(ledger, parent, primary, gstTdsTcsExclusions) &&
-      !hasAnyInLedgerOrParent(ledger, parent, advanceTaxExclusions)) {
+      !hasAnyInLedgerOrParent(ledger, parent, advanceTaxExclusions) &&
+      !matchesPhrase(ledger, 'payable') &&
+      !matchesPhrase(parent, 'payable')) {
       return addAutoNote({
         ...row,
         'H1': 'Asset',
@@ -1488,6 +1591,42 @@ export function applyClassificationRules(
         'H2': 'Cost of Materials Consumed',
         'H3': 'Other Direct expenses',
       }, 'Direct Expenses');
+    }
+  }
+
+  if (allowAutoOverride) {
+    const h1Value = normalize(row['H1']);
+    if (h1Value === 'asset') {
+      return addAutoNote({
+        ...row,
+        'H1': 'Asset',
+        'H2': 'Other Current Assets',
+        'H3': 'Other current assets',
+      }, 'Fallback Asset');
+    }
+    if (h1Value === 'income') {
+      return addAutoNote({
+        ...row,
+        'H1': 'Income',
+        'H2': 'Other Income',
+        'H3': 'Miscellaneous non-operating Income',
+      }, 'Fallback Income');
+    }
+    if (h1Value === 'liability') {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': 'Other Current Liabilities',
+        'H3': 'Other payables',
+      }, 'Fallback Liability');
+    }
+    if (h1Value === 'expense') {
+      return addAutoNote({
+        ...row,
+        'H1': 'Expense',
+        'H2': 'Other Expenses',
+        'H3': 'Miscellaneous other expenses',
+      }, 'Fallback Expense');
     }
   }
 
