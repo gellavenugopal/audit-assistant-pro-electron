@@ -277,6 +277,7 @@ type DisplayNoteRow = {
 };
 
 const BS_FACE_TEMPLATE_VERSION = 1;
+const PL_FACE_TEMPLATE_VERSION = 1;
 
 const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
   actual: {
@@ -2621,6 +2622,8 @@ export default function FinancialReview() {
       'manual:bs-face:current-assets': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: true },
       'face-section:Liabilities': { hidden: true },
       'face-section:Assets': { hidden: true },
+      'face-total:Liabilities': { bold: true },
+      'face-total:Assets': { bold: true },
     };
 
     const hasH2 = (h2: string) => h2Options.includes(h2);
@@ -2703,6 +2706,161 @@ export default function FinancialReview() {
       templateVersion: BS_FACE_TEMPLATE_VERSION,
     };
   }, []);
+
+  const buildPlFaceTemplateLayout = useCallback((h2Options: string[]) => {
+    const h2ToH1 = new Map<string, string>();
+    mergedBsplHeads.forEach((row) => {
+      if (!row.H2 || !row.H1) return;
+      if (!h2ToH1.has(row.H2)) h2ToH1.set(row.H2, row.H1);
+    });
+    const manualRows: Record<string, { label: string }> = {
+      'manual:pl-face:income': { label: 'Income:' },
+      'manual:pl-face:expenses': { label: 'Expenses:' },
+      'manual:pl-face:profit-before-exceptional': { label: 'Profit/(loss) before exceptional and extraordinary items and tax' },
+      'manual:pl-face:exceptional-header': { label: 'Exceptional Items' },
+      'manual:pl-face:exceptional-items': { label: 'Exceptional items' },
+      'manual:pl-face:prior-period-items': { label: 'Prior Period Items' },
+      'manual:pl-face:profit-before-extraordinary': { label: "Profit/(loss) before extraordinary items and tax" },
+      'manual:pl-face:extraordinary-header': { label: 'Extraordinary Items' },
+      'manual:pl-face:extraordinary-items': { label: 'Extraordinary Items' },
+      'manual:pl-face:profit-before-partners': { label: "Profit before, partners' remuneration and tax" },
+      'manual:pl-face:partners-remuneration': { label: "Partners' Remuneration" },
+      'manual:pl-face:profit-before-tax': { label: 'Profit before tax' },
+      'manual:pl-face:profit-continuing': { label: 'Profit/(Loss) for the period from continuing operations' },
+      'manual:pl-face:discontinuing-ops': { label: 'Profit/(loss) from discontinuing operations' },
+      'manual:pl-face:profit-for-year': { label: 'Profit/(Loss) for the year' },
+      'manual:pl-face:share-consolidation': { label: 'Share of Profit & Loss in Consolidation' },
+    };
+
+    const overrides: Record<string, NoteRowOverride> = {
+      'manual:pl-face:income': { rowType: 'HEADER', isParent: true, visibility: 'always', bold: true },
+      'manual:pl-face:expenses': { rowType: 'HEADER', isParent: true, visibility: 'always', bold: true },
+      'face-total:Income': { bold: true },
+      'face-total:Expenses': { bold: true },
+      'manual:pl-face:profit-before-exceptional': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("face-total:Income"), ROW("face-total:Expenses"))',
+        labelWhenPartnership: "Profit/(loss) before exceptional and extraordinary items, partners' remuneration and tax",
+      },
+      'manual:pl-face:exceptional-header': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: false },
+      'manual:pl-face:exceptional-items': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:prior-period-items': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:profit-before-extraordinary': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("manual:pl-face:profit-before-exceptional"), SUM(ROW("manual:pl-face:exceptional-items"), ROW("manual:pl-face:prior-period-items")))',
+        labelWhenPartnership: "Profit/(loss) before extraordinary items, partners' remuneration and tax",
+      },
+      'manual:pl-face:extraordinary-header': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: false },
+      'manual:pl-face:extraordinary-items': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:profit-before-partners': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("manual:pl-face:profit-before-extraordinary"), ROW("manual:pl-face:extraordinary-items"))',
+      },
+      'manual:pl-face:partners-remuneration': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:profit-before-tax': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("manual:pl-face:profit-before-partners"), ROW("manual:pl-face:partners-remuneration"))',
+      },
+      'manual:pl-face:profit-continuing': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("manual:pl-face:profit-before-tax"), ROW("face:Expense:Tax Expenses"))',
+      },
+      'manual:pl-face:discontinuing-ops': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:profit-for-year': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'SUM(ROW("manual:pl-face:profit-continuing"), ROW("manual:pl-face:discontinuing-ops"))',
+      },
+      'manual:pl-face:share-consolidation': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+    };
+
+    const order: string[] = [];
+    const used = new Set<string>();
+    const hasH2 = (h2: string) => h2Options.includes(h2);
+    const isIncome = (h2: string) => h2ToH1.get(h2) === 'Income';
+    const isExpense = (h2: string) => h2ToH1.get(h2) === 'Expense';
+
+    order.push('manual:pl-face:income');
+    [
+      'Revenue from Operations',
+      'Other Income',
+    ].forEach((h2) => {
+      if (hasH2(h2)) {
+        order.push(`face:Income:${h2}`);
+        used.add(h2);
+      }
+    });
+    h2Options.forEach((h2) => {
+      if (used.has(h2)) return;
+      if (!isIncome(h2)) return;
+      order.push(`face:Income:${h2}`);
+      used.add(h2);
+    });
+    order.push('face-total:Income');
+
+    order.push('manual:pl-face:expenses');
+    const expenseOrder = [
+      'Cost of Materials Consumed',
+      'Purchases of Stock in Trade',
+      'Change in Inventories',
+      'User_Defined_Expense - 1',
+      'Employee Benefits Expense',
+      'Finance Costs',
+      'Depreciation and Amortisation Expense',
+      'Other Expenses',
+    ];
+    expenseOrder.forEach((h2) => {
+      if (hasH2(h2)) {
+        order.push(`face:Expense:${h2}`);
+        used.add(h2);
+      }
+    });
+    h2Options.forEach((h2) => {
+      if (used.has(h2)) return;
+      if (!isExpense(h2)) return;
+      if (h2 === 'Tax Expenses') return;
+      order.push(`face:Expense:${h2}`);
+      used.add(h2);
+    });
+    order.push('face-total:Expenses');
+
+    order.push('manual:pl-face:profit-before-exceptional');
+    order.push('manual:pl-face:exceptional-header');
+    order.push('manual:pl-face:exceptional-items');
+    order.push('manual:pl-face:prior-period-items');
+    order.push('manual:pl-face:profit-before-extraordinary');
+    order.push('manual:pl-face:extraordinary-header');
+    order.push('manual:pl-face:extraordinary-items');
+    order.push('manual:pl-face:profit-before-partners');
+    order.push('manual:pl-face:partners-remuneration');
+    order.push('manual:pl-face:profit-before-tax');
+    if (hasH2('Tax Expenses')) {
+      order.push('face:Expense:Tax Expenses');
+      overrides['face:Expense:Tax Expenses'] = { indent: 1 };
+    }
+    order.push('manual:pl-face:profit-continuing');
+    order.push('manual:pl-face:discontinuing-ops');
+    order.push('manual:pl-face:profit-for-year');
+    order.push('manual:pl-face:share-consolidation');
+
+    return {
+      order,
+      manualRows,
+      overrides,
+      templateVersion: PL_FACE_TEMPLATE_VERSION,
+    };
+  }, [mergedBsplHeads]);
 
   const faceAutoRowsBS = useMemo<DisplayNoteRow[]>(() => {
     const rows: DisplayNoteRow[] = [];
@@ -2942,6 +3100,19 @@ export default function FinancialReview() {
       };
     });
   }, [noteLayoutLoaded, faceH2OptionsBS, buildBsFaceTemplateLayout]);
+
+  useEffect(() => {
+    if (!noteLayoutLoaded) return;
+    if (faceH2OptionsPL.length === 0) return;
+    setNoteLayouts((prev) => {
+      const existing = prev['face|PL'];
+      if (existing?.templateVersion === PL_FACE_TEMPLATE_VERSION) return prev;
+      return {
+        ...prev,
+        ['face|PL']: buildPlFaceTemplateLayout(faceH2OptionsPL),
+      };
+    });
+  }, [noteLayoutLoaded, faceH2OptionsPL, buildPlFaceTemplateLayout]);
 
   const noteH3Order = useMemo(() => {
     if (!selectedNoteH2) return [];
@@ -5922,7 +6093,7 @@ export default function FinancialReview() {
                           )}
                         </div>
                       </TableCell>
-                        <TableCell className="text-center" style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                        <TableCell className={cn("text-center", row.bold && 'font-semibold')} style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
                           {row.noteNo ? (
                             noteEditMode ? (
                               `Note ${row.noteNo}`
@@ -5942,7 +6113,7 @@ export default function FinancialReview() {
                             )
                           ) : null}
                         </TableCell>
-                        <TableCell className="text-right font-mono" style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                        <TableCell className={cn("text-right font-mono", row.bold && 'font-semibold')} style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
                           {noteEditMode && row.rowType === 'INPUT' ? (
                             <Input
                               type="number"
