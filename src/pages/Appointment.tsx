@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ClipboardCheck, FileSignature, UploadCloud, FileDown, Eye } from 'lucide-react';
+import { ClipboardCheck, FileSignature, UploadCloud, FileDown, Eye, Trash2 } from 'lucide-react';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -22,7 +22,7 @@ export default function Appointment() {
   const appointmentLetterInputRef = useRef<HTMLInputElement>(null);
   const adt1InputRef = useRef<HTMLInputElement>(null);
   const challanInputRef = useRef<HTMLInputElement>(null);
-  const { files, uploadFile, downloadFile, getFileUrl } = useEvidenceFiles(currentEngagement?.id);
+  const { files, uploadFile, downloadFile, getFileUrl, deleteFile } = useEvidenceFiles(currentEngagement?.id);
 
   const handleFileUpload = (label: string, fileType: string) => {
     return async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -62,6 +62,38 @@ export default function Appointment() {
     navigate('/appointment/engagement-letter');
   };
 
+  const handleAppointmentLetterUpload = () => {
+    return async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const selected = event.target.files;
+      if (!selected || selected.length === 0) {
+        return;
+      }
+
+      const file = selected[0];
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      const validExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
+
+      if (!fileExtension || !validExtensions.includes(fileExtension)) {
+        toast.error('Invalid file format. Only PDF, JPG, JPEG, or PNG files are allowed.');
+        event.target.value = '';
+        return;
+      }
+
+      if (!currentEngagement) {
+        toast.error('Please select an engagement before uploading.');
+        event.target.value = '';
+        return;
+      }
+
+      await uploadFile(file, {
+        name: file.name,
+        file_type: 'appointment_letter',
+      });
+
+      event.target.value = '';
+    };
+  };
+
 
   const openFilePreview = async (file: EvidenceFile) => {
     const url = await getFileUrl(file);
@@ -97,6 +129,39 @@ export default function Appointment() {
               <Button size="sm" onClick={() => downloadFile(item)}>
                 <FileDown className="h-4 w-4 mr-2" />
                 Download
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderAppointmentLetterList = (items: EvidenceFile[]) => {
+    if (items.length === 0) {
+      return (
+        <p className="text-xs text-muted-foreground">
+          No uploads yet.
+        </p>
+      );
+    }
+
+    return (
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-900 truncate">{item.name}</p>
+              <p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleDateString()}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => openFilePreview(item)}>
+                <Eye className="h-4 w-4 mr-2" />
+                View
+              </Button>
+              <Button size="sm" variant="destructive" onClick={() => deleteFile(item)}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
               </Button>
             </div>
           </div>
@@ -167,8 +232,8 @@ export default function Appointment() {
                 <input
                   ref={appointmentLetterInputRef}
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.doc,.docx"
-                  onChange={handleFileUpload('Appointment Letter', 'appointment_letter')}
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={handleAppointmentLetterUpload()}
                   className="hidden"
                 />
                 <div className="flex flex-wrap gap-2">
@@ -178,9 +243,9 @@ export default function Appointment() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground font-medium">
-                  Supported formats: PDF (.pdf), JPEG (.jpg, .jpeg), DOC/DOCX
+                  Supported formats: PDF (.pdf), JPG/JPEG (.jpg, .jpeg), PNG (.png)
                 </p>
-                {renderFileList(appointmentFiles)}
+                {renderAppointmentLetterList(appointmentFiles)}
               </CardContent>
             </Card>
             )}
