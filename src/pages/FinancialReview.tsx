@@ -87,6 +87,7 @@ import { applyClassificationRules, ClassificationRule } from '@/utils/classifica
 import { TALLY_DEFAULT_GROUPS } from '@/utils/tallyGroupMaster';
 import { buildNoteStructure, getNoteH2Options, getScaleFactor, isZeroAfterScale } from '@/utils/noteBuilder';
 import { buildFaceFromNotes, buildPreparedNotes } from '@/utils/noteFaceBuilder';
+import { detectFormulaCycles, evaluateFormula, extractRowRefs, extractVariableRefs } from '@/utils/statementFormula';
 
 // Entity Types
 const ENTITY_TYPES = [
@@ -214,6 +215,9 @@ type TableTabSettings = {
 
 type NoteRowOverride = {
   label?: string;
+  labelWhenPartnership?: string;
+  labelWhenOther?: string;
+  useAltLabelForOthers?: boolean;
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';
@@ -221,12 +225,23 @@ type NoteRowOverride = {
   isParent?: boolean;
   hidden?: boolean;
   manualParentId?: string;
+  rowType?: 'INPUT' | 'CALC' | 'HEADER' | 'SUBTOTAL' | 'TOTAL' | 'CONDITIONAL';
+  formula?: string;
+  visibility?: 'always' | 'nonzero' | 'childNonZero' | 'enabled';
+  enabled?: boolean;
+  manualValue?: number;
+  noteNoMode?: 'auto' | 'hide' | 'custom';
+  noteNoOverride?: number;
+  valueSource?: 'manual' | 'ledger' | 'user';
+  allowNegative?: boolean;
+  noteTarget?: string;
 };
 
 type NoteLayout = {
   order: string[];
   manualRows: Record<string, { label: string }>;
   overrides: Record<string, NoteRowOverride>;
+  templateVersion?: number;
 };
 
 type FlatNoteRow = {
@@ -250,7 +265,19 @@ type DisplayNoteRow = {
   isParent: boolean;
   isManual: boolean;
   autoType?: FlatNoteRow['type'];
+  rowType?: NoteRowOverride['rowType'];
+  parentId?: string;
+  noteNo?: number;
+  isSection?: boolean;
+  noteTarget?: string;
+  formulaWarning?: boolean;
+  missingRowRefs?: string[];
+  missingVariableRefs?: string[];
+  hasCycle?: boolean;
 };
+
+const BS_FACE_TEMPLATE_VERSION = 1;
+const PL_FACE_TEMPLATE_VERSION = 1;
 
 const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
   actual: {
@@ -510,6 +537,7 @@ export default function FinancialReview() {
   const [isBsplHeadsOpen, setIsBsplHeadsOpen] = useState(false);
   const [isRulesBotOpen, setIsRulesBotOpen] = useState(false);
   const [isTableSettingsOpen, setIsTableSettingsOpen] = useState(false);
+  const [isNoteNumberDialogOpen, setIsNoteNumberDialogOpen] = useState(false);
   const [tableSettings, setTableSettings] = useState(DEFAULT_TABLE_SETTINGS);
   const [externalConfigActive, setExternalConfigActive] = useState(false);
   const [userDefinedExpenseThreshold, setUserDefinedExpenseThreshold] = useState(5000);
@@ -541,6 +569,17 @@ export default function FinancialReview() {
   const [selectedNoteRowId, setSelectedNoteRowId] = useState<string | null>(null);
   const noteListRef = useRef<HTMLDivElement | null>(null);
   const saveNoteLayoutsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [noteNumberStart, setNoteNumberStart] = useState(3);
+  const [noteNumberStartDraft, setNoteNumberStartDraft] = useState('3');
+  const [statementVariables, setStatementVariables] = useState<Record<string, { type: 'number' | 'percent' | 'text'; value: string }>>({});
+  const [isVariablesDialogOpen, setIsVariablesDialogOpen] = useState(false);
+  const [newVariableName, setNewVariableName] = useState('');
+  const [newVariableType, setNewVariableType] = useState<'number' | 'percent' | 'text'>('number');
+  const [newVariableValue, setNewVariableValue] = useState('');
+  const [selectedFaceRowId, setSelectedFaceRowId] = useState<string | null>(null);
+  const [faceNewRowLabel, setFaceNewRowLabel] = useState('');
+  const [faceSelectedLabel, setFaceSelectedLabel] = useState('');
+  const [faceParentAnchorId, setFaceParentAnchorId] = useState<string | null>(null);
 
   useEffect(() => {
     if (activeTab === 'notes-pl' || activeTab === 'face-pl') {
@@ -675,86 +714,80 @@ export default function FinancialReview() {
   }, [numberScale]);
 
   useEffect(() => {
-    if (!currentEngagement?.id) return;
     let cancelled = false;
-    const loadNoteLayouts = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('engagements')
-          .select('notes')
-          .eq('id', currentEngagement.id)
-          .single();
-        if (error) throw error;
-
-        const rawNotes = data?.notes;
-        let payload: Record<string, unknown> = {};
-        if (rawNotes) {
-          try {
-            payload = JSON.parse(rawNotes);
-          } catch {
-            payload = { legacyNotes: rawNotes };
-          }
-        }
-
-        const layouts = (payload.noteLayouts && typeof payload.noteLayouts === 'object')
-          ? payload.noteLayouts as Record<string, NoteLayout>
-          : {};
-        const previewSettings = payload.notePreviewSettings && typeof payload.notePreviewSettings === 'object'
-          ? payload.notePreviewSettings as Record<string, unknown>
-          : null;
-
-        if (!cancelled) {
-          setNoteLayouts(layouts);
-          setNoteLayoutPayload(payload);
-          if (previewSettings) {
-            const nextDefaults = {
-              rowHeight: typeof previewSettings.rowHeight === 'number' ? previewSettings.rowHeight : notePreviewDefaults.rowHeight,
-              particularsWidth: typeof previewSettings.particularsWidth === 'number' ? previewSettings.particularsWidth : notePreviewDefaults.particularsWidth,
-              amountWidth: typeof previewSettings.amountWidth === 'number' ? previewSettings.amountWidth : notePreviewDefaults.amountWidth,
-              fontSize: typeof previewSettings.fontSize === 'number' ? previewSettings.fontSize : notePreviewDefaults.fontSize,
-              zoom: typeof previewSettings.zoom === 'number' ? previewSettings.zoom : notePreviewDefaults.zoom,
-            };
-            setNotePreviewDefaults(nextDefaults);
-            setNoteTableSettings((prev) => ({
-              rowHeight: nextDefaults.rowHeight,
-              particularsWidth: nextDefaults.particularsWidth,
-              amountWidth: nextDefaults.amountWidth,
-              fontSize: nextDefaults.fontSize,
-            }));
-            setNotePreviewZoom(nextDefaults.zoom);
-          }
-          setNoteLayoutLoaded(true);
-        }
-      } catch (error) {
-        console.error('Failed to load note layouts:', error);
-        if (!cancelled) {
-          setNoteLayouts({});
-          setNoteLayoutPayload({});
-          setNoteLayoutLoaded(true);
+    try {
+      const raw = localStorage.getItem('statement_layout_config');
+      let payload: Record<string, unknown> = {};
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = {};
         }
       }
-    };
 
-    loadNoteLayouts();
+      const layouts = (payload.noteLayouts && typeof payload.noteLayouts === 'object')
+        ? payload.noteLayouts as Record<string, NoteLayout>
+        : {};
+      const previewSettings = payload.notePreviewSettings && typeof payload.notePreviewSettings === 'object'
+        ? payload.notePreviewSettings as Record<string, unknown>
+        : null;
+      const variables = payload.variables && typeof payload.variables === 'object'
+        ? payload.variables as Record<string, { type: 'number' | 'percent' | 'text'; value: string }>
+        : {};
+
+      if (!cancelled) {
+        const payloadNoteStart = typeof payload.noteNumberStart === 'number' ? payload.noteNumberStart : 3;
+        setNoteLayouts(layouts);
+        setNoteLayoutPayload({ ...payload, noteNumberStart: payloadNoteStart, variables });
+        setNoteNumberStart(payloadNoteStart);
+        setNoteNumberStartDraft(String(payloadNoteStart));
+        setStatementVariables(variables);
+        if (previewSettings) {
+          const nextDefaults = {
+            rowHeight: typeof previewSettings.rowHeight === 'number' ? previewSettings.rowHeight : notePreviewDefaults.rowHeight,
+            particularsWidth: typeof previewSettings.particularsWidth === 'number' ? previewSettings.particularsWidth : notePreviewDefaults.particularsWidth,
+            amountWidth: typeof previewSettings.amountWidth === 'number' ? previewSettings.amountWidth : notePreviewDefaults.amountWidth,
+            fontSize: typeof previewSettings.fontSize === 'number' ? previewSettings.fontSize : notePreviewDefaults.fontSize,
+            zoom: typeof previewSettings.zoom === 'number' ? previewSettings.zoom : notePreviewDefaults.zoom,
+          };
+          setNotePreviewDefaults(nextDefaults);
+          setNoteTableSettings((prev) => ({
+            rowHeight: nextDefaults.rowHeight,
+            particularsWidth: nextDefaults.particularsWidth,
+            amountWidth: nextDefaults.amountWidth,
+            fontSize: nextDefaults.fontSize,
+          }));
+          setNotePreviewZoom(nextDefaults.zoom);
+        }
+        setNoteLayoutLoaded(true);
+      }
+    } catch (error) {
+      console.error('Failed to load statement layout config:', error);
+      if (!cancelled) {
+        setNoteLayouts({});
+        setNoteLayoutPayload({});
+        setStatementVariables({});
+        setNoteLayoutLoaded(true);
+      }
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [currentEngagement?.id]);
+  }, []);
 
   useEffect(() => {
-    if (!noteLayoutLoaded || !currentEngagement?.id) return;
+    if (!noteLayoutLoaded) return;
     if (saveNoteLayoutsRef.current) {
       clearTimeout(saveNoteLayoutsRef.current);
     }
     saveNoteLayoutsRef.current = setTimeout(async () => {
       try {
-        const payload = { ...noteLayoutPayload, noteLayouts };
-        await supabase
-          .from('engagements')
-          .update({ notes: JSON.stringify(payload) })
-          .eq('id', currentEngagement.id);
+        const payload = { ...noteLayoutPayload, noteLayouts, variables: statementVariables };
+        localStorage.setItem('statement_layout_config', JSON.stringify(payload));
       } catch (error) {
-        console.error('Failed to save note layouts:', error);
+        console.error('Failed to save statement layout config:', error);
       }
     }, 800);
 
@@ -763,7 +796,7 @@ export default function FinancialReview() {
         clearTimeout(saveNoteLayoutsRef.current);
       }
     };
-  }, [noteLayouts, noteLayoutPayload, noteLayoutLoaded, currentEngagement?.id]);
+  }, [noteLayouts, noteLayoutPayload, noteLayoutLoaded, statementVariables]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1192,6 +1225,8 @@ export default function FinancialReview() {
       normalized.includes('limited liability partnership') ||
       normalized.includes('llp');
   }, [entityType]);
+
+  const isNonCompanyEntityType = useMemo(() => !isCompanyEntityType, [isCompanyEntityType]);
 
   const normalizeOption = useCallback((value: string) => {
     return (value || '')
@@ -2148,10 +2183,12 @@ export default function FinancialReview() {
     // Load Actual TB from localStorage
     const savedActual = localStorage.getItem(`tb_actual_${currentEngagement.id}`);
     let hydrated = false;
+    let cachedActualCount = 0;
     if (savedActual) {
       try {
         const parsedActual = JSON.parse(savedActual);
         if (Array.isArray(parsedActual) && parsedActual.length > 0) {
+          cachedActualCount = parsedActual.length;
           setActualData(parsedActual);
           hydrated = true;
         }
@@ -2162,10 +2199,12 @@ export default function FinancialReview() {
 
     // Load Classified TB from localStorage
     const savedClassified = localStorage.getItem(`tb_classified_${currentEngagement.id}`);
+    let cachedClassifiedCount = 0;
     if (savedClassified) {
       try {
         const parsedClassified = JSON.parse(savedClassified);
         if (Array.isArray(parsedClassified) && parsedClassified.length > 0) {
+          cachedClassifiedCount = parsedClassified.length;
           setCurrentData(parsedClassified);
           hydrated = true;
         }
@@ -2173,9 +2212,11 @@ export default function FinancialReview() {
         console.error('Failed to load classified TB:', e);
       }
     }
-    
-    // Fallback to database if nothing in local cache
-    if (!hydrated && trialBalanceDB.lines && trialBalanceDB.lines.length > 0) {
+
+    // Prefer database when available to avoid stale local cache
+    if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0) {
+      const dbCount = trialBalanceDB.lines.length;
+      if (!hydrated || dbCount >= cachedClassifiedCount || dbCount >= cachedActualCount) {
       const loadedData: LedgerRow[] = trialBalanceDB.lines.map(line => {
         const row: LedgerRow = {
           'Ledger Name': line.account_name,
@@ -2206,6 +2247,7 @@ export default function FinancialReview() {
         title: 'Data Loaded',
         description: `Loaded ${loadedData.length} ledgers from saved data`,
       });
+      }
     }
   }, [currentEngagement?.id, trialBalanceDB.lines, classificationRules, deriveH1FromRevenueAndBalance, filterClassifiedRows]);
   
@@ -2434,14 +2476,14 @@ export default function FinancialReview() {
         ? new Set(['Asset', 'Liability'])
         : new Set(['Income', 'Expense']);
       const ordered: string[] = [];
-      filteredBsplHeads.forEach((row) => {
+      mergedBsplHeads.forEach((row) => {
         if (!allowedH1.has(row.H1)) return;
         if (!ordered.includes(row.H2)) ordered.push(row.H2);
       });
       return ordered;
     }
     return getNoteH2Options(noteStatementType, currentData, numberScale);
-  }, [noteStatementType, currentData, numberScale, noteEditMode, filteredBsplHeads]);
+  }, [noteStatementType, currentData, numberScale, noteEditMode, mergedBsplHeads]);
 
   const noteTolerance = useMemo(() => getScaleFactor(numberScale) * 0.005, [numberScale]);
 
@@ -2471,7 +2513,14 @@ export default function FinancialReview() {
     return order;
   }, [filteredBsplHeads]);
 
-  const preparedNotesBS = useMemo(() => {
+  const applyNoteNumberOffset = useCallback((notes: ReturnType<typeof buildPreparedNotes>, startAt: number) => {
+    return notes.map((note, idx) => ({
+      ...note,
+      noteNo: startAt + idx,
+    }));
+  }, []);
+
+  const preparedNotesBSRaw = useMemo(() => {
     return buildPreparedNotes({
       classifiedRows: currentData,
       statementType: 'BS',
@@ -2480,7 +2529,7 @@ export default function FinancialReview() {
     });
   }, [currentData, noteTolerance, bsNoteH2Order]);
 
-  const preparedNotesPL = useMemo(() => {
+  const preparedNotesPLRaw = useMemo(() => {
     return buildPreparedNotes({
       classifiedRows: currentData,
       statementType: 'PL',
@@ -2488,6 +2537,15 @@ export default function FinancialReview() {
       h2Order: plNoteH2Order,
     });
   }, [currentData, noteTolerance, plNoteH2Order]);
+
+  const preparedNotesBS = useMemo(() => {
+    return applyNoteNumberOffset(preparedNotesBSRaw, noteNumberStart);
+  }, [applyNoteNumberOffset, preparedNotesBSRaw, noteNumberStart]);
+
+  const preparedNotesPL = useMemo(() => {
+    const plStart = noteNumberStart + preparedNotesBSRaw.length;
+    return applyNoteNumberOffset(preparedNotesPLRaw, plStart);
+  }, [applyNoteNumberOffset, preparedNotesPLRaw, noteNumberStart, preparedNotesBSRaw.length]);
 
   const preparedNotes = useMemo(() => {
     return noteStatementType === 'PL' ? preparedNotesPL : preparedNotesBS;
@@ -2499,6 +2557,562 @@ export default function FinancialReview() {
 
   const faceSummaryBS = useMemo(() => buildFaceFromNotes(preparedNotesBS, 'BS'), [preparedNotesBS]);
   const faceSummaryPL = useMemo(() => buildFaceFromNotes(preparedNotesPL, 'PL'), [preparedNotesPL]);
+  const faceNoteMetaMapBS = useMemo(() => {
+    return new Map(preparedNotesBS.map((note) => [note.H2, { total: note.total, noteNo: note.noteNo }]));
+  }, [preparedNotesBS]);
+  const faceNoteMetaMapPL = useMemo(() => {
+    return new Map(preparedNotesPL.map((note) => [note.H2, { total: note.total, noteNo: note.noteNo }]));
+  }, [preparedNotesPL]);
+  const faceH2OptionsBS = useMemo(() => {
+    const options: string[] = [];
+    const seen = new Set<string>();
+    mergedBsplHeads.forEach((row) => {
+      if (row.H1 !== 'Asset' && row.H1 !== 'Liability') return;
+      if (!row.H2) return;
+      if (seen.has(row.H2)) return;
+      seen.add(row.H2);
+      options.push(row.H2);
+    });
+    return options;
+  }, [mergedBsplHeads]);
+  const faceH2OptionsPL = useMemo(() => {
+    const options: string[] = [];
+    const seen = new Set<string>();
+    mergedBsplHeads.forEach((row) => {
+      if (row.H1 !== 'Income' && row.H1 !== 'Expense') return;
+      if (!row.H2) return;
+      if (seen.has(row.H2)) return;
+      seen.add(row.H2);
+      options.push(row.H2);
+    });
+    return options;
+  }, [mergedBsplHeads]);
+
+  const buildBsFaceTemplateLayout = useCallback((h2Options: string[]) => {
+    const manualRows: Record<string, { label: string }> = {
+      'manual:bs-face:equity-liabilities': { label: 'EQUITY AND LIABILITIES' },
+      'manual:bs-face:shareholders-funds': { label: "Shareholders' funds" },
+      'manual:bs-face:blank-liability-break': { label: '' },
+      'manual:bs-face:non-current-liabilities': { label: 'Non-current liabilities' },
+      'manual:bs-face:current-liabilities': { label: 'Current liabilities' },
+      'manual:bs-face:blank-before-assets': { label: '' },
+      'manual:bs-face:assets': { label: 'ASSETS' },
+      'manual:bs-face:non-current-assets': { label: 'Non-current assets' },
+      'manual:bs-face:ppe-intangible-parent': { label: 'Property, Plant and Equipment Property and Intangible assets' },
+      'manual:bs-face:current-assets': { label: 'Current assets' },
+    };
+
+    const overrides: Record<string, NoteRowOverride> = {
+      'manual:bs-face:equity-liabilities': { rowType: 'HEADER', isParent: true, visibility: 'always', bold: true },
+      'manual:bs-face:shareholders-funds': {
+        rowType: 'HEADER',
+        isParent: true,
+        visibility: 'childNonZero',
+        bold: true,
+        labelWhenOther: "Owners' funds",
+        useAltLabelForOthers: true,
+      },
+      'manual:bs-face:blank-liability-break': { rowType: 'HEADER', visibility: 'always' },
+      'manual:bs-face:non-current-liabilities': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: true },
+      'manual:bs-face:current-liabilities': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: true },
+      'manual:bs-face:blank-before-assets': { rowType: 'HEADER', visibility: 'always' },
+      'manual:bs-face:assets': { rowType: 'HEADER', isParent: true, visibility: 'always', bold: true },
+      'manual:bs-face:non-current-assets': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: true },
+      'manual:bs-face:ppe-intangible-parent': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: true },
+      'manual:bs-face:current-assets': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: true },
+      'face-section:Liabilities': { hidden: true },
+      'face-section:Assets': { hidden: true },
+      'face-total:Liabilities': { bold: true },
+      'face-total:Assets': { bold: true },
+    };
+
+    const hasH2 = (h2: string) => h2Options.includes(h2);
+    const order: string[] = [];
+
+    order.push('manual:bs-face:equity-liabilities');
+    order.push('manual:bs-face:shareholders-funds');
+    [
+      'Share Capital',
+      'Owners’ Capital Account',
+      "Owners' Capital Account",
+      'Partners’ Capital Account',
+      "Partners' Capital Account",
+      'Reserves and Surplus',
+    ].forEach((h2) => {
+      if (hasH2(h2)) order.push(`face:Liability:${h2}`);
+    });
+    order.push('manual:bs-face:blank-liability-break');
+    ['Share Application Money Pending Allotment', 'Minority Interest'].forEach((h2) => {
+      if (hasH2(h2)) order.push(`face:Liability:${h2}`);
+    });
+    order.push('manual:bs-face:non-current-liabilities');
+    [
+      'Long-term Borrowings',
+      'Deferred Tax Liabilities (Net)',
+      'Other Long-term Liabilities',
+      'Long-term Provisions',
+    ].forEach((h2) => {
+      if (hasH2(h2)) order.push(`face:Liability:${h2}`);
+    });
+    order.push('manual:bs-face:current-liabilities');
+    [
+      'Short-term Borrowings',
+      'Trade Payables',
+      'Other Current Liabilities',
+      'Short-term Provisions',
+    ].forEach((h2) => {
+      if (hasH2(h2)) order.push(`face:Liability:${h2}`);
+    });
+    order.push('face-total:Liabilities');
+
+    order.push('manual:bs-face:blank-before-assets');
+    order.push('manual:bs-face:assets');
+    order.push('manual:bs-face:non-current-assets');
+    order.push('manual:bs-face:ppe-intangible-parent');
+    [
+      'Property, Plant and Equipment',
+      'Intangible Assets',
+    ].forEach((h2) => {
+      if (hasH2(h2)) order.push(`face:Asset:${h2}`);
+      if (hasH2(h2)) {
+        overrides[`face:Asset:${h2}`] = { ...overrides[`face:Asset:${h2}`], indent: 2 };
+      }
+    });
+    [
+      'Non-current Investments',
+      'Deferred Tax Assets (Net)',
+      'Long-term Loans and Advances',
+      'Other Non-current Assets',
+    ].forEach((h2) => {
+      if (hasH2(h2)) order.push(`face:Asset:${h2}`);
+    });
+    order.push('manual:bs-face:current-assets');
+    [
+      'Current Investments',
+      'Inventories',
+      'Trade Receivables',
+      'Cash and Bank Balances',
+      'Short-term Loans and Advances',
+      'Other Current Assets',
+    ].forEach((h2) => {
+      if (hasH2(h2)) order.push(`face:Asset:${h2}`);
+    });
+    order.push('face-total:Assets');
+
+    return {
+      order,
+      manualRows,
+      overrides,
+      templateVersion: BS_FACE_TEMPLATE_VERSION,
+    };
+  }, []);
+
+  const buildPlFaceTemplateLayout = useCallback((h2Options: string[]) => {
+    const h2ToH1 = new Map<string, string>();
+    mergedBsplHeads.forEach((row) => {
+      if (!row.H2 || !row.H1) return;
+      if (!h2ToH1.has(row.H2)) h2ToH1.set(row.H2, row.H1);
+    });
+    const manualRows: Record<string, { label: string }> = {
+      'manual:pl-face:income': { label: 'Income:' },
+      'manual:pl-face:expenses': { label: 'Expenses:' },
+      'manual:pl-face:profit-before-exceptional': { label: 'Profit/(loss) before exceptional and extraordinary items and tax' },
+      'manual:pl-face:exceptional-header': { label: 'Exceptional Items' },
+      'manual:pl-face:exceptional-items': { label: 'Exceptional items' },
+      'manual:pl-face:prior-period-items': { label: 'Prior Period Items' },
+      'manual:pl-face:profit-before-extraordinary': { label: "Profit/(loss) before extraordinary items and tax" },
+      'manual:pl-face:extraordinary-header': { label: 'Extraordinary Items' },
+      'manual:pl-face:extraordinary-items': { label: 'Extraordinary Items' },
+      'manual:pl-face:profit-before-partners': { label: "Profit before, partners' remuneration and tax" },
+      'manual:pl-face:partners-remuneration': { label: "Partners' Remuneration" },
+      'manual:pl-face:profit-before-tax': { label: 'Profit before tax' },
+      'manual:pl-face:profit-continuing': { label: 'Profit/(Loss) for the period from continuing operations' },
+      'manual:pl-face:discontinuing-ops': { label: 'Profit/(loss) from discontinuing operations' },
+      'manual:pl-face:profit-for-year': { label: 'Profit/(Loss) for the year' },
+      'manual:pl-face:share-consolidation': { label: 'Share of Profit & Loss in Consolidation' },
+    };
+
+    const overrides: Record<string, NoteRowOverride> = {
+      'manual:pl-face:income': { rowType: 'HEADER', isParent: true, visibility: 'always', bold: true },
+      'manual:pl-face:expenses': { rowType: 'HEADER', isParent: true, visibility: 'always', bold: true },
+      'face-total:Income': { bold: true },
+      'face-total:Expenses': { bold: true },
+      'manual:pl-face:profit-before-exceptional': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("face-total:Income"), ROW("face-total:Expenses"))',
+        labelWhenPartnership: "Profit/(loss) before exceptional and extraordinary items, partners' remuneration and tax",
+      },
+      'manual:pl-face:exceptional-header': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: false },
+      'manual:pl-face:exceptional-items': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:prior-period-items': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:profit-before-extraordinary': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("manual:pl-face:profit-before-exceptional"), SUM(ROW("manual:pl-face:exceptional-items"), ROW("manual:pl-face:prior-period-items")))',
+        labelWhenPartnership: "Profit/(loss) before extraordinary items, partners' remuneration and tax",
+      },
+      'manual:pl-face:extraordinary-header': { rowType: 'HEADER', isParent: true, visibility: 'childNonZero', bold: false },
+      'manual:pl-face:extraordinary-items': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:profit-before-partners': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("manual:pl-face:profit-before-extraordinary"), ROW("manual:pl-face:extraordinary-items"))',
+      },
+      'manual:pl-face:partners-remuneration': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:profit-before-tax': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("manual:pl-face:profit-before-partners"), ROW("manual:pl-face:partners-remuneration"))',
+      },
+      'manual:pl-face:profit-continuing': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'DIFF(ROW("manual:pl-face:profit-before-tax"), ROW("face:Expense:Tax Expenses"))',
+      },
+      'manual:pl-face:discontinuing-ops': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+      'manual:pl-face:profit-for-year': {
+        rowType: 'CALC',
+        bold: true,
+        visibility: 'nonzero',
+        formula: 'SUM(ROW("manual:pl-face:profit-continuing"), ROW("manual:pl-face:discontinuing-ops"))',
+      },
+      'manual:pl-face:share-consolidation': { rowType: 'INPUT', visibility: 'nonzero', indent: 1 },
+    };
+
+    const order: string[] = [];
+    const used = new Set<string>();
+    const hasH2 = (h2: string) => h2Options.includes(h2);
+    const isIncome = (h2: string) => h2ToH1.get(h2) === 'Income';
+    const isExpense = (h2: string) => h2ToH1.get(h2) === 'Expense';
+
+    order.push('manual:pl-face:income');
+    [
+      'Revenue from Operations',
+      'Other Income',
+    ].forEach((h2) => {
+      if (hasH2(h2)) {
+        order.push(`face:Income:${h2}`);
+        used.add(h2);
+      }
+    });
+    h2Options.forEach((h2) => {
+      if (used.has(h2)) return;
+      if (!isIncome(h2)) return;
+      order.push(`face:Income:${h2}`);
+      used.add(h2);
+    });
+    order.push('face-total:Income');
+
+    order.push('manual:pl-face:expenses');
+    const expenseOrder = [
+      'Cost of Materials Consumed',
+      'Purchases of Stock in Trade',
+      'Change in Inventories',
+      'User_Defined_Expense - 1',
+      'Employee Benefits Expense',
+      'Finance Costs',
+      'Depreciation and Amortisation Expense',
+      'Other Expenses',
+    ];
+    expenseOrder.forEach((h2) => {
+      if (hasH2(h2)) {
+        order.push(`face:Expense:${h2}`);
+        used.add(h2);
+      }
+    });
+    h2Options.forEach((h2) => {
+      if (used.has(h2)) return;
+      if (!isExpense(h2)) return;
+      if (h2 === 'Tax Expenses') return;
+      order.push(`face:Expense:${h2}`);
+      used.add(h2);
+    });
+    order.push('face-total:Expenses');
+
+    order.push('manual:pl-face:profit-before-exceptional');
+    order.push('manual:pl-face:exceptional-header');
+    order.push('manual:pl-face:exceptional-items');
+    order.push('manual:pl-face:prior-period-items');
+    order.push('manual:pl-face:profit-before-extraordinary');
+    order.push('manual:pl-face:extraordinary-header');
+    order.push('manual:pl-face:extraordinary-items');
+    order.push('manual:pl-face:profit-before-partners');
+    order.push('manual:pl-face:partners-remuneration');
+    order.push('manual:pl-face:profit-before-tax');
+    if (hasH2('Tax Expenses')) {
+      order.push('face:Expense:Tax Expenses');
+      overrides['face:Expense:Tax Expenses'] = { indent: 1 };
+    }
+    order.push('manual:pl-face:profit-continuing');
+    order.push('manual:pl-face:discontinuing-ops');
+    order.push('manual:pl-face:profit-for-year');
+    order.push('manual:pl-face:share-consolidation');
+
+    return {
+      order,
+      manualRows,
+      overrides,
+      templateVersion: PL_FACE_TEMPLATE_VERSION,
+    };
+  }, [mergedBsplHeads]);
+
+  const faceAutoRowsBS = useMemo<DisplayNoteRow[]>(() => {
+    const rows: DisplayNoteRow[] = [];
+    const liabilities = faceSummaryBS.sections.find((section) => section.title === 'Liabilities');
+    const assets = faceSummaryBS.sections.find((section) => section.title === 'Assets');
+    const h2ToH1 = new Map<string, string>();
+    mergedBsplHeads.forEach((row) => {
+      if (!row.H2 || !row.H1) return;
+      if (!h2ToH1.has(row.H2)) h2ToH1.set(row.H2, row.H1);
+    });
+    const liabilityH2List = noteEditMode
+      ? faceH2OptionsBS.filter((h2) => h2ToH1.get(h2) === 'Liability')
+      : (liabilities?.rows.map((row) => row.H2) || []);
+    const assetH2List = noteEditMode
+      ? faceH2OptionsBS.filter((h2) => h2ToH1.get(h2) === 'Asset')
+      : (assets?.rows.map((row) => row.H2) || []);
+
+    if (liabilities || noteEditMode) {
+      rows.push({
+        id: 'face-section:Liabilities',
+        label: 'Liabilities',
+        amount: 0,
+        formattedAmount: '',
+        indent: 0,
+        bold: true,
+        italic: false,
+        align: 'left',
+        isParent: true,
+        isManual: false,
+        rowType: 'HEADER',
+        isSection: true,
+      });
+      liabilityH2List.forEach((h2) => {
+        const meta = faceNoteMetaMapBS.get(h2);
+        const amount = meta?.total ?? 0;
+        rows.push({
+          id: `face:Liability:${h2}`,
+          label: h2,
+          amount,
+          formattedAmount: formatNumber(amount),
+          indent: 1,
+          bold: false,
+          italic: false,
+          align: 'left',
+          isParent: false,
+          isManual: false,
+          noteNo: meta?.noteNo,
+          noteTarget: h2,
+        });
+      });
+      rows.push({
+        id: 'face-total:Liabilities',
+        label: 'Total Liabilities',
+        amount: liabilities?.total ?? 0,
+        formattedAmount: formatNumber(liabilities?.total ?? 0),
+        indent: 0,
+        bold: true,
+        italic: false,
+        align: 'left',
+        isParent: false,
+        isManual: false,
+        rowType: 'TOTAL',
+      });
+    }
+    if (assets || noteEditMode) {
+      rows.push({
+        id: 'face-section:Assets',
+        label: 'Assets',
+        amount: 0,
+        formattedAmount: '',
+        indent: 0,
+        bold: true,
+        italic: false,
+        align: 'left',
+        isParent: true,
+        isManual: false,
+        rowType: 'HEADER',
+        isSection: true,
+      });
+      assetH2List.forEach((h2) => {
+        const meta = faceNoteMetaMapBS.get(h2);
+        const amount = meta?.total ?? 0;
+        rows.push({
+          id: `face:Asset:${h2}`,
+          label: h2,
+          amount,
+          formattedAmount: formatNumber(amount),
+          indent: 1,
+          bold: false,
+          italic: false,
+          align: 'left',
+          isParent: false,
+          isManual: false,
+          noteNo: meta?.noteNo,
+          noteTarget: h2,
+        });
+      });
+      rows.push({
+        id: 'face-total:Assets',
+        label: 'Total Assets',
+        amount: assets?.total ?? 0,
+        formattedAmount: formatNumber(assets?.total ?? 0),
+        indent: 0,
+        bold: true,
+        italic: false,
+        align: 'left',
+        isParent: false,
+        isManual: false,
+        rowType: 'TOTAL',
+      });
+    }
+    return rows;
+  }, [faceSummaryBS, formatNumber, mergedBsplHeads, noteEditMode, faceH2OptionsBS, faceNoteMetaMapBS]);
+
+  const faceAutoRowsPL = useMemo<DisplayNoteRow[]>(() => {
+    const rows: DisplayNoteRow[] = [];
+    const income = faceSummaryPL.sections.find((section) => section.title === 'Income');
+    const expenses = faceSummaryPL.sections.find((section) => section.title === 'Expenses');
+    const h2ToH1 = new Map<string, string>();
+    mergedBsplHeads.forEach((row) => {
+      if (!row.H2 || !row.H1) return;
+      if (!h2ToH1.has(row.H2)) h2ToH1.set(row.H2, row.H1);
+    });
+    const incomeH2List = noteEditMode
+      ? faceH2OptionsPL.filter((h2) => h2ToH1.get(h2) === 'Income')
+      : (income?.rows.map((row) => row.H2) || []);
+    const expenseH2List = noteEditMode
+      ? faceH2OptionsPL.filter((h2) => h2ToH1.get(h2) === 'Expense')
+      : (expenses?.rows.map((row) => row.H2) || []);
+
+    if (income || noteEditMode) {
+      rows.push({
+        id: 'face-section:Income',
+        label: 'Income',
+        amount: 0,
+        formattedAmount: '',
+        indent: 0,
+        bold: true,
+        italic: false,
+        align: 'left',
+        isParent: true,
+        isManual: false,
+        rowType: 'HEADER',
+        isSection: true,
+      });
+      incomeH2List.forEach((h2) => {
+        const meta = faceNoteMetaMapPL.get(h2);
+        const amount = meta?.total ?? 0;
+        rows.push({
+          id: `face:Income:${h2}`,
+          label: h2,
+          amount,
+          formattedAmount: formatNumber(amount),
+          indent: 1,
+          bold: false,
+          italic: false,
+          align: 'left',
+          isParent: false,
+          isManual: false,
+          noteNo: meta?.noteNo,
+          noteTarget: h2,
+        });
+      });
+      rows.push({
+        id: 'face-total:Income',
+        label: 'Total Income',
+        amount: income?.total ?? 0,
+        formattedAmount: formatNumber(income?.total ?? 0),
+        indent: 0,
+        bold: true,
+        italic: false,
+        align: 'left',
+        isParent: false,
+        isManual: false,
+        rowType: 'TOTAL',
+      });
+    }
+    if (expenses || noteEditMode) {
+      rows.push({
+        id: 'face-section:Expenses',
+        label: 'Expenses',
+        amount: 0,
+        formattedAmount: '',
+        indent: 0,
+        bold: true,
+        italic: false,
+        align: 'left',
+        isParent: true,
+        isManual: false,
+        rowType: 'HEADER',
+        isSection: true,
+      });
+      expenseH2List.forEach((h2) => {
+        const meta = faceNoteMetaMapPL.get(h2);
+        const amount = meta?.total ?? 0;
+        rows.push({
+          id: `face:Expense:${h2}`,
+          label: h2,
+          amount,
+          formattedAmount: formatNumber(amount),
+          indent: 1,
+          bold: false,
+          italic: false,
+          align: 'left',
+          isParent: false,
+          isManual: false,
+          noteNo: meta?.noteNo,
+          noteTarget: h2,
+        });
+      });
+      rows.push({
+        id: 'face-total:Expenses',
+        label: 'Total Expenses',
+        amount: expenses?.total ?? 0,
+        formattedAmount: formatNumber(expenses?.total ?? 0),
+        indent: 0,
+        bold: true,
+        italic: false,
+        align: 'left',
+        isParent: false,
+        isManual: false,
+        rowType: 'TOTAL',
+      });
+    }
+    return rows;
+  }, [faceSummaryPL, formatNumber, mergedBsplHeads, noteEditMode, faceH2OptionsPL, faceNoteMetaMapPL]);
+
+  useEffect(() => {
+    if (!noteLayoutLoaded) return;
+    if (faceH2OptionsBS.length === 0) return;
+    setNoteLayouts((prev) => {
+      const existing = prev['face|BS'];
+      if (existing?.templateVersion === BS_FACE_TEMPLATE_VERSION) return prev;
+      return {
+        ...prev,
+        ['face|BS']: buildBsFaceTemplateLayout(faceH2OptionsBS),
+      };
+    });
+  }, [noteLayoutLoaded, faceH2OptionsBS, buildBsFaceTemplateLayout]);
+
+  useEffect(() => {
+    if (!noteLayoutLoaded) return;
+    if (faceH2OptionsPL.length === 0) return;
+    setNoteLayouts((prev) => {
+      const existing = prev['face|PL'];
+      if (existing?.templateVersion === PL_FACE_TEMPLATE_VERSION) return prev;
+      return {
+        ...prev,
+        ['face|PL']: buildPlFaceTemplateLayout(faceH2OptionsPL),
+      };
+    });
+  }, [noteLayoutLoaded, faceH2OptionsPL, buildPlFaceTemplateLayout]);
 
   const noteH3Order = useMemo(() => {
     if (!selectedNoteH2) return [];
@@ -2506,7 +3120,8 @@ export default function FinancialReview() {
       ? new Set(['Asset', 'Liability'])
       : new Set(['Income', 'Expense']);
     const ordered: string[] = [];
-    filteredBsplHeads.forEach((row) => {
+    const sourceRows = noteEditMode ? mergedBsplHeads : filteredBsplHeads;
+    sourceRows.forEach((row) => {
       if (!allowedH1.has(row.H1)) return;
       if (row.H2 !== selectedNoteH2) return;
       if (!ordered.includes(row.H3)) {
@@ -2514,7 +3129,7 @@ export default function FinancialReview() {
       }
     });
     return ordered;
-  }, [filteredBsplHeads, noteStatementType, selectedNoteH2]);
+  }, [filteredBsplHeads, mergedBsplHeads, noteStatementType, selectedNoteH2, noteEditMode]);
 
   useEffect(() => {
     if (availableNoteH2.length === 0) {
@@ -2526,6 +3141,281 @@ export default function FinancialReview() {
     }
   }, [availableNoteH2, selectedNoteH2]);
 
+  const buildLayoutRows = useCallback((
+    autoRows: DisplayNoteRow[],
+    layout?: NoteLayout
+  ): DisplayNoteRow[] => {
+    const overrides = layout?.overrides || {};
+    const manualRows = layout?.manualRows || {};
+    const autoMap = new Map(autoRows.map((row) => [row.id, row]));
+    const autoIds = autoRows.map((row) => row.id);
+
+    if (!layout) {
+      return autoRows.map((row) => ({
+        ...row,
+        label: overrides[row.id]?.label ?? row.label,
+        indent: typeof overrides[row.id]?.indent === 'number' ? (overrides[row.id]?.indent as number) : row.indent,
+        bold: overrides[row.id]?.bold ?? row.bold,
+        italic: overrides[row.id]?.italic ?? row.italic,
+        align: overrides[row.id]?.align ?? row.align,
+      }));
+    }
+
+    const order = layout.order.filter((id) => manualRows[id] || autoMap.has(id));
+    autoIds.forEach((id) => {
+      if (!order.includes(id)) order.push(id);
+    });
+
+    const rows: DisplayNoteRow[] = [];
+    const manualChildrenMap = new Map<string, string[]>();
+    const isManualChild = (rowId: string) => {
+      return Boolean(overrides[rowId]?.manualParentId);
+    };
+
+    order.forEach((rowId) => {
+      const override = overrides[rowId];
+      if (override?.hidden) return;
+      if (override?.manualParentId) {
+        if (!manualChildrenMap.has(override.manualParentId)) {
+          manualChildrenMap.set(override.manualParentId, []);
+        }
+        manualChildrenMap.get(override.manualParentId)?.push(rowId);
+        return;
+      }
+      if (manualRows[rowId]) return;
+      if (autoMap.has(rowId)) return;
+    });
+
+    const resolveLabelOverride = (rowId: string, fallback: string) => {
+      const override = overrides[rowId] || {};
+      if (isPartnershipEntityType && override.labelWhenPartnership) {
+        return override.labelWhenPartnership;
+      }
+      if (isNonCompanyEntityType && override.useAltLabelForOthers && override.labelWhenOther) {
+        return override.labelWhenOther;
+      }
+      return override.label ?? fallback;
+    };
+
+    order.forEach((rowId) => {
+      if (overrides[rowId]?.hidden) return;
+      if (isManualChild(rowId)) return;
+      if (manualRows[rowId]) {
+        const manualRow = manualRows[rowId];
+        rows.push({
+          id: rowId,
+          label: resolveLabelOverride(rowId, manualRow.label),
+          amount: 0,
+          formattedAmount: '',
+          indent: overrides[rowId]?.indent ?? 0,
+          bold: Boolean(overrides[rowId]?.bold),
+          italic: Boolean(overrides[rowId]?.italic),
+          align: overrides[rowId]?.align || 'left',
+          isParent: Boolean(overrides[rowId]?.isParent),
+          isManual: true,
+          rowType: overrides[rowId]?.rowType,
+          noteNo: overrides[rowId]?.noteNoOverride,
+          isSection: Boolean(overrides[rowId]?.isParent),
+          noteTarget: overrides[rowId]?.noteTarget,
+        });
+      } else {
+        const autoRow = autoMap.get(rowId);
+        if (autoRow) {
+          const override = overrides[rowId] || {};
+          rows.push({
+            ...autoRow,
+            label: resolveLabelOverride(rowId, autoRow.label),
+            indent: typeof override.indent === 'number' ? override.indent : autoRow.indent,
+            bold: override.bold ?? autoRow.bold,
+            italic: override.italic ?? autoRow.italic,
+            align: override.align ?? autoRow.align,
+            rowType: override.rowType ?? autoRow.rowType,
+            noteNo: override.noteNoOverride ?? autoRow.noteNo,
+            isParent: override.isParent ?? autoRow.isParent,
+            isSection: autoRow.isSection,
+            noteTarget: autoRow.noteTarget,
+          });
+        }
+      }
+
+      const childIds = manualChildrenMap.get(rowId) || [];
+      childIds.forEach((childId) => {
+        if (overrides[childId]?.hidden) return;
+        if (manualRows[childId]) {
+          const manualRow = manualRows[childId];
+          rows.push({
+            id: childId,
+            label: resolveLabelOverride(childId, manualRow.label),
+            amount: 0,
+            formattedAmount: '',
+            indent: overrides[childId]?.indent ?? 1,
+            bold: Boolean(overrides[childId]?.bold),
+            italic: Boolean(overrides[childId]?.italic),
+            align: overrides[childId]?.align || 'left',
+            isParent: Boolean(overrides[childId]?.isParent),
+            isManual: true,
+            rowType: overrides[childId]?.rowType,
+            noteNo: overrides[childId]?.noteNoOverride,
+            isSection: false,
+            noteTarget: overrides[childId]?.noteTarget,
+          });
+        } else {
+          const autoRow = autoMap.get(childId);
+          if (autoRow) {
+            const override = overrides[childId] || {};
+            rows.push({
+              ...autoRow,
+              label: resolveLabelOverride(childId, autoRow.label),
+              indent: typeof override.indent === 'number' ? override.indent : autoRow.indent,
+              bold: override.bold ?? autoRow.bold,
+              italic: override.italic ?? autoRow.italic,
+              align: override.align ?? autoRow.align,
+              rowType: override.rowType ?? autoRow.rowType,
+              noteNo: override.noteNoOverride ?? autoRow.noteNo,
+              isParent: override.isParent ?? autoRow.isParent,
+              isSection: autoRow.isSection,
+              noteTarget: autoRow.noteTarget,
+            });
+          }
+        }
+      });
+    });
+
+    return rows;
+  }, []);
+
+  const computeRowState = useCallback((
+    rows: DisplayNoteRow[],
+    layout: NoteLayout | undefined,
+    tolerance: number,
+    noteMetaMap?: Map<string, { total: number; noteNo: number }>,
+    noteRowValueMap?: Map<string, number>
+  ) => {
+    const overrides = layout?.overrides || {};
+    const formulaMap = new Map<string, string>();
+    const rowValues = new Map<string, number>();
+    const rowOrder = rows.map((row) => row.id);
+    const parentMap = new Map<string, string[]>();
+
+    const rowTypes = new Map<string, NoteRowOverride['rowType']>();
+
+    const getParentByIndent = (index: number, indent: number) => {
+      for (let i = index - 1; i >= 0; i -= 1) {
+        const candidate = rows[i];
+        if (candidate.indent < indent) {
+          return candidate.id;
+        }
+      }
+      return null;
+    };
+
+    rows.forEach((row, index) => {
+      const override = overrides[row.id] || {};
+      const rowType = override.rowType ?? (row.isSection ? 'HEADER' : 'INPUT');
+      rowTypes.set(row.id, rowType);
+      let value = row.amount;
+      if (override.noteTarget) {
+        if (noteMetaMap?.has(override.noteTarget)) {
+          value = noteMetaMap.get(override.noteTarget)?.total ?? value;
+        } else if (noteRowValueMap?.has(override.noteTarget)) {
+          value = noteRowValueMap.get(override.noteTarget) ?? value;
+        }
+      }
+      if (row.isManual && typeof override.manualValue === 'number') {
+        value = override.manualValue;
+      }
+      if (rowType === 'HEADER') {
+        value = 0;
+      }
+      if (override.allowNegative === false && value < 0) {
+        value = Math.abs(value);
+      }
+      rowValues.set(row.id, value);
+
+      const parentId = override.manualParentId || (row.indent > 0 ? getParentByIndent(index, row.indent) : null);
+      if (parentId) {
+        if (!parentMap.has(parentId)) parentMap.set(parentId, []);
+        parentMap.get(parentId)?.push(row.id);
+      }
+    });
+
+    rows.forEach((row) => {
+      const override = overrides[row.id] || {};
+      const rowType = rowTypes.get(row.id);
+      if (!rowType) return;
+      if (!['CALC', 'TOTAL', 'SUBTOTAL'].includes(rowType)) return;
+      if (!override.formula) return;
+      formulaMap.set(row.id, override.formula);
+    });
+
+    for (let iter = 0; iter < 5; iter += 1) {
+      let changed = false;
+      rows.forEach((row) => {
+        const override = overrides[row.id] || {};
+        const rowType = rowTypes.get(row.id);
+        if (!rowType) return;
+        if (!['CALC', 'TOTAL', 'SUBTOTAL'].includes(rowType)) return;
+        if (!override.formula) return;
+        const nextValue = evaluateFormula(override.formula, {
+          rowValues,
+          rowOrder,
+          parentMap,
+          variables: statementVariables,
+        });
+        if (rowValues.get(row.id) !== nextValue) {
+          rowValues.set(row.id, nextValue);
+          changed = true;
+        }
+      });
+      if (!changed) break;
+    }
+
+    const visibilityMap = new Map<string, boolean>();
+    rows.forEach((row) => {
+      const override = overrides[row.id] || {};
+      const visibility = override.visibility || 'always';
+      const enabled = override.enabled ?? true;
+      let visible = true;
+      if (visibility === 'enabled') {
+        visible = enabled;
+      } else if (visibility === 'nonzero') {
+        visible = Math.abs(rowValues.get(row.id) || 0) > tolerance;
+      } else if (visibility === 'childNonZero') {
+        const children = parentMap.get(row.id) || [];
+        visible = children.some((childId) => Math.abs(rowValues.get(childId) || 0) > tolerance);
+      }
+      visibilityMap.set(row.id, visible);
+    });
+
+    const computedRows = rows.map((row) => {
+      const override = overrides[row.id] || {};
+      const rowType = rowTypes.get(row.id) ?? row.rowType;
+      let amount = rowValues.get(row.id) || 0;
+      if (rowType === 'HEADER') {
+        amount = 0;
+      }
+      let noteNo = row.noteNo;
+      if (override.noteTarget && noteMetaMap?.has(override.noteTarget)) {
+        noteNo = noteMetaMap.get(override.noteTarget)?.noteNo ?? noteNo;
+      }
+      const noteMode = override.noteNoMode || 'auto';
+      if (noteMode === 'hide') {
+        noteNo = undefined;
+      } else if (noteMode === 'custom' && typeof override.noteNoOverride === 'number') {
+        noteNo = override.noteNoOverride;
+      }
+      return {
+        ...row,
+        amount,
+        formattedAmount: rowType === 'HEADER' ? '' : formatNumber(amount),
+        rowType,
+        noteNo,
+      };
+    });
+
+    return { rows: computedRows, visibilityMap, parentMap, formulaMap, rowTypes };
+  }, [formatNumber, statementVariables]);
+
   useEffect(() => {
     if (!selectedNoteH2 || !noteListRef.current) return;
     const target = noteListRef.current.querySelector(`[data-note-h2="${CSS.escape(selectedNoteH2)}"]`);
@@ -2533,6 +3423,64 @@ export default function FinancialReview() {
       target.scrollIntoView({ block: 'nearest' });
     }
   }, [selectedNoteH2, noteStatementType]);
+
+  useEffect(() => {
+    if (!noteEditMode) return;
+    if (activeTab === 'face-bs' && faceAutoRowsBS.length > 0) {
+      const layoutKey = 'face|BS';
+      setNoteLayouts((prev) => {
+        if (prev[layoutKey]) return prev;
+        return {
+          ...prev,
+          [layoutKey]: {
+            order: faceAutoRowsBS.map((row) => row.id),
+            manualRows: {},
+            overrides: {},
+          },
+        };
+      });
+    }
+    if (activeTab === 'face-pl' && faceAutoRowsPL.length > 0) {
+      const layoutKey = 'face|PL';
+      setNoteLayouts((prev) => {
+        if (prev[layoutKey]) return prev;
+        return {
+          ...prev,
+          [layoutKey]: {
+            order: faceAutoRowsPL.map((row) => row.id),
+            manualRows: {},
+            overrides: {},
+          },
+        };
+      });
+    }
+  }, [noteEditMode, activeTab, faceAutoRowsBS, faceAutoRowsPL]);
+
+  useEffect(() => {
+    if (!noteEditMode) return;
+    if (activeTab !== 'face-bs' && activeTab !== 'face-pl') return;
+    const layoutKey = activeTab === 'face-pl' ? 'face|PL' : 'face|BS';
+    const autoRows = activeTab === 'face-pl' ? faceAutoRowsPL : faceAutoRowsBS;
+    if (autoRows.length === 0) return;
+    setNoteLayouts((prev) => {
+      const layout = prev[layoutKey];
+      if (!layout) return prev;
+      const order = layout.order.filter((id) => layout.manualRows[id] || autoRows.some((row) => row.id === id));
+      autoRows.forEach((row) => {
+        if (!order.includes(row.id)) order.push(row.id);
+      });
+      if (order.length === layout.order.length && order.every((id, idx) => id === layout.order[idx])) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [layoutKey]: {
+          ...layout,
+          order,
+        },
+      };
+    });
+  }, [noteEditMode, activeTab, faceAutoRowsBS, faceAutoRowsPL]);
 
   const activeNote = useMemo(() => {
     if (!selectedNoteH2) return null;
@@ -2728,9 +3676,19 @@ export default function FinancialReview() {
     const autoMap = new Map(autoFlatRows.map((row) => [row.id, row]));
     const autoIds = autoFlatRows.map((row) => row.id);
 
+    const resolveLabel = (rowId: string, fallback: string) => {
+      const override = overrides[rowId] || {};
+      if (isPartnershipEntityType && override.labelWhenPartnership) {
+        return override.labelWhenPartnership;
+      }
+      if (isNonCompanyEntityType && override.useAltLabelForOthers && override.labelWhenOther) {
+        return override.labelWhenOther;
+      }
+      return override.label ?? fallback;
+    };
     const buildDisplayRow = (row: FlatNoteRow, isManual: boolean, manualLabel?: string): DisplayNoteRow => {
       const override = overrides[row.id] || {};
-      const label = isManual ? (manualLabel || row.label) : (override.label ?? row.label);
+      const label = resolveLabel(row.id, isManual ? (manualLabel || row.label) : row.label);
       const isManualChild = Boolean(override.manualParentId);
       const indent = typeof override.indent === 'number'
         ? override.indent
@@ -2823,15 +3781,41 @@ export default function FinancialReview() {
       });
     });
 
+    const noteRowValueMap = new Map<string, number>();
+    autoFlatRows.forEach((row) => {
+      if (row.type === 'parent') return;
+      noteRowValueMap.set(row.label, row.amount);
+    });
+    const computedState = computeRowState(rows, noteLayout, noteTolerance, undefined, noteRowValueMap);
+    const computedRows = computedState.rows;
+    const visibilityMap = computedState.visibilityMap;
+    const formulaMap = computedState.formulaMap;
+    const rowTypes = computedState.rowTypes;
+    const missingRowRefs = new Map<string, string[]>();
+    const missingVariableRefs = new Map<string, string[]>();
+    formulaMap.forEach((formula, rowId) => {
+      const refs = Array.from(extractRowRefs(formula)).filter((ref) => !rowTypes.has(ref));
+      const vars = Array.from(extractVariableRefs(formula)).filter((name) => !statementVariables[name]);
+      if (refs.length) missingRowRefs.set(rowId, refs);
+      if (vars.length) missingVariableRefs.set(rowId, vars);
+    });
+    const hasCycle = detectFormulaCycles(formulaMap);
+
     if (noteEditMode) {
-      return rows;
+      return computedRows.map((row) => ({
+        ...row,
+        formulaWarning: Boolean(missingRowRefs.get(row.id)?.length || missingVariableRefs.get(row.id)?.length || hasCycle),
+        missingRowRefs: missingRowRefs.get(row.id),
+        missingVariableRefs: missingVariableRefs.get(row.id),
+        hasCycle,
+      }) as DisplayNoteRow & { formulaWarning?: boolean; missingRowRefs?: string[]; missingVariableRefs?: string[]; hasCycle?: boolean; });
     }
 
     const isNonZero = (value: number) => !isZeroAfterScale(value, scaleFactor);
     const isManualHeader = (row: DisplayNoteRow) => row.isManual;
     const isAutoParentHeader = (row: DisplayNoteRow) => row.autoType === 'parent';
     const isIndentHeader = (row: DisplayNoteRow, index: number) => {
-      const nextRow = rows[index + 1];
+      const nextRow = computedRows[index + 1];
       return row.indent === 0 && nextRow && nextRow.indent > row.indent;
     };
     const isHeaderRow = (row: DisplayNoteRow, index: number) => {
@@ -2839,8 +3823,8 @@ export default function FinancialReview() {
     };
     const filtered: DisplayNoteRow[] = [];
     let i = 0;
-    while (i < rows.length) {
-      const row = rows[i];
+    while (i < computedRows.length) {
+      const row = computedRows[i];
       if (overrides[row.id]?.hidden) {
         i += 1;
         continue;
@@ -2849,7 +3833,7 @@ export default function FinancialReview() {
       const isGroupHeader = isHeaderRow(row, i);
 
       if (!isGroupHeader) {
-        if (isNonZero(row.amount)) {
+        if ((visibilityMap.get(row.id) ?? true) && isNonZero(row.amount)) {
           filtered.push(row);
         }
         i += 1;
@@ -2860,28 +3844,29 @@ export default function FinancialReview() {
       let j = i + 1;
       const useIndentGrouping = !isManualHeader(row) && (isAutoParentHeader(row) || isIndentHeader(row, i));
       if (useIndentGrouping) {
-        while (j < rows.length && rows[j].indent > row.indent) {
-          if (!overrides[rows[j].id]?.hidden) {
-            group.push(rows[j]);
+        while (j < computedRows.length && computedRows[j].indent > row.indent) {
+          if (!overrides[computedRows[j].id]?.hidden) {
+            group.push(computedRows[j]);
           }
           j += 1;
         }
       } else {
-        while (j < rows.length) {
-          if (isHeaderRow(rows[j], j)) {
+        while (j < computedRows.length) {
+          if (isHeaderRow(computedRows[j], j)) {
             break;
           }
-          if (!overrides[rows[j].id]?.hidden) {
-            group.push(rows[j]);
+          if (!overrides[computedRows[j].id]?.hidden) {
+            group.push(computedRows[j]);
           }
           j += 1;
         }
       }
 
-      const groupSum = group.reduce((sum, child) => sum + Math.abs(child.amount), 0);
-      if (groupSum > 0) {
+      const visibleGroup = group.filter((child) => visibilityMap.get(child.id) ?? true);
+      const groupSum = visibleGroup.reduce((sum, child) => sum + Math.abs(child.amount), 0);
+      if ((visibilityMap.get(row.id) ?? true) && groupSum > 0) {
         filtered.push(row);
-        group.forEach((child) => {
+        visibleGroup.forEach((child) => {
           if (isNonZero(child.amount)) {
             filtered.push(child);
           }
@@ -2891,18 +3876,18 @@ export default function FinancialReview() {
     }
 
     return filtered;
-  }, [activeNote, autoFlatRows, noteLayout, noteEditMode, numberScale]);
+  }, [activeNote, autoFlatRows, noteLayout, noteEditMode, numberScale, computeRowState, noteTolerance, isPartnershipEntityType, isNonCompanyEntityType]);
 
-  const handleAddManualRow = useCallback((position: 'above' | 'below' | 'top' | 'bottom') => {
+  const handleAddManualRow = useCallback((position: 'above' | 'below' | 'top' | 'bottom', labelOverride?: string) => {
     if (!noteKey || !activeNote) {
       toast({ title: 'Select a note before adding rows' });
       return;
     }
-    if (!noteNewRowLabel.trim()) {
+    const label = (labelOverride ?? noteNewRowLabel).trim();
+    if (!label && labelOverride === undefined) {
       toast({ title: 'Enter a row label first' });
       return;
     }
-    const label = noteNewRowLabel.trim();
 
     ensureNoteLayout();
     const newId = `manual:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2923,15 +3908,26 @@ export default function FinancialReview() {
         }
       }
       order.splice(index, 0, newId);
+      const nextOverrides = { ...layout.overrides };
+      if (!label) {
+        nextOverrides[newId] = { ...nextOverrides[newId], rowType: 'HEADER', visibility: 'always' };
+      }
       return {
         ...layout,
         order,
         manualRows: { ...layout.manualRows, [newId]: { label } },
+        overrides: nextOverrides,
       };
     });
     setSelectedNoteRowId(newId);
-    setNoteNewRowLabel('');
+    if (labelOverride === undefined) {
+      setNoteNewRowLabel('');
+    }
   }, [noteKey, activeNote, ensureNoteLayout, updateNoteLayout, selectedNoteRowId, noteNewRowLabel, toast]);
+
+  const handleAddEmptyNoteRow = useCallback((position: 'above' | 'below' | 'top' | 'bottom') => {
+    handleAddManualRow(position, '');
+  }, [handleAddManualRow]);
 
   const handleMoveSelectedRow = useCallback((direction: 'up' | 'down') => {
     if (!selectedNoteRowId) return;
@@ -3124,6 +4120,30 @@ export default function FinancialReview() {
     toast({ title: 'Note preview defaults saved' });
   }, [noteTableSettings, notePreviewZoom, toast]);
 
+  const handleSaveNoteNumberStart = useCallback(() => {
+    const parsed = parseInt(noteNumberStartDraft, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      toast({ title: 'Invalid note start', description: 'Enter a positive number.' });
+      return;
+    }
+    setNoteNumberStart(parsed);
+    setNoteLayoutPayload((prev) => ({
+      ...prev,
+      noteNumberStart: parsed,
+    }));
+    setIsNoteNumberDialogOpen(false);
+    toast({ title: 'Note numbering updated' });
+  }, [noteNumberStartDraft, toast]);
+
+  const handleSaveVariables = useCallback(() => {
+    setNoteLayoutPayload((prev) => ({
+      ...prev,
+      variables: statementVariables,
+    }));
+    setIsVariablesDialogOpen(false);
+    toast({ title: 'Variables saved' });
+  }, [statementVariables, toast]);
+
   const handleResetNotePreview = useCallback(() => {
     setNoteTableSettings({
       rowHeight: notePreviewDefaults.rowHeight,
@@ -3134,25 +4154,289 @@ export default function FinancialReview() {
     setNotePreviewZoom(notePreviewDefaults.zoom);
   }, [notePreviewDefaults]);
 
+  const faceLayoutKey = useMemo(() => {
+    return noteStatementType === 'PL' ? 'face|PL' : 'face|BS';
+  }, [noteStatementType]);
+
+  const faceLayout = useMemo(() => {
+    return noteLayouts[faceLayoutKey];
+  }, [noteLayouts, faceLayoutKey]);
+
+  const faceAutoRows = useMemo(() => {
+    return noteStatementType === 'PL' ? faceAutoRowsPL : faceAutoRowsBS;
+  }, [noteStatementType, faceAutoRowsPL, faceAutoRowsBS]);
+
+  const displayFaceRows = useMemo(() => {
+    const rows = buildLayoutRows(faceAutoRows, faceLayout);
+    const noteMetaMap = noteStatementType === 'PL' ? faceNoteMetaMapPL : faceNoteMetaMapBS;
+    const computedState = computeRowState(rows, faceLayout, noteTolerance, noteMetaMap);
+    const formulaMap = computedState.formulaMap;
+    const rowTypes = computedState.rowTypes;
+    const missingRowRefs = new Map<string, string[]>();
+    const missingVariableRefs = new Map<string, string[]>();
+    formulaMap.forEach((formula, rowId) => {
+      const refs = Array.from(extractRowRefs(formula)).filter((ref) => !rowTypes.has(ref));
+      const vars = Array.from(extractVariableRefs(formula)).filter((name) => !statementVariables[name]);
+      if (refs.length) missingRowRefs.set(rowId, refs);
+      if (vars.length) missingVariableRefs.set(rowId, vars);
+    });
+    const hasCycle = detectFormulaCycles(formulaMap);
+    if (noteEditMode) {
+      return computedState.rows.map((row) => ({
+        ...row,
+        formulaWarning: Boolean(missingRowRefs.get(row.id)?.length || missingVariableRefs.get(row.id)?.length || hasCycle),
+        missingRowRefs: missingRowRefs.get(row.id),
+        missingVariableRefs: missingVariableRefs.get(row.id),
+        hasCycle,
+      }));
+    }
+    return computedState.rows.filter((row) => {
+      const visible = computedState.visibilityMap.get(row.id) ?? true;
+      if (row.rowType === 'TOTAL') return true;
+      if (row.isSection || row.rowType === 'HEADER') return visible;
+      return visible && Math.abs(row.amount) > noteTolerance;
+    });
+  }, [buildLayoutRows, faceAutoRows, faceLayout, noteEditMode, computeRowState, noteTolerance]);
+
+  const selectedNoteDisplayRow = useMemo(() => {
+    if (!selectedNoteRowId) return null;
+    return displayNoteRows.find((row) => row.id === selectedNoteRowId) || null;
+  }, [displayNoteRows, selectedNoteRowId]);
+
+  const selectedFaceDisplayRow = useMemo(() => {
+    if (!selectedFaceRowId) return null;
+    return displayFaceRows.find((row) => row.id === selectedFaceRowId) || null;
+  }, [displayFaceRows, selectedFaceRowId]);
+
   const handleNoteLinkClick = useCallback((statementType: 'BS' | 'PL', h2: string) => {
     setActiveTab(statementType === 'PL' ? 'notes-pl' : 'notes-bs');
     setSelectedNoteH2(h2);
   }, [setActiveTab, setSelectedNoteH2]);
 
-  const handleSaveNoteEdits = useCallback(async () => {
-    if (!currentEngagement?.id) return;
-    try {
-      const payload = { ...noteLayoutPayload, noteLayouts };
-      await supabase
-        .from('engagements')
-        .update({ notes: JSON.stringify(payload) })
-        .eq('id', currentEngagement.id);
-      toast({ title: 'Note edits saved' });
-    } catch (error) {
-      console.error('Failed to save note edits:', error);
-      toast({ title: 'Failed to save note edits', variant: 'destructive' });
+  const resolveFaceRowLabel = useCallback((rowId: string) => {
+    if (!rowId) return '';
+    const layout = noteLayouts[faceLayoutKey];
+    if (layout?.manualRows[rowId]) {
+      return layout.manualRows[rowId].label;
     }
-  }, [currentEngagement?.id, noteLayoutPayload, noteLayouts, toast]);
+    const overrideLabel = layout?.overrides[rowId]?.label;
+    if (overrideLabel) return overrideLabel;
+    const autoRow = faceAutoRows.find((row) => row.id === rowId);
+    return autoRow?.label || '';
+  }, [noteLayouts, faceLayoutKey, faceAutoRows]);
+
+  const ensureFaceLayout = useCallback(() => {
+    setNoteLayouts((prev) => {
+      if (prev[faceLayoutKey]) return prev;
+      return {
+        ...prev,
+        [faceLayoutKey]: {
+          order: faceAutoRows.map((row) => row.id),
+          manualRows: {},
+          overrides: {},
+        },
+      };
+    });
+  }, [faceLayoutKey, faceAutoRows]);
+
+  useEffect(() => {
+    if (!selectedFaceRowId) {
+      setFaceSelectedLabel('');
+      return;
+    }
+    setFaceSelectedLabel(resolveFaceRowLabel(selectedFaceRowId));
+  }, [selectedFaceRowId, resolveFaceRowLabel]);
+
+  const updateFaceLayout = useCallback((updater: (layout: NoteLayout) => NoteLayout) => {
+    setNoteLayouts((prev) => {
+      const existing = prev[faceLayoutKey];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [faceLayoutKey]: updater(existing),
+      };
+    });
+  }, [faceLayoutKey]);
+
+  const handleAddFaceRow = useCallback((position: 'above' | 'below' | 'top' | 'bottom') => {
+    ensureFaceLayout();
+    if (!faceNewRowLabel.trim()) {
+      toast({ title: 'Enter a row label first' });
+      return;
+    }
+    const label = faceNewRowLabel.trim();
+    const newId = `manual:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    updateFaceLayout((layout) => {
+      const order = [...layout.order];
+      let index = 0;
+      if (position === 'top') {
+        index = 0;
+      } else if (position === 'bottom') {
+        index = order.length;
+      } else {
+        const currentIndex = selectedFaceRowId ? order.indexOf(selectedFaceRowId) : -1;
+        if (currentIndex === -1) {
+          index = position === 'above' ? 0 : order.length;
+        } else {
+          index = position === 'above' ? currentIndex : currentIndex + 1;
+        }
+      }
+      order.splice(index, 0, newId);
+      return {
+        ...layout,
+        order,
+        manualRows: { ...layout.manualRows, [newId]: { label } },
+      };
+    });
+    setSelectedFaceRowId(newId);
+    setFaceNewRowLabel('');
+  }, [ensureFaceLayout, faceNewRowLabel, selectedFaceRowId, updateFaceLayout, toast]);
+
+  const handleMoveFaceRow = useCallback((direction: 'up' | 'down') => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId) return;
+    updateFaceLayout((layout) => {
+      const order = [...layout.order];
+      const index = order.indexOf(selectedFaceRowId);
+      if (index === -1) return layout;
+      const nextIndex = direction === 'up' ? index - 1 : index + 1;
+      if (nextIndex < 0 || nextIndex >= order.length) return layout;
+      [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
+      return { ...layout, order };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleDeleteFaceRow = useCallback(() => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId) return;
+    updateFaceLayout((layout) => {
+      const isManual = Boolean(layout.manualRows[selectedFaceRowId]);
+      const order = layout.order.filter((id) => id !== selectedFaceRowId);
+      const manualRows = { ...layout.manualRows };
+      const overrides = { ...layout.overrides };
+
+      if (isManual) {
+        delete manualRows[selectedFaceRowId];
+        delete overrides[selectedFaceRowId];
+      } else {
+        overrides[selectedFaceRowId] = { ...overrides[selectedFaceRowId], hidden: true };
+      }
+
+      return { ...layout, order, manualRows, overrides };
+    });
+    setSelectedFaceRowId(null);
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleFaceLabelChange = useCallback((value: string) => {
+    ensureFaceLayout();
+    setFaceSelectedLabel(value);
+    if (!selectedFaceRowId) return;
+    updateFaceLayout((layout) => {
+      const manualRows = { ...layout.manualRows };
+      const overrides = { ...layout.overrides };
+      const nextLabel = value.trim();
+      if (manualRows[selectedFaceRowId]) {
+        manualRows[selectedFaceRowId] = { label: nextLabel };
+      } else {
+        overrides[selectedFaceRowId] = { ...overrides[selectedFaceRowId], label: nextLabel };
+      }
+      return { ...layout, manualRows, overrides };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleFaceToggleStyle = useCallback((field: 'bold' | 'italic') => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId) return;
+    updateFaceLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedFaceRowId] || {};
+      overrides[selectedFaceRowId] = { ...current, [field]: !current[field] };
+      return { ...layout, overrides };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleFaceAlign = useCallback((align: 'left' | 'center' | 'right') => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId) return;
+    updateFaceLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedFaceRowId] || {};
+      overrides[selectedFaceRowId] = { ...current, align };
+      return { ...layout, overrides };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleFaceIndent = useCallback((delta: number) => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId) return;
+    updateFaceLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedFaceRowId] || {};
+      const nextIndent = Math.max(0, (current.indent ?? 0) + delta);
+      overrides[selectedFaceRowId] = { ...current, indent: nextIndent };
+      return { ...layout, overrides };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleFaceSetParentAnchor = useCallback(() => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId) return;
+    setFaceParentAnchorId(selectedFaceRowId);
+    updateFaceLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedFaceRowId] || {};
+      overrides[selectedFaceRowId] = { ...current, isParent: true, indent: 0 };
+      return { ...layout, overrides };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleFaceAttachToParent = useCallback(() => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId || !faceParentAnchorId) return;
+    if (selectedFaceRowId === faceParentAnchorId) return;
+    updateFaceLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedFaceRowId] || {};
+      overrides[selectedFaceRowId] = { ...current, manualParentId: faceParentAnchorId, indent: current.indent ?? 1 };
+      return { ...layout, overrides };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, faceParentAnchorId, updateFaceLayout]);
+
+  const handleFaceClearParent = useCallback(() => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId) return;
+    updateFaceLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedFaceRowId] || {};
+      const next = { ...current };
+      delete next.manualParentId;
+      overrides[selectedFaceRowId] = next;
+      return { ...layout, overrides };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleFaceMakeParent = useCallback((isParent: boolean) => {
+    ensureFaceLayout();
+    if (!selectedFaceRowId) return;
+    updateFaceLayout((layout) => {
+      const overrides = { ...layout.overrides };
+      const current = overrides[selectedFaceRowId] || {};
+      overrides[selectedFaceRowId] = { ...current, isParent, indent: isParent ? 0 : 1 };
+      return { ...layout, overrides };
+    });
+  }, [ensureFaceLayout, selectedFaceRowId, updateFaceLayout]);
+
+  const handleSaveNoteEdits = useCallback(() => {
+    try {
+      const payload = { ...noteLayoutPayload, noteLayouts, variables: statementVariables };
+      localStorage.setItem('statement_layout_config', JSON.stringify(payload));
+      toast({ title: 'Layout saved' });
+    } catch (error) {
+      console.error('Failed to save layout:', error);
+      toast({ title: 'Failed to save layout', variant: 'destructive' });
+    }
+  }, [noteLayoutPayload, noteLayouts, statementVariables, toast]);
 
   // Export Template for Excel Import
   const handleExportTemplate = useCallback(() => {
@@ -3517,16 +4801,46 @@ export default function FinancialReview() {
   }, [filteredData, currentStockData, classifiedTbColumnWidths, currentEngagement, toast]);
 
   // Save Session
-  const handleSave = useCallback(() => {
-    const sessionName = prompt('Enter session name:', `Session_${new Date().toISOString().split('T')[0]}`);
-    if (!sessionName) return;
-    
-    // TODO: Implement session save to database
-    toast({
-      title: 'Save',
-      description: 'Session save feature coming soon'
-    });
-  }, [toast]);
+  const handleSave = useCallback(async () => {
+    if (!currentEngagement?.id) {
+      toast({ title: 'No engagement selected', variant: 'destructive' });
+      return;
+    }
+    if (currentData.length === 0) {
+      toast({ title: 'No classified data to save', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const dbLines: TrialBalanceLineInput[] = currentData.map(row => ({
+        account_code: row['Composite Key'] || '',
+        account_name: row['Ledger Name'] || '',
+        ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
+        ledger_primary_group: row['Primary Group'] || null,
+        opening_balance: row['Opening Balance'] || 0,
+        debit: row['Debit'] || 0,
+        credit: row['Credit'] || 0,
+        closing_balance: row['Closing Balance'] || 0,
+        balance_type: getActualBalanceSign(row),
+        note: row['Notes'] || null,
+        period_type: 'current',
+        period_ending: toDate || null,
+        face_group: row['H1'] || null,
+        note_group: row['H2'] || null,
+        sub_note: row['H3'] || null,
+      }));
+
+      const ok = await trialBalanceDB.importLines(dbLines, true, true);
+      if (!ok) {
+        toast({ title: 'Save failed', variant: 'destructive' });
+        return;
+      }
+      toast({ title: 'Saved', description: `Saved ${dbLines.length} lines.` });
+    } catch (error) {
+      console.error('Save failed:', error);
+      toast({ title: 'Save failed', variant: 'destructive' });
+    }
+  }, [currentEngagement?.id, currentData, toDate, trialBalanceDB, toast]);
 
   // Reset all filters
   const handleResetFilters = useCallback(() => {
@@ -3634,10 +4948,10 @@ export default function FinancialReview() {
     </div>
   ) : (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="text-xs font-semibold">
-          {noteStatementType === 'PL' ? 'Profit & Loss Notes' : 'Balance Sheet Notes'}
-        </div>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="text-xs font-semibold">
+                      {noteStatementType === 'PL' ? 'Profit & Loss Notes' : 'Balance Sheet Notes'}
+                    </div>
         <div className="flex items-center gap-2">
           <Checkbox
             id="show-parent-totals"
@@ -3759,7 +5073,7 @@ export default function FinancialReview() {
           </Button>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
         <div className="border rounded-md p-2 max-h-[520px] overflow-auto">
           {noteEditMode && (
             <div className="flex flex-col gap-2 mb-3">
@@ -3776,13 +5090,16 @@ export default function FinancialReview() {
                 className="h-7 text-xs"
                 disabled={!selectedNoteRowId}
               />
-              <div className="flex flex-wrap gap-1">
-                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('top')}>
-                  Add Top
-                </Button>
-                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('above')} disabled={!selectedNoteRowId}>
-                  Add Above
-                </Button>
+                <div className="flex flex-wrap gap-1">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('top')}>
+                    Add Top
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddEmptyNoteRow('top')}>
+                    Add Empty
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('above')} disabled={!selectedNoteRowId}>
+                    Add Above
+                  </Button>
                 <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddManualRow('below')} disabled={!selectedNoteRowId}>
                   Add Below
                 </Button>
@@ -3844,9 +5161,227 @@ export default function FinancialReview() {
                   Delete
                 </Button>
                 <Button size="sm" variant="default" className="h-7 text-[11px]" onClick={handleSaveNoteEdits}>
-                  Save Note Edits
+                  Save Layout
                 </Button>
               </div>
+                {selectedNoteRowId && (
+                  <div className="border rounded-md p-2 text-[11px] flex flex-col gap-2">
+                  <div className="font-semibold">Row Properties</div>
+                  <div className="text-[10px] text-muted-foreground break-all">
+                    Row ID: <span className="font-mono">{selectedNoteRowId}</span>
+                  </div>
+                  {!selectedNoteDisplayRow?.isManual && (
+                    <div className="text-[10px] text-muted-foreground">
+                      Source: Auto (SUMIFS from classified TB)
+                    </div>
+                  )}
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">Row Type</Label>
+                    <Select
+                      value={noteLayout?.overrides[selectedNoteRowId]?.rowType || selectedNoteDisplayRow?.rowType || 'INPUT'}
+                      onValueChange={(value) => {
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = { ...current, rowType: value as NoteRowOverride['rowType'] };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-7 text-xs">
+                        <SelectValue placeholder="Row Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="INPUT">INPUT</SelectItem>
+                        <SelectItem value="CALC">CALC</SelectItem>
+                        <SelectItem value="HEADER">HEADER</SelectItem>
+                        <SelectItem value="SUBTOTAL">SUBTOTAL</SelectItem>
+                        <SelectItem value="TOTAL">TOTAL</SelectItem>
+                        <SelectItem value="CONDITIONAL">CONDITIONAL</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {['CALC', 'SUBTOTAL', 'TOTAL'].includes(noteLayout?.overrides[selectedNoteRowId]?.rowType || selectedNoteDisplayRow?.rowType || '') && (
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">Formula</Label>
+                      <Input
+                        value={noteLayout?.overrides[selectedNoteRowId]?.formula || ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          updateNoteLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedNoteRowId] || {};
+                            overrides[selectedNoteRowId] = { ...current, formula: value };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                        className="h-7 text-xs flex-1"
+                        placeholder={'SUM(ROW("a"), ROW("b"))'}
+                      />
+                    </div>
+                  )}
+                  {['CALC', 'SUBTOTAL', 'TOTAL'].includes(noteLayout?.overrides[selectedNoteRowId]?.rowType || selectedNoteDisplayRow?.rowType || '') && (
+                    <div className="text-[10px] text-muted-foreground">
+                      Example: DIFF(ROW("total_income"), ROW("total_expenses"))
+                    </div>
+                  )}
+                  {(selectedNoteDisplayRow?.formulaWarning || selectedNoteDisplayRow?.hasCycle) && (
+                    <div className="text-[10px] text-red-600">
+                      {selectedNoteDisplayRow?.hasCycle && <div>Formula cycle detected.</div>}
+                      {selectedNoteDisplayRow?.missingRowRefs && selectedNoteDisplayRow.missingRowRefs.length > 0 && (
+                        <div>Missing rows: {selectedNoteDisplayRow.missingRowRefs.join(', ')}</div>
+                      )}
+                      {selectedNoteDisplayRow?.missingVariableRefs && selectedNoteDisplayRow.missingVariableRefs.length > 0 && (
+                        <div>Missing variables: {selectedNoteDisplayRow.missingVariableRefs.join(', ')}</div>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Label className="w-20 text-[11px]">Manual</Label>
+                    <Input
+                      type="number"
+                      value={noteLayout?.overrides[selectedNoteRowId]?.manualValue ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = { ...current, manualValue: value === '' ? undefined : Number(value) };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                      className="h-7 text-xs w-28"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="w-20 text-[11px]">Visibility</Label>
+                    <Select
+                      value={noteLayout?.overrides[selectedNoteRowId]?.visibility || 'always'}
+                      onValueChange={(value) => {
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = { ...current, visibility: value as NoteRowOverride['visibility'] };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-7 text-xs">
+                        <SelectValue placeholder="Visibility" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="always">Always show</SelectItem>
+                        <SelectItem value="nonzero">Show if non-zero</SelectItem>
+                        <SelectItem value="childNonZero">Show if child has value</SelectItem>
+                        <SelectItem value="enabled">Show if enabled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Checkbox
+                      checked={noteLayout?.overrides[selectedNoteRowId]?.enabled ?? true}
+                      onCheckedChange={(value) => {
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = { ...current, enabled: Boolean(value) };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                    />
+                    <span className="text-[11px]">Enabled</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={noteLayout?.overrides[selectedNoteRowId]?.allowNegative ?? true}
+                      onCheckedChange={(value) => {
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = { ...current, allowNegative: Boolean(value) };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                    />
+                    <span className="text-[11px]">Allow negative</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="w-20 text-[11px]">Alt label</Label>
+                    <Input
+                      value={noteLayout?.overrides[selectedNoteRowId]?.labelWhenPartnership || ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = { ...current, labelWhenPartnership: value || undefined };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                      className="h-7 text-xs flex-1"
+                      placeholder="Partnership/LLP label"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={noteLayout?.overrides[selectedNoteRowId]?.useAltLabelForOthers ?? false}
+                      onCheckedChange={(value) => {
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = { ...current, useAltLabelForOthers: Boolean(value) };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                    />
+                    <span className="text-[11px]">Use alt label for non-company</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="w-20 text-[11px]">Alt label</Label>
+                    <Input
+                      value={noteLayout?.overrides[selectedNoteRowId]?.labelWhenOther || ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = { ...current, labelWhenOther: value || undefined };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                      className="h-7 text-xs flex-1"
+                      placeholder="Non-company label"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="w-20 text-[11px]">H3 Map</Label>
+                    <Select
+                      value={noteLayout?.overrides[selectedNoteRowId]?.noteTarget || ''}
+                      onValueChange={(value) => {
+                        updateNoteLayout((layout) => {
+                          const overrides = { ...layout.overrides };
+                          const current = overrides[selectedNoteRowId] || {};
+                          overrides[selectedNoteRowId] = {
+                            ...current,
+                            noteTarget: value === '__none__' ? undefined : value || undefined,
+                          };
+                          return { ...layout, overrides };
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-7 text-xs w-48">
+                        <SelectValue placeholder="Select H3" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {noteH3Order.map((h3) => (
+                          <SelectItem key={h3} value={h3}>
+                            {h3}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {availableNoteH2.length === 0 ? (
@@ -3945,13 +5480,35 @@ export default function FinancialReview() {
                             paddingLeft: `${row.indent * 24}px`,
                           }}
                         >
-                          {row.label}
+                          <div className="flex items-center gap-2">
+                          <span>{row.label || ' '}</span>
+                            {noteEditMode && row.formulaWarning && (
+                              <span className="text-red-600 text-[10px]">!</span>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell
                           className="text-right font-mono"
                           style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}
                         >
-                          {row.formattedAmount}
+                          {noteEditMode && row.rowType === 'INPUT' ? (
+                            <Input
+                              type="number"
+                              value={noteLayout?.overrides[row.id]?.manualValue ?? row.amount}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                updateNoteLayout((layout) => {
+                                  const overrides = { ...layout.overrides };
+                                  const current = overrides[row.id] || {};
+                                  overrides[row.id] = { ...current, manualValue: value === '' ? undefined : Number(value) };
+                                  return { ...layout, overrides };
+                                });
+                              }}
+                              className="h-7 text-xs text-right"
+                            />
+                          ) : (
+                            row.formattedAmount
+                          )}
                         </TableCell>
                       </TableRow>
                     );
@@ -3995,64 +5552,594 @@ export default function FinancialReview() {
 
     return (
       <div className="flex flex-col gap-4">
-        <div className="border rounded-md p-2 overflow-auto">
-          <Table>
-            <TableHeader>
-              <TableRow style={{ height: `${noteTableSettings.rowHeight}px` }}>
-                <TableHead style={{ width: noteTableSettings.particularsWidth, fontSize: `${noteTableSettings.fontSize}px` }}>
-                  Particulars
-                </TableHead>
-                <TableHead className="text-center" style={{ width: 90, fontSize: `${noteTableSettings.fontSize}px` }}>
-                  Note No
-                </TableHead>
-                <TableHead className="text-right" style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}>
-                  Amount
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {summary.sections.map((section) => (
-                <React.Fragment key={section.title}>
-                  <TableRow className="font-semibold" style={{ height: `${noteTableSettings.rowHeight}px` }}>
-                    <TableCell style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
-                      {section.title}
-                    </TableCell>
-                    <TableCell />
-                    <TableCell />
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="text-xs font-semibold">
+            {statementType === 'PL' ? 'Profit & Loss Face' : 'Balance Sheet Face'}
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`face-show-parent-${statementType}`}
+              checked={showParentNoteTotals}
+              onCheckedChange={(value) => setShowParentNoteTotals(Boolean(value))}
+            />
+            <Label htmlFor={`face-show-parent-${statementType}`} className="text-xs">
+              Show parent totals
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`face-edit-notes-${statementType}`}
+              checked={noteEditMode}
+              onCheckedChange={(value) => {
+                const nextValue = Boolean(value);
+                setNoteEditMode(nextValue);
+                if (!nextValue) {
+                  setSelectedFaceRowId(null);
+                }
+              }}
+            />
+            <Label htmlFor={`face-edit-notes-${statementType}`} className="text-xs">
+              Edit notes
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Row Height</Label>
+            <Input
+              type="number"
+              min={18}
+              max={80}
+              value={noteTableSettings.rowHeight}
+              onChange={(e) => setNoteTableSettings(prev => ({
+                ...prev,
+                rowHeight: Math.max(18, Math.min(80, parseInt(e.target.value, 10) || prev.rowHeight)),
+              }))}
+              className="h-8 w-20 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Particulars Width</Label>
+            <Input
+              type="number"
+              min={200}
+              max={900}
+              value={noteTableSettings.particularsWidth}
+              onChange={(e) => setNoteTableSettings(prev => ({
+                ...prev,
+                particularsWidth: Math.max(200, Math.min(900, parseInt(e.target.value, 10) || prev.particularsWidth)),
+              }))}
+              className="h-8 w-24 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Amount Width</Label>
+            <Input
+              type="number"
+              min={120}
+              max={400}
+              value={noteTableSettings.amountWidth}
+              onChange={(e) => setNoteTableSettings(prev => ({
+                ...prev,
+                amountWidth: Math.max(120, Math.min(400, parseInt(e.target.value, 10) || prev.amountWidth)),
+              }))}
+              className="h-8 w-24 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Font Size</Label>
+            <Input
+              type="number"
+              min={10}
+              max={18}
+              value={noteTableSettings.fontSize}
+              onChange={(e) => setNoteTableSettings(prev => ({
+                ...prev,
+                fontSize: Math.max(10, Math.min(18, parseInt(e.target.value, 10) || prev.fontSize)),
+              }))}
+              className="h-8 w-20 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Zoom</Label>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setNotePreviewZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
+            >
+              -
+            </Button>
+            <div className="text-xs w-10 text-center">{Math.round(notePreviewZoom * 100)}%</div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setNotePreviewZoom((prev) => Math.min(1.6, Math.round((prev + 0.1) * 10) / 10))}
+            >
+              +
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setNotePreviewZoom(1)}
+            >
+              Reset
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={handleResetNotePreview}
+            >
+              Reset Preview
+            </Button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
+          <div className="border rounded-md p-2 max-h-[520px] overflow-auto">
+            {noteEditMode && (
+              <div className="flex flex-col gap-2 mb-3">
+                <Input
+                  value={faceNewRowLabel}
+                  onChange={(e) => setFaceNewRowLabel(e.target.value)}
+                  placeholder="New row label"
+                  className="h-7 text-xs"
+                />
+                <Input
+                  value={faceSelectedLabel}
+                  onChange={(e) => handleFaceLabelChange(e.target.value)}
+                  placeholder="Selected row label"
+                  className="h-7 text-xs"
+                  disabled={!selectedFaceRowId}
+                />
+                <div className="flex flex-wrap gap-1">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddFaceRow('top')}>
+                    Add Top
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddFaceRow('above')} disabled={!selectedFaceRowId}>
+                    Add Above
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddFaceRow('below')} disabled={!selectedFaceRowId}>
+                    Add Below
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleAddFaceRow('bottom')}>
+                    Add Bottom
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleMoveFaceRow('up')} disabled={!selectedFaceRowId}>
+                    Move Up
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleMoveFaceRow('down')} disabled={!selectedFaceRowId}>
+                    Move Down
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleFaceSetParentAnchor} disabled={!selectedFaceRowId}>
+                    Set Parent
+                  </Button>
+                  {faceParentAnchorId && (
+                    <span className="text-[10px] text-muted-foreground self-center">
+                      Parent: {resolveFaceRowLabel(faceParentAnchorId) || 'Selected'}
+                    </span>
+                  )}
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleFaceAttachToParent} disabled={!selectedFaceRowId || !faceParentAnchorId}>
+                    Attach to Parent
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={handleFaceClearParent} disabled={!selectedFaceRowId}>
+                    Clear Parent
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceMakeParent(false)} disabled={!selectedFaceRowId}>
+                    Make Child
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceMakeParent(true)} disabled={!selectedFaceRowId}>
+                    Make Parent
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceIndent(-1)} disabled={!selectedFaceRowId}>
+                    Indent -
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceIndent(1)} disabled={!selectedFaceRowId}>
+                    Indent +
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceToggleStyle('bold')} disabled={!selectedFaceRowId}>
+                    Bold
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceToggleStyle('italic')} disabled={!selectedFaceRowId}>
+                    Italic
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceAlign('left')} disabled={!selectedFaceRowId}>
+                    Align Left
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceAlign('center')} disabled={!selectedFaceRowId}>
+                    Align Center
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => handleFaceAlign('right')} disabled={!selectedFaceRowId}>
+                    Align Right
+                  </Button>
+                  <Button size="sm" variant="destructive" className="h-7 text-[11px]" onClick={handleDeleteFaceRow} disabled={!selectedFaceRowId}>
+                    Delete
+                  </Button>
+                  <Button size="sm" variant="default" className="h-7 text-[11px]" onClick={handleSaveNoteEdits}>
+                    Save Layout
+                  </Button>
+                </div>
+                {selectedFaceRowId && (
+                  <div className="border rounded-md p-2 text-[11px] flex flex-col gap-2">
+                    <div className="font-semibold">Row Properties</div>
+                    <div className="text-[10px] text-muted-foreground break-all">
+                      Row ID: <span className="font-mono">{selectedFaceRowId}</span>
+                    </div>
+                    {!selectedFaceDisplayRow?.isManual && (
+                      <div className="text-[10px] text-muted-foreground">
+                        Source: Auto (note total for selected H2)
+                      </div>
+                    )}
+                    {selectedFaceDisplayRow?.noteTarget && (
+                      <div className="text-[10px] text-muted-foreground">
+                        Linked H2: {selectedFaceDisplayRow.noteTarget}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">Row Type</Label>
+                      <Select
+                        value={faceLayout?.overrides[selectedFaceRowId]?.rowType || selectedFaceDisplayRow?.rowType || 'INPUT'}
+                        onValueChange={(value) => {
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, rowType: value as NoteRowOverride['rowType'] };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue placeholder="Row Type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="INPUT">INPUT</SelectItem>
+                          <SelectItem value="CALC">CALC</SelectItem>
+                          <SelectItem value="HEADER">HEADER</SelectItem>
+                          <SelectItem value="SUBTOTAL">SUBTOTAL</SelectItem>
+                          <SelectItem value="TOTAL">TOTAL</SelectItem>
+                          <SelectItem value="CONDITIONAL">CONDITIONAL</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {['CALC', 'SUBTOTAL', 'TOTAL'].includes(faceLayout?.overrides[selectedFaceRowId]?.rowType || selectedFaceDisplayRow?.rowType || '') && (
+                      <div className="flex items-center gap-2">
+                        <Label className="w-20 text-[11px]">Formula</Label>
+                        <Input
+                          value={faceLayout?.overrides[selectedFaceRowId]?.formula || ''}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            updateFaceLayout((layout) => {
+                              const overrides = { ...layout.overrides };
+                              const current = overrides[selectedFaceRowId] || {};
+                              overrides[selectedFaceRowId] = { ...current, formula: value };
+                              return { ...layout, overrides };
+                            });
+                          }}
+                          className="h-7 text-xs flex-1"
+                          placeholder={'SUM(ROW("a"), ROW("b"))'}
+                        />
+                      </div>
+                    )}
+                    {['CALC', 'SUBTOTAL', 'TOTAL'].includes(faceLayout?.overrides[selectedFaceRowId]?.rowType || selectedFaceDisplayRow?.rowType || '') && (
+                      <div className="text-[10px] text-muted-foreground">
+                        Example: DIFF(ROW("face-total:Income"), ROW("face-total:Expenses"))
+                      </div>
+                    )}
+                    {(selectedFaceDisplayRow?.formulaWarning || selectedFaceDisplayRow?.hasCycle) && (
+                      <div className="text-[10px] text-red-600">
+                        {selectedFaceDisplayRow?.hasCycle && <div>Formula cycle detected.</div>}
+                        {selectedFaceDisplayRow?.missingRowRefs && selectedFaceDisplayRow.missingRowRefs.length > 0 && (
+                          <div>Missing rows: {selectedFaceDisplayRow.missingRowRefs.join(', ')}</div>
+                        )}
+                        {selectedFaceDisplayRow?.missingVariableRefs && selectedFaceDisplayRow.missingVariableRefs.length > 0 && (
+                          <div>Missing variables: {selectedFaceDisplayRow.missingVariableRefs.join(', ')}</div>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">Manual</Label>
+                      <Input
+                        type="number"
+                        value={faceLayout?.overrides[selectedFaceRowId]?.manualValue ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, manualValue: value === '' ? undefined : Number(value) };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                        className="h-7 text-xs w-28"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">Visibility</Label>
+                      <Select
+                        value={faceLayout?.overrides[selectedFaceRowId]?.visibility || 'always'}
+                        onValueChange={(value) => {
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, visibility: value as NoteRowOverride['visibility'] };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue placeholder="Visibility" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="always">Always show</SelectItem>
+                          <SelectItem value="nonzero">Show if non-zero</SelectItem>
+                          <SelectItem value="childNonZero">Show if child has value</SelectItem>
+                          <SelectItem value="enabled">Show if enabled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Checkbox
+                        checked={faceLayout?.overrides[selectedFaceRowId]?.enabled ?? true}
+                        onCheckedChange={(value) => {
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, enabled: Boolean(value) };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                      />
+                      <span className="text-[11px]">Enabled</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={faceLayout?.overrides[selectedFaceRowId]?.allowNegative ?? true}
+                        onCheckedChange={(value) => {
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, allowNegative: Boolean(value) };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                      />
+                      <span className="text-[11px]">Allow negative</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">Alt label</Label>
+                      <Input
+                        value={faceLayout?.overrides[selectedFaceRowId]?.labelWhenPartnership || ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, labelWhenPartnership: value || undefined };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                        className="h-7 text-xs flex-1"
+                        placeholder="Partnership/LLP label"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={faceLayout?.overrides[selectedFaceRowId]?.useAltLabelForOthers ?? false}
+                        onCheckedChange={(value) => {
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, useAltLabelForOthers: Boolean(value) };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                      />
+                    <span className="text-[11px]">Use alt label for non-company</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">Alt label</Label>
+                      <Input
+                        value={faceLayout?.overrides[selectedFaceRowId]?.labelWhenOther || ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, labelWhenOther: value || undefined };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                        className="h-7 text-xs flex-1"
+                        placeholder="Non-company label"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">Note No</Label>
+                      <Select
+                        value={faceLayout?.overrides[selectedFaceRowId]?.noteNoMode || 'auto'}
+                        onValueChange={(value) => {
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, noteNoMode: value as NoteRowOverride['noteNoMode'] };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-7 text-xs w-28">
+                          <SelectValue placeholder="Mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="auto">Auto</SelectItem>
+                          <SelectItem value="hide">Hide</SelectItem>
+                          <SelectItem value="custom">Custom</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {faceLayout?.overrides[selectedFaceRowId]?.noteNoMode === 'custom' && (
+                        <Input
+                          type="number"
+                          value={faceLayout?.overrides[selectedFaceRowId]?.noteNoOverride ?? ''}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            updateFaceLayout((layout) => {
+                              const overrides = { ...layout.overrides };
+                              const current = overrides[selectedFaceRowId] || {};
+                              overrides[selectedFaceRowId] = {
+                                ...current,
+                                noteNoOverride: value === '' ? undefined : Number(value),
+                              };
+                              return { ...layout, overrides };
+                            });
+                          }}
+                          className="h-7 text-xs w-20"
+                        />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="w-20 text-[11px]">H2 Map</Label>
+                      <Select
+                        value={faceLayout?.overrides[selectedFaceRowId]?.noteTarget || selectedFaceDisplayRow?.noteTarget || ''}
+                        onValueChange={(value) => {
+                          updateFaceLayout((layout) => {
+                            const overrides = { ...layout.overrides };
+                            const current = overrides[selectedFaceRowId] || {};
+                            overrides[selectedFaceRowId] = { ...current, noteTarget: value || undefined };
+                            return { ...layout, overrides };
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-7 text-xs w-48">
+                          <SelectValue placeholder="Select H2" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(statementType === 'PL' ? faceH2OptionsPL : faceH2OptionsBS).map((h2) => (
+                            <SelectItem key={h2} value={h2}>
+                              {h2}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {noteEditMode ? 'Select a row in the table to edit.' : 'Enable Edit notes to change layout.'}
+            </p>
+          </div>
+          <div className="border rounded-md p-2 max-h-[520px] overflow-auto">
+            <div
+              style={{
+                transform: `scale(${notePreviewZoom})`,
+                transformOrigin: 'top left',
+                width: `${100 / notePreviewZoom}%`,
+              }}
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow style={{ height: `${noteTableSettings.rowHeight}px` }}>
+                    <TableHead style={{ width: noteTableSettings.particularsWidth, fontSize: `${noteTableSettings.fontSize}px` }}>
+                      Particulars
+                    </TableHead>
+                    <TableHead className="text-center" style={{ width: 90, fontSize: `${noteTableSettings.fontSize}px` }}>
+                      Note No
+                    </TableHead>
+                    <TableHead className="text-right" style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}>
+                      Amount
+                    </TableHead>
                   </TableRow>
-                  {section.rows.map((row) => (
-                    <TableRow key={`${section.title}-${row.H2}`} style={{ height: `${noteTableSettings.rowHeight}px` }}>
-                      <TableCell style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
-                        {row.H2}
+                </TableHeader>
+                <TableBody>
+                  {displayFaceRows.map((row) => {
+                    const isSelected = noteEditMode && selectedFaceRowId === row.id;
+                    const alignClass = row.align === 'center'
+                      ? 'text-center'
+                      : row.align === 'right'
+                        ? 'text-right'
+                        : 'text-left';
+                    return (
+                      <TableRow
+                        key={row.id}
+                        className={cn(
+                          isSelected && 'bg-blue-50',
+                          noteEditMode && 'cursor-pointer'
+                        )}
+                        style={{ height: `${noteTableSettings.rowHeight}px` }}
+                        onClick={() => {
+                          if (noteEditMode) {
+                            setSelectedFaceRowId(row.id);
+                          }
+                        }}
+                      >
+                      <TableCell
+                        className={cn(
+                          alignClass,
+                          row.bold && 'font-semibold',
+                          row.italic && 'italic'
+                        )}
+                        style={{
+                          width: noteTableSettings.particularsWidth,
+                          fontSize: `${noteTableSettings.fontSize}px`,
+                          paddingLeft: `${row.indent * 24}px`,
+                        }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span>{row.label || ' '}</span>
+                          {noteEditMode && row.formulaWarning && (
+                            <span className="text-red-600 text-[10px]">!</span>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell className="text-center" style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="h-auto px-0 text-xs"
-                          onClick={() => handleNoteLinkClick(statementType, row.H2)}
-                        >
-                          Note {row.noteNo}
-                        </Button>
-                      </TableCell>
-                      <TableCell className="text-right font-mono" style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
-                        {formatNumber(row.amount)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  <TableRow className="font-semibold border-t" style={{ height: `${noteTableSettings.rowHeight}px` }}>
-                    <TableCell style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
-                      Total {section.title}
-                    </TableCell>
-                    <TableCell />
-                    <TableCell className="text-right font-mono" style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
-                      {formatNumber(section.total)}
-                    </TableCell>
-                  </TableRow>
-                </React.Fragment>
-              ))}
-            </TableBody>
-          </Table>
+                        <TableCell className={cn("text-center", row.bold && 'font-semibold')} style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                          {row.noteNo ? (
+                            noteEditMode ? (
+                              `Note ${row.noteNo}`
+                            ) : (
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="h-auto px-0 text-xs"
+                                onClick={() => {
+                                  if (row.noteTarget) {
+                                    handleNoteLinkClick(statementType, row.noteTarget);
+                                  }
+                                }}
+                              >
+                                Note {row.noteNo}
+                              </Button>
+                            )
+                          ) : null}
+                        </TableCell>
+                        <TableCell className={cn("text-right font-mono", row.bold && 'font-semibold')} style={{ fontSize: `${noteTableSettings.fontSize}px` }}>
+                          {noteEditMode && row.rowType === 'INPUT' ? (
+                            <Input
+                              type="number"
+                              value={faceLayout?.overrides[row.id]?.manualValue ?? row.amount}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                updateFaceLayout((layout) => {
+                                  const overrides = { ...layout.overrides };
+                                  const current = overrides[row.id] || {};
+                                  overrides[row.id] = { ...current, manualValue: value === '' ? undefined : Number(value) };
+                                  return { ...layout, overrides };
+                                });
+                              }}
+                              className="h-7 text-xs text-right"
+                            />
+                          ) : (
+                            row.formattedAmount
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
         </div>
         <div className="flex flex-wrap gap-6 text-xs">
           {statementType === 'BS' ? (
@@ -4272,6 +6359,17 @@ export default function FinancialReview() {
               <DropdownMenuItem onClick={handleSaveNotePreviewDefaults}>
                 <Save className="w-4 h-4 mr-2" />
                 Save Note Preview Defaults
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setNoteNumberStartDraft(String(noteNumberStart));
+                setIsNoteNumberDialogOpen(true);
+              }}>
+                <Settings className="w-4 h-4 mr-2" />
+                Note Number Start
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsVariablesDialogOpen(true)}>
+                <Settings className="w-4 h-4 mr-2" />
+                Statement Variables
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem 
@@ -5328,6 +7426,150 @@ export default function FinancialReview() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsTableSettingsOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Note Number Start Dialog */}
+      <Dialog open={isNoteNumberDialogOpen} onOpenChange={setIsNoteNumberDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Note Number Start</DialogTitle>
+            <DialogDescription>
+              Set the starting note number for Balance Sheet notes. P&amp;L notes will continue after the last BS note.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2 text-xs">
+            <Label className="w-32">Start Number</Label>
+            <Input
+              type="number"
+              min={1}
+              value={noteNumberStartDraft}
+              onChange={(e) => setNoteNumberStartDraft(e.target.value)}
+              className="h-8 w-24 text-xs"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNoteNumberDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveNoteNumberStart}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Statement Variables Dialog */}
+      <Dialog open={isVariablesDialogOpen} onOpenChange={setIsVariablesDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Statement Variables</DialogTitle>
+            <DialogDescription>
+              Define reusable variables for formula rows.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 text-xs">
+            <div className="grid grid-cols-[1fr_110px_120px_80px] gap-2 items-center">
+              <Input
+                value={newVariableName}
+                onChange={(e) => setNewVariableName(e.target.value)}
+                placeholder="variable_name"
+                className="h-8 text-xs"
+              />
+              <Select value={newVariableType} onValueChange={(value) => setNewVariableType(value as 'number' | 'percent' | 'text')}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="number">Number</SelectItem>
+                  <SelectItem value="percent">Percent</SelectItem>
+                  <SelectItem value="text">Text</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                value={newVariableValue}
+                onChange={(e) => setNewVariableValue(e.target.value)}
+                placeholder="Value"
+                className="h-8 text-xs"
+              />
+              <Button
+                size="sm"
+                onClick={() => {
+                  const name = newVariableName.trim();
+                  if (!name) return;
+                  setStatementVariables((prev) => ({
+                    ...prev,
+                    [name]: { type: newVariableType, value: newVariableValue },
+                  }));
+                  setNewVariableName('');
+                  setNewVariableValue('');
+                  setNewVariableType('number');
+                }}
+              >
+                Add
+              </Button>
+            </div>
+            <div className="border rounded-md max-h-64 overflow-auto">
+              {Object.keys(statementVariables).length === 0 ? (
+                <div className="p-3 text-muted-foreground">No variables defined.</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Value</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Object.entries(statementVariables).map(([name, variable]) => (
+                      <TableRow key={name}>
+                        <TableCell>{name}</TableCell>
+                        <TableCell>{variable.type}</TableCell>
+                        <TableCell>
+                          <Input
+                            value={variable.value}
+                            onChange={(e) =>
+                              setStatementVariables((prev) => ({
+                                ...prev,
+                                [name]: { ...prev[name], value: e.target.value },
+                              }))
+                            }
+                            className="h-7 text-xs"
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-7 text-[11px]"
+                            onClick={() => {
+                              setStatementVariables((prev) => {
+                                const next = { ...prev };
+                                delete next[name];
+                                return next;
+                              });
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsVariablesDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveVariables}>
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

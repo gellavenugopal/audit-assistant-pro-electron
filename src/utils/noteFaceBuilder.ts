@@ -126,14 +126,14 @@ export function buildFaceFromNotes(preparedNotes: PreparedNote[], statementType:
     const liabilityTotal = liabilityRows.reduce((sum, note) => sum + note.total, 0);
 
     sections.push({
-      title: 'Assets',
-      rows: assetRows.map((note) => ({ H2: note.H2, noteNo: note.noteNo, amount: note.total, H1: note.H1 })),
-      total: assetTotal,
-    });
-    sections.push({
       title: 'Liabilities',
       rows: liabilityRows.map((note) => ({ H2: note.H2, noteNo: note.noteNo, amount: note.total, H1: note.H1 })),
       total: liabilityTotal,
+    });
+    sections.push({
+      title: 'Assets',
+      rows: assetRows.map((note) => ({ H2: note.H2, noteNo: note.noteNo, amount: note.total, H1: note.H1 })),
+      total: assetTotal,
     });
 
     return {
