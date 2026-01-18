@@ -8,8 +8,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -43,6 +45,9 @@ const emptyDraft = {
   primaryGroupContains: '',
   parentGroupContains: '',
   ledgerNameContains: '',
+  matchLedger: true,
+  matchParent: true,
+  matchPrimary: false,
   h1: '',
   h2: '',
   h3: '',
@@ -83,27 +88,53 @@ export function ClassificationRulesBot({
     return (bsplOptions.h3Options[draft.h1] || {})[draft.h2] || [];
   }, [bsplOptions.h3Options, draft.h1, draft.h2]);
 
-  const buildRuleFromDraft = () => {
+  const splitKeywords = (value?: string) => {
+    return (value || '')
+      .split(/[\n,;]/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  };
+
+  const buildRulesFromDraft = () => {
     if (!draft.h1.trim()) return null;
-    return {
+    const keywords = splitKeywords(draft.ledgerNameContains);
+    const primaryValue = draft.primaryGroupContains?.trim() || '';
+    const parentValue = draft.parentGroupContains?.trim() || '';
+    const baseRule = {
       ...draft,
-      id: editingId || `rule_${Date.now()}`,
-      primaryGroupContains: draft.primaryGroupContains?.trim() || '',
-      parentGroupContains: draft.parentGroupContains?.trim() || '',
-      ledgerNameContains: draft.ledgerNameContains?.trim() || '',
+      primaryGroupContains: primaryValue,
+      parentGroupContains: parentValue,
+      ledgerNameContains: '',
       h1: draft.h1.trim(),
       h2: draft.h2.trim(),
       h3: draft.h3.trim(),
+      matchLedger: Boolean(draft.matchLedger),
+      matchParent: Boolean(draft.matchParent),
+      matchPrimary: Boolean(draft.matchPrimary),
     } as ClassificationRule;
+
+    if (keywords.length === 0) {
+      return [{
+        ...baseRule,
+        id: editingId || `rule_${Date.now()}`,
+        ledgerNameContains: '',
+      }];
+    }
+
+    return keywords.map((keyword, index) => ({
+      ...baseRule,
+      id: `${editingId || `rule_${Date.now()}`}_${index}`,
+      ledgerNameContains: keyword,
+    }));
   };
 
   const handleApply = () => {
-    const rule = buildRuleFromDraft();
-    if (!rule) return;
+    const nextRules = buildRulesFromDraft();
+    if (!nextRules) return;
 
     const nextRows = editingId
-      ? rows.map(item => (item.id === editingId ? rule : item))
-      : [...rows, rule];
+      ? [...rows.filter(item => item.id !== editingId), ...nextRules]
+      : [...rows, ...nextRules];
 
     setRows(nextRows);
     onSave(nextRows);
@@ -123,11 +154,11 @@ export function ClassificationRulesBot({
   };
 
   const handleSave = () => {
-    const rule = buildRuleFromDraft();
-    const nextRows = rule
+    const nextRules = buildRulesFromDraft();
+    const nextRows = nextRules
       ? (editingId
-          ? rows.map(item => (item.id === editingId ? rule : item))
-          : [...rows, rule])
+          ? [...rows.filter(item => item.id !== editingId), ...nextRules]
+          : [...rows, ...nextRules])
       : rows;
     setRows(nextRows);
     onSave(nextRows);
@@ -140,6 +171,9 @@ export function ClassificationRulesBot({
       'Ledger Contains': rule.ledgerNameContains || '',
       'Primary Contains': rule.primaryGroupContains || '',
       'Parent Contains': rule.parentGroupContains || '',
+      'Match Ledger': rule.matchLedger ? 'Yes' : 'No',
+      'Match Parent': rule.matchParent ? 'Yes' : 'No',
+      'Match Primary': rule.matchPrimary ? 'Yes' : 'No',
       H1: rule.h1,
       H2: rule.h2,
       H3: rule.h3,
@@ -165,12 +199,18 @@ export function ClassificationRulesBot({
         const h2 = String(row.H2 || row.h2 || '').trim();
         const h3 = String(row.H3 || row.h3 || '').trim();
         if (!h1) return null;
+        const matchLedger = String(row['Match Ledger'] || row.matchLedger || 'Yes').toLowerCase() === 'yes';
+        const matchParent = String(row['Match Parent'] || row.matchParent || 'Yes').toLowerCase() === 'yes';
+        const matchPrimary = String(row['Match Primary'] || row.matchPrimary || 'No').toLowerCase() === 'yes';
         return {
           id: `rule_${Date.now()}_${index}`,
           scope,
           ledgerNameContains: String(row['Ledger Contains'] || row.ledgerContains || row.ledger || '').trim(),
           primaryGroupContains: String(row['Primary Contains'] || row.primaryContains || row.primary || '').trim(),
           parentGroupContains: String(row['Parent Contains'] || row.parentContains || row.parent || '').trim(),
+          matchLedger,
+          matchParent,
+          matchPrimary,
           h1,
           h2,
           h3,
@@ -212,11 +252,36 @@ export function ClassificationRulesBot({
             </div>
             <div className="space-y-1">
               <Label>Ledger Name Contains</Label>
-              <Input
+              <Textarea
                 value={draft.ledgerNameContains || ''}
                 onChange={(e) => setDraft(prev => ({ ...prev, ledgerNameContains: e.target.value }))}
-                placeholder="e.g. interest, rent"
+                placeholder="One keyword per line (e.g. interest)"
+                className="min-h-[72px]"
               />
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <span>Match in:</span>
+                <label className="flex items-center gap-1">
+                  <Checkbox
+                    checked={Boolean(draft.matchLedger)}
+                    onCheckedChange={(value) => setDraft(prev => ({ ...prev, matchLedger: Boolean(value) }))}
+                  />
+                  Ledger
+                </label>
+                <label className="flex items-center gap-1">
+                  <Checkbox
+                    checked={Boolean(draft.matchParent)}
+                    onCheckedChange={(value) => setDraft(prev => ({ ...prev, matchParent: Boolean(value) }))}
+                  />
+                  Parent
+                </label>
+                <label className="flex items-center gap-1">
+                  <Checkbox
+                    checked={Boolean(draft.matchPrimary)}
+                    onCheckedChange={(value) => setDraft(prev => ({ ...prev, matchPrimary: Boolean(value) }))}
+                  />
+                  Primary
+                </label>
+              </div>
             </div>
           </div>
 
@@ -349,6 +414,19 @@ export function ClassificationRulesBot({
           <span>Saved Rules: {rows.length}</span>
           <div className="flex items-center gap-2">
             {rows.length === 0 && <span>Add a rule above to see it here.</span>}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (rows.length === 0) return;
+                if (!window.confirm('Delete all saved rules? This cannot be undone.')) return;
+                setRows([]);
+                onSave([]);
+              }}
+              disabled={rows.length === 0}
+            >
+              Delete All
+            </Button>
             <Button variant="outline" size="sm" onClick={handleExportRules}>
               Export Rules
             </Button>
@@ -382,6 +460,7 @@ export function ClassificationRulesBot({
                 <TableHead className="w-32">Ledger Contains</TableHead>
                 <TableHead className="w-44">Primary Contains</TableHead>
                 <TableHead className="w-44">Parent Contains</TableHead>
+                <TableHead className="w-24">Match In</TableHead>
                 <TableHead className="w-20">H1</TableHead>
                 <TableHead className="w-28">H2</TableHead>
                 <TableHead className="w-32">H3</TableHead>
@@ -391,7 +470,7 @@ export function ClassificationRulesBot({
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground py-6">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground py-6">
                     No rules defined yet.
                   </TableCell>
                 </TableRow>
@@ -407,6 +486,11 @@ export function ClassificationRulesBot({
                     </TableCell>
                     <TableCell className="truncate" title={rule.parentGroupContains || ''}>
                       {rule.parentGroupContains || '-'}
+                    </TableCell>
+                    <TableCell className="text-[11px] text-muted-foreground">
+                      {[rule.matchLedger ? 'L' : null, rule.matchParent ? 'P' : null, rule.matchPrimary ? 'Pr' : null]
+                        .filter(Boolean)
+                        .join(', ') || '-'}
                     </TableCell>
                     <TableCell className="text-xs">{rule.h1}</TableCell>
                     <TableCell className="text-xs">{rule.h2}</TableCell>
