@@ -26,21 +26,30 @@ export default function Appointment() {
 
   const handleFileUpload = (label: string, fileType: string) => {
     return async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const files = event.target.files;
-      if (files && files.length > 0) {
-        const file = files[0];
-        const fileExtension = file.name.split('.').pop()?.toLowerCase();
-        
-        // Validate file type
-        const validExtensions = ['pdf', 'jpg', 'jpeg', 'doc', 'docx'];
-        if (!fileExtension || !validExtensions.includes(fileExtension)) {
-          toast.error('Invalid file format. Only PDF, JPEG, or DOC/DOCX files are allowed.');
-          return;
-        }
+      const selected = Array.from(event.target.files || []);
+      if (selected.length === 0) return;
 
-        if (!currentEngagement) {
-          toast.error('Please select an engagement before uploading.');
-          return;
+      // Validate file type
+      const validExtensions = ['pdf', 'jpg', 'jpeg', 'doc', 'docx'];
+      const invalidFiles = selected.filter((file) => {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        return !fileExtension || !validExtensions.includes(fileExtension);
+      });
+
+      if (invalidFiles.length) {
+        toast.error('Invalid file format. Only PDF, JPEG, or DOC/DOCX files are allowed.');
+      }
+
+      if (!currentEngagement) {
+        toast.error('Please select an engagement before uploading.');
+        event.target.value = '';
+        return;
+      }
+
+      for (const file of selected) {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        if (!fileExtension || !validExtensions.includes(fileExtension)) {
+          continue;
         }
 
         const uploaded = await uploadFile(file, {
@@ -51,10 +60,10 @@ export default function Appointment() {
         if (uploaded) {
           toast.success(`${label} uploaded successfully.`);
         }
-        
-        // Reset input
-        event.target.value = '';
       }
+      
+      // Reset input
+      event.target.value = '';
     };
   };
 
@@ -64,19 +73,19 @@ export default function Appointment() {
 
   const handleAppointmentLetterUpload = () => {
     return async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const selected = event.target.files;
-      if (!selected || selected.length === 0) {
+      const selected = Array.from(event.target.files || []);
+      if (selected.length === 0) {
         return;
       }
 
-      const file = selected[0];
-      const fileExtension = file.name.split('.').pop()?.toLowerCase();
       const validExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
+      const invalidFiles = selected.filter((file) => {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        return !fileExtension || !validExtensions.includes(fileExtension);
+      });
 
-      if (!fileExtension || !validExtensions.includes(fileExtension)) {
+      if (invalidFiles.length) {
         toast.error('Invalid file format. Only PDF, JPG, JPEG, or PNG files are allowed.');
-        event.target.value = '';
-        return;
       }
 
       if (!currentEngagement) {
@@ -85,10 +94,17 @@ export default function Appointment() {
         return;
       }
 
-      await uploadFile(file, {
-        name: file.name,
-        file_type: 'appointment_letter',
-      });
+      for (const file of selected) {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        if (!fileExtension || !validExtensions.includes(fileExtension)) {
+          continue;
+        }
+
+        await uploadFile(file, {
+          name: file.name,
+          file_type: 'appointment_letter',
+        });
+      }
 
       event.target.value = '';
     };
@@ -233,6 +249,7 @@ export default function Appointment() {
                   ref={appointmentLetterInputRef}
                   type="file"
                   accept=".pdf,.jpg,.jpeg,.png"
+                  multiple
                   onChange={handleAppointmentLetterUpload()}
                   className="hidden"
                 />
@@ -265,6 +282,7 @@ export default function Appointment() {
                     ref={adt1InputRef}
                     type="file"
                     accept=".pdf,.jpg,.jpeg,.doc,.docx"
+                    multiple
                     onChange={handleFileUpload('ADT-1', 'adt1')}
                     className="hidden"
                   />
@@ -272,6 +290,7 @@ export default function Appointment() {
                     ref={challanInputRef}
                     type="file"
                     accept=".pdf,.jpg,.jpeg,.doc,.docx"
+                    multiple
                     onChange={handleFileUpload('Challan', 'challan')}
                     className="hidden"
                   />

@@ -708,19 +708,20 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
 
   const handleCommunicationUpload = () => {
     return async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const files = event.target.files;
-      if (!files || files.length === 0) {
+      const files = Array.from(event.target.files || []);
+      if (files.length === 0) {
         return;
       }
 
-      const file = files[0];
-      const fileExtension = file.name.split('.').pop()?.toLowerCase();
       const validExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
+      const invalidFiles = files.filter((item) => {
+        const fileExtension = item.name.split('.').pop()?.toLowerCase();
+        return !fileExtension || !validExtensions.includes(fileExtension);
+      });
 
-      if (!fileExtension || !validExtensions.includes(fileExtension)) {
+      if (invalidFiles.length) {
         toast.error('Invalid file format. Only PDF, JPG, JPEG, or PNG files are allowed.');
         event.target.value = '';
-        return;
       }
 
       if (!currentEngagement) {
@@ -729,10 +730,17 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
         return;
       }
 
-      await uploadEvidenceFile(file, {
-        name: file.name,
-        file_type: COMMUNICATION_FILE_TYPE,
-      });
+      for (const file of files) {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        if (!fileExtension || !validExtensions.includes(fileExtension)) {
+          continue;
+        }
+
+        await uploadEvidenceFile(file, {
+          name: file.name,
+          file_type: COMMUNICATION_FILE_TYPE,
+        });
+      }
 
       event.target.value = '';
     };
@@ -824,6 +832,7 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
             ref={communicationInputRef}
             type="file"
             accept=".pdf,.jpg,.jpeg,.png"
+            multiple
             onChange={handleCommunicationUpload()}
             className="hidden"
           />

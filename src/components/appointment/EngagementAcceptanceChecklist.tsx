@@ -4,11 +4,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useEvidenceFiles, EvidenceFile } from '@/hooks/useEvidenceFiles';
+import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { Check, ClipboardCheck, Eye, FileDown, Pencil, Trash2, UploadCloud, X } from 'lucide-react';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
@@ -32,7 +34,7 @@ const CHECKLIST_CRITERIA = [
 ];
 
 const RESPONSE_OPTIONS = ['Yes', 'No', 'NA'];
-const CHECKLIST_VERSION = 2;
+const CHECKLIST_VERSION = 3;
 
 type ChecklistItem = {
   id: string;
@@ -42,13 +44,18 @@ type ChecklistItem = {
   isCustom: boolean;
 };
 
+type DecisionOutcome = 'accept' | 'reject' | '';
+
 type ChecklistFormState = {
   clientName: string;
   engagementType: string;
   engagementPeriod: string;
+  preparedBy: string;
+  reviewedBy: string;
   items: ChecklistItem[];
-  decision: string;
-  remarks: string;
+  decision: DecisionOutcome;
+  acceptRemarks: string;
+  rejectRemarks: string;
 };
 
 const getEngagementTypeLabel = (type?: string) => {
@@ -67,19 +74,10 @@ const getEngagementTypeLabel = (type?: string) => {
 };
 
 const buildEngagementPeriod = (financialYear?: string) => {
-  if (!financialYear) return 'for the year ended March 31, XXXX';
-  const match = financialYear.match(/(\\d{4})\\D+(\\d{2,4})/);
-  if (!match) return `for the year ended March 31, ${financialYear}`;
-  const startYear = Number(match[1]);
-  const endPart = match[2];
-  let endYear = Number(endPart);
-  if (endPart.length === 2) {
-    endYear = Math.floor(startYear / 100) * 100 + endYear;
-  }
-  if (!Number.isFinite(endYear) || endYear < 1900) {
-    return `for the year ended March 31, ${financialYear}`;
-  }
-  return `for the year ended March 31, ${endYear}`;
+  if (!financialYear) return 'for the financial year ____';
+  const trimmed = financialYear.trim();
+  if (!trimmed) return 'for the financial year ____';
+  return `for the financial year ${trimmed}`;
 };
 
 const buildDefaultItems = () =>
@@ -91,22 +89,41 @@ const buildDefaultItems = () =>
     isCustom: false,
   }));
 
+const normalizeDecision = (value?: string): DecisionOutcome => {
+  if (!value) return '';
+  const normalized = value.toLowerCase();
+  if (normalized.includes('reject') || normalized.includes('not accept')) return 'reject';
+  if (normalized.includes('accept')) return 'accept';
+  return '';
+};
+
+const getDecisionLabel = (value: DecisionOutcome) => {
+  if (value === 'accept') return 'Accept';
+  if (value === 'reject') return 'Reject';
+  return '';
+};
+
 export function EngagementAcceptanceChecklist() {
   const { currentEngagement } = useEngagement();
-  const { files, uploadFile, downloadFile, getFileUrl } = useEvidenceFiles(currentEngagement?.id);
+  const { files, uploadFile, deleteFile, getFileUrl } = useEvidenceFiles(currentEngagement?.id);
+  const { members: teamMembers } = useTeamMembers(currentEngagement?.id);
   const signedChecklistInputRef = useRef<HTMLInputElement>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [newCriteria, setNewCriteria] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
+  const [isEditing, setIsEditing] = useState(true);
 
   const defaultState = useMemo<ChecklistFormState>(() => ({
     clientName: currentEngagement?.client_name || '',
     engagementType: getEngagementTypeLabel(currentEngagement?.engagement_type),
     engagementPeriod: buildEngagementPeriod(currentEngagement?.financial_year),
+    preparedBy: '',
+    reviewedBy: '',
     items: buildDefaultItems(),
     decision: '',
-    remarks: '',
+    acceptRemarks: '',
+    rejectRemarks: '',
   }), [currentEngagement?.client_name, currentEngagement?.engagement_type, currentEngagement?.financial_year]);
 
   const [formState, setFormState] = useState<ChecklistFormState>(defaultState);
@@ -116,12 +133,32 @@ export function EngagementAcceptanceChecklist() {
     : null;
 
   useEffect(() => {
+    setIsEditing(true);
+    setEditingId(null);
+    setEditingValue('');
+  }, [currentEngagement?.id]);
+
+  useEffect(() => {
     if (!storageKey) return;
     const stored = localStorage.getItem(storageKey);
     if (stored) {
       try {
         const parsed = JSON.parse(stored) as ChecklistFormState & { version?: number };
         const parsedVersion = typeof parsed.version === 'number' ? parsed.version : 1;
+        const normalizedDecision = normalizeDecision(parsed.decision);
+        const legacyRemarks = typeof (parsed as any).remarks === 'string' ? (parsed as any).remarks : '';
+        const acceptRemarks =
+          typeof parsed.acceptRemarks === 'string'
+            ? parsed.acceptRemarks
+            : normalizedDecision === 'accept'
+              ? legacyRemarks
+              : '';
+        const rejectRemarks =
+          typeof parsed.rejectRemarks === 'string'
+            ? parsed.rejectRemarks
+            : normalizedDecision === 'reject'
+              ? legacyRemarks
+              : legacyRemarks;
         let items = Array.isArray(parsed.items) && parsed.items.length > 0
           ? parsed.items.map((item, idx) => ({
               id: item.id || `custom-${idx + 1}`,
@@ -157,11 +194,20 @@ export function EngagementAcceptanceChecklist() {
           ];
         }
 
-        setFormState({
+        const resolvedState = {
           ...defaultState,
           ...parsed,
+          decision:
+            parsed.decision === 'accept' || parsed.decision === 'reject'
+              ? parsed.decision
+              : normalizedDecision,
+          acceptRemarks,
+          rejectRemarks,
+          preparedBy: parsed.preparedBy || '',
+          reviewedBy: parsed.reviewedBy || '',
           items,
-        });
+        };
+        setFormState(resolvedState);
         return;
       } catch (error) {
         console.warn('Unable to parse saved checklist data', error);
@@ -170,10 +216,10 @@ export function EngagementAcceptanceChecklist() {
     setFormState(defaultState);
   }, [defaultState, storageKey]);
 
-  useEffect(() => {
+  const persistChecklist = (value: ChecklistFormState) => {
     if (!storageKey) return;
-    localStorage.setItem(storageKey, JSON.stringify({ version: CHECKLIST_VERSION, ...formState }));
-  }, [formState, storageKey]);
+    localStorage.setItem(storageKey, JSON.stringify({ version: CHECKLIST_VERSION, ...value }));
+  };
 
   const signedChecklistFiles = files.filter(
     (file) => file.file_type === 'engagement_acceptance_checklist_signed'
@@ -207,13 +253,13 @@ export function EngagementAcceptanceChecklist() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => openFilePreview(item)}>
+              <Button size="sm" variant="outline" onClick={() => openFilePreview(item)}>
                 <Eye className="h-4 w-4 mr-2" />
-                Preview
+                View
               </Button>
-              <Button size="sm" onClick={() => downloadFile(item)}>
-                <FileDown className="h-4 w-4 mr-2" />
-                Download
+              <Button size="sm" variant="destructive" onClick={() => deleteFile(item)}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
               </Button>
             </div>
           </div>
@@ -223,6 +269,7 @@ export function EngagementAcceptanceChecklist() {
   };
 
   const updateResponse = (index: number, value: string) => {
+    if (!isEditing) return;
     setFormState((prev) => {
       const next = [...prev.items];
       next[index] = { ...next[index], response: value };
@@ -231,6 +278,7 @@ export function EngagementAcceptanceChecklist() {
   };
 
   const updateRemarks = (index: number, value: string) => {
+    if (!isEditing) return;
     setFormState((prev) => {
       const next = [...prev.items];
       next[index] = { ...next[index], remarks: value };
@@ -239,6 +287,7 @@ export function EngagementAcceptanceChecklist() {
   };
 
   const handleAddCriteria = () => {
+    if (!isEditing) return;
     const trimmed = newCriteria.trim();
     if (!trimmed) return;
     setFormState((prev) => ({
@@ -258,6 +307,7 @@ export function EngagementAcceptanceChecklist() {
   };
 
   const startEditCriteria = (item: ChecklistItem) => {
+    if (!isEditing || !item.isCustom) return;
     setEditingId(item.id);
     setEditingValue(item.criteria);
   };
@@ -268,6 +318,7 @@ export function EngagementAcceptanceChecklist() {
   };
 
   const saveEditCriteria = (index: number) => {
+    if (!isEditing) return;
     const trimmed = editingValue.trim();
     if (!trimmed) return;
     setFormState((prev) => {
@@ -279,6 +330,7 @@ export function EngagementAcceptanceChecklist() {
   };
 
   const deleteCriteria = (id: string) => {
+    if (!isEditing) return;
     setFormState((prev) => ({
       ...prev,
       items: prev.items.filter((item) => item.id !== id),
@@ -288,26 +340,69 @@ export function EngagementAcceptanceChecklist() {
     }
   };
 
-  const handleSignedChecklistUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = event.target.files;
-    if (!selected || selected.length === 0) return;
-
-    const file = selected[0];
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    const validExtensions = ['pdf', 'jpg', 'jpeg', 'doc', 'docx'];
-    if (!extension || !validExtensions.includes(extension)) {
-      toast.error('Invalid file format. Only PDF, JPEG, or DOC/DOCX files are allowed.');
-      event.target.value = '';
+  const handleSaveChecklist = () => {
+    if (!storageKey) {
+      toast.error('Select an engagement before saving.');
       return;
     }
+    const snapshot: ChecklistFormState = {
+      ...formState,
+      items: formState.items.map((item) => ({ ...item })),
+    };
+    persistChecklist(snapshot);
+    toast.success('Checklist saved');
+    setIsEditing(false);
+    cancelEditCriteria();
+  };
 
-    const uploaded = await uploadFile(file, {
-      name: file.name,
-      file_type: 'engagement_acceptance_checklist_signed',
+  const handleEditChecklist = () => {
+    setIsEditing(true);
+  };
+
+  const handleResetChecklist = () => {
+    setFormState((prev) => ({
+      ...prev,
+      clientName: defaultState.clientName,
+      engagementType: defaultState.engagementType,
+      engagementPeriod: defaultState.engagementPeriod,
+      preparedBy: '',
+      reviewedBy: '',
+      decision: '',
+      acceptRemarks: '',
+      rejectRemarks: '',
+      items: prev.items.map((item) => ({
+        ...item,
+        response: '',
+        remarks: '',
+      })),
+    }));
+    setNewCriteria('');
+    cancelEditCriteria();
+  };
+
+  const handleSignedChecklistUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files || []);
+    if (selected.length === 0) return;
+
+    const validExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
+    const invalidFiles = selected.filter((file) => {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      return !extension || !validExtensions.includes(extension);
     });
 
-    if (uploaded) {
-      toast.success('Signed checklist uploaded successfully.');
+    if (invalidFiles.length) {
+      toast.error('Invalid file format. Only PDF, JPG, JPEG, or PNG files are allowed.');
+    }
+
+    for (const file of selected) {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      if (!extension || !validExtensions.includes(extension)) {
+        continue;
+      }
+      await uploadFile(file, {
+        name: file.name,
+        file_type: 'engagement_acceptance_checklist_signed',
+      });
     }
 
     event.target.value = '';
@@ -319,6 +414,8 @@ export function EngagementAcceptanceChecklist() {
       ['Client Name', formState.clientName],
       ['Engagement Type', formState.engagementType],
       ['Eng Period', formState.engagementPeriod],
+      ['Prepared By', formState.preparedBy],
+      ['Reviewed By', formState.reviewedBy],
     ];
 
     const makeCell = (text: string, bold = false) =>
@@ -361,6 +458,20 @@ export function EngagementAcceptanceChecklist() {
       ],
     });
 
+    const decisionLabel = getDecisionLabel(formState.decision);
+    const remarksLabel =
+      formState.decision === 'accept'
+        ? 'Remarks for accepting'
+        : formState.decision === 'reject'
+          ? 'Remarks for not accepting'
+          : '';
+    const remarksValue =
+      formState.decision === 'accept'
+        ? formState.acceptRemarks
+        : formState.decision === 'reject'
+          ? formState.rejectRemarks
+          : '';
+
     const doc = new Document({
       sections: [
         {
@@ -370,8 +481,6 @@ export function EngagementAcceptanceChecklist() {
             new Paragraph({
               children: [new TextRun({ text: 'Client/Engagement Acceptance Decision Checklist', bold: true })],
             }),
-            new Paragraph(''),
-            riskTable,
             new Paragraph(''),
             new Paragraph({
               children: [
@@ -383,12 +492,12 @@ export function EngagementAcceptanceChecklist() {
               ],
             }),
             new Paragraph(''),
-            new Paragraph(`Decision - ${formState.decision || ''}`),
-            new Paragraph(
-              'You may mention here that the assignment has been accepted or rejected based on your judgement'
-            ),
-            new Paragraph(`(Remarks for not accepting) - ${formState.remarks || ''}`),
-            new Paragraph('If not accepting, please mention a brief reason of not accepting the assignment.'),
+            riskTable,
+            new Paragraph(''),
+            new Paragraph(`Decision - ${decisionLabel}`),
+            ...(remarksLabel
+              ? [new Paragraph(`${remarksLabel} - ${remarksValue || ''}`)]
+              : []),
           ],
         },
       ],
@@ -425,6 +534,8 @@ export function EngagementAcceptanceChecklist() {
       ['Client Name', formState.clientName],
       ['Engagement Type', formState.engagementType],
       ['Eng Period', formState.engagementPeriod],
+      ['Prepared By', formState.preparedBy],
+      ['Reviewed By', formState.reviewedBy],
     ];
 
     autoTable(doc, {
@@ -437,9 +548,13 @@ export function EngagementAcceptanceChecklist() {
     const tableEndY = (doc as any).lastAutoTable?.finalY || 40;
     doc.setFontSize(11);
     doc.text('Client/Engagement Acceptance Decision Checklist', margin, tableEndY + 24);
+    let currentY = writeWrappedText(
+      'Select Yes/No/NA as applicable and decide on the apparent prima facie risk of the engagement to decide whether to accept/continue the engagement or not.',
+      tableEndY + 36
+    );
 
     autoTable(doc, {
-      startY: tableEndY + 32,
+      startY: currentY + 8,
       head: [['Does the Firm/ engagement team have reasons to have concerns about', 'Response', 'Remarks']],
       body: formState.items.map((item, idx) => [
         `${idx + 1}. ${item.criteria}`,
@@ -451,18 +566,25 @@ export function EngagementAcceptanceChecklist() {
       headStyles: { fillColor: [230, 230, 230] },
     });
 
-    let currentY = (doc as any).lastAutoTable?.finalY || tableEndY + 32;
-    currentY = writeWrappedText(
-      'Select Yes/No/NA as applicable and decide on the apparent prima facie risk of the engagement to decide whether to accept/continue the engagement or not.',
-      currentY + 18
-    );
-    currentY = writeWrappedText(`Decision - ${formState.decision || ''}`, currentY);
-    currentY = writeWrappedText(
-      'You may mention here that the assignment has been accepted or rejected based on your judgement',
-      currentY
-    );
-    currentY = writeWrappedText(`(Remarks for not accepting) - ${formState.remarks || ''}`, currentY);
-    writeWrappedText('If not accepting, please mention a brief reason of not accepting the assignment.', currentY);
+    currentY = (doc as any).lastAutoTable?.finalY || currentY + 32;
+    const decisionLabel = getDecisionLabel(formState.decision);
+    const remarksLabel =
+      formState.decision === 'accept'
+        ? 'Remarks for accepting'
+        : formState.decision === 'reject'
+          ? 'Remarks for not accepting'
+          : '';
+    const remarksValue =
+      formState.decision === 'accept'
+        ? formState.acceptRemarks
+        : formState.decision === 'reject'
+          ? formState.rejectRemarks
+          : '';
+
+    currentY = writeWrappedText(`Decision - ${decisionLabel}`, currentY + 18);
+    if (remarksLabel) {
+      currentY = writeWrappedText(`${remarksLabel} - ${remarksValue || ''}`, currentY);
+    }
 
     const clientName = formState.clientName || currentEngagement?.client_name || 'Client';
     const financialYear = currentEngagement?.financial_year || 'FY';
@@ -491,10 +613,22 @@ export function EngagementAcceptanceChecklist() {
             <td className="border px-2 py-1 font-semibold">Eng Period</td>
             <td className="border px-2 py-1">{formState.engagementPeriod}</td>
           </tr>
+          <tr>
+            <td className="border px-2 py-1 font-semibold">Prepared By</td>
+            <td className="border px-2 py-1">{formState.preparedBy}</td>
+          </tr>
+          <tr>
+            <td className="border px-2 py-1 font-semibold">Reviewed By</td>
+            <td className="border px-2 py-1">{formState.reviewedBy}</td>
+          </tr>
         </tbody>
       </table>
 
       <p className="font-semibold">Client/Engagement Acceptance Decision Checklist</p>
+
+      <p className="font-semibold">
+        Select Yes/No/NA as applicable and decide on the apparent prima facie risk of the engagement to decide whether to accept/continue the engagement or not.
+      </p>
 
       <table className="w-full border-collapse table-auto">
         <thead>
@@ -519,13 +653,13 @@ export function EngagementAcceptanceChecklist() {
         </tbody>
       </table>
 
-      <p className="font-semibold">
-        Select Yes/No/NA as applicable and decide on the apparent prima facie risk of the engagement to decide whether to accept/continue the engagement or not.
-      </p>
-      <p>Decision - {formState.decision}</p>
-      <p>You may mention here that the assignment has been accepted or rejected based on your judgement</p>
-      <p>(Remarks for not accepting) - {formState.remarks}</p>
-      <p>If not accepting, please mention a brief reason of not accepting the assignment.</p>
+      <p>Decision - {getDecisionLabel(formState.decision)}</p>
+      {formState.decision === 'accept' && (
+        <p>Remarks for accepting - {formState.acceptRemarks}</p>
+      )}
+      {formState.decision === 'reject' && (
+        <p>Remarks for not accepting - {formState.rejectRemarks}</p>
+      )}
     </div>
   );
 
@@ -546,13 +680,14 @@ export function EngagementAcceptanceChecklist() {
             <input
               ref={signedChecklistInputRef}
               type="file"
-              accept=".pdf,.jpg,.jpeg,.doc,.docx"
+              accept=".pdf,.jpg,.jpeg,.png"
+              multiple
               onChange={handleSignedChecklistUpload}
               className="hidden"
             />
             <Button size="sm" onClick={() => signedChecklistInputRef.current?.click()}>
               <UploadCloud className="h-4 w-4 mr-2" />
-              Upload signed checklist
+              Upload signed declaration
             </Button>
             <Dialog open={showPreview} onOpenChange={setShowPreview}>
               <DialogTrigger asChild>
@@ -583,7 +718,10 @@ export function EngagementAcceptanceChecklist() {
       </CardHeader>
       <CardContent className="space-y-6">
         <div>
-          <Label className="text-sm font-semibold">Signed checklist uploads</Label>
+          <Label className="text-sm font-semibold">Signed declaration uploads</Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Supported formats: PDF (.pdf), JPG/JPEG (.jpg, .jpeg), PNG (.png)
+          </p>
           <div className="mt-2">
             {renderFileList(signedChecklistFiles)}
           </div>
@@ -597,6 +735,7 @@ export function EngagementAcceptanceChecklist() {
             <Input
               value={formState.clientName}
               onChange={(e) => setFormState((prev) => ({ ...prev, clientName: e.target.value }))}
+              disabled={!isEditing}
             />
           </div>
           <div className="space-y-2">
@@ -604,6 +743,7 @@ export function EngagementAcceptanceChecklist() {
             <Input
               value={formState.engagementType}
               onChange={(e) => setFormState((prev) => ({ ...prev, engagementType: e.target.value }))}
+              disabled={!isEditing}
             />
           </div>
           <div className="space-y-2 md:col-span-2">
@@ -611,6 +751,7 @@ export function EngagementAcceptanceChecklist() {
             <Input
               value={formState.engagementPeriod}
               onChange={(e) => setFormState((prev) => ({ ...prev, engagementPeriod: e.target.value }))}
+              disabled={!isEditing}
             />
           </div>
         </div>
@@ -618,6 +759,9 @@ export function EngagementAcceptanceChecklist() {
         <Separator />
 
         <div className="space-y-3">
+          <p className="text-sm font-semibold">
+            Select Yes/No/NA as applicable and decide on the apparent prima facie risk of the engagement to decide whether to accept/continue the engagement or not.
+          </p>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm table-auto">
               <thead>
@@ -634,7 +778,7 @@ export function EngagementAcceptanceChecklist() {
                 {formState.items.map((item, idx) => (
                   <tr key={item.id}>
                     <td className="border px-3 py-2 align-top whitespace-normal break-words">
-                      {editingId === item.id ? (
+                      {editingId === item.id && item.isCustom && isEditing ? (
                         <Input
                           value={editingValue}
                           onChange={(e) => setEditingValue(e.target.value)}
@@ -647,6 +791,7 @@ export function EngagementAcceptanceChecklist() {
                       <Select
                         value={item.response || ''}
                         onValueChange={(value) => updateResponse(idx, value)}
+                        disabled={!isEditing}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select" />
@@ -665,11 +810,54 @@ export function EngagementAcceptanceChecklist() {
                         value={item.remarks}
                         onChange={(e) => updateRemarks(idx, e.target.value)}
                         placeholder="Remarks"
+                        disabled={!isEditing}
                       />
                     </td>
                     <td className="border px-3 py-2">
                       <div className="flex items-center gap-2">
-                        {editingId === item.id ? (
+                        {!item.isCustom ? (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-50"
+                              disabled
+                              title="Fixed item"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-50"
+                              disabled
+                              title="Fixed item"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : !isEditing ? (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-50"
+                              disabled
+                              title="Editing disabled"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-50"
+                              disabled
+                              title="Editing disabled"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : editingId === item.id ? (
                           <>
                             <Button
                               variant="ghost"
@@ -719,17 +907,15 @@ export function EngagementAcceptanceChecklist() {
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Select Yes/No/NA as applicable and decide on the apparent prima facie risk of the engagement to decide whether to accept/continue the engagement or not.
-          </p>
           <div className="flex flex-wrap gap-2 items-center">
             <Input
               value={newCriteria}
               onChange={(e) => setNewCriteria(e.target.value)}
               placeholder="Add new checklist item"
               className="max-w-md"
+              disabled={!isEditing}
             />
-            <Button size="sm" onClick={handleAddCriteria}>
+            <Button size="sm" onClick={handleAddCriteria} disabled={!isEditing}>
               Add line item
             </Button>
           </div>
@@ -740,21 +926,121 @@ export function EngagementAcceptanceChecklist() {
         <div className="space-y-3">
           <div className="space-y-2">
             <Label>Decision</Label>
-            <Textarea
-              rows={3}
+            <RadioGroup
               value={formState.decision}
-              onChange={(e) => setFormState((prev) => ({ ...prev, decision: e.target.value }))}
-              placeholder="Mention whether the assignment has been accepted or rejected."
-            />
+              onValueChange={(value) =>
+                setFormState((prev) => ({ ...prev, decision: value as DecisionOutcome }))
+              }
+              className="flex flex-wrap gap-4"
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="decision-accept" value="accept" disabled={!isEditing} />
+                <Label htmlFor="decision-accept" className="font-normal">
+                  Accept
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="decision-reject" value="reject" disabled={!isEditing} />
+                <Label htmlFor="decision-reject" className="font-normal">
+                  Reject
+                </Label>
+              </div>
+            </RadioGroup>
           </div>
-          <div className="space-y-2">
-            <Label>Remarks for not accepting</Label>
-            <Textarea
-              rows={3}
-              value={formState.remarks}
-              onChange={(e) => setFormState((prev) => ({ ...prev, remarks: e.target.value }))}
-              placeholder="Provide brief reasons if not accepting."
-            />
+          {formState.decision === 'accept' && (
+            <div className="space-y-2">
+              <Label>Remarks for accepting</Label>
+              <Textarea
+                rows={3}
+                value={formState.acceptRemarks}
+                onChange={(e) => setFormState((prev) => ({ ...prev, acceptRemarks: e.target.value }))}
+                placeholder="Mention brief reasons for accepting the engagement."
+                disabled={!isEditing}
+              />
+            </div>
+          )}
+          {formState.decision === 'reject' && (
+            <div className="space-y-2">
+              <Label>Remarks for not accepting</Label>
+              <Textarea
+                rows={3}
+                value={formState.rejectRemarks}
+                onChange={(e) => setFormState((prev) => ({ ...prev, rejectRemarks: e.target.value }))}
+                placeholder="If not accepting, please mention a brief reason of not accepting the assignment."
+                disabled={!isEditing}
+              />
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        <div className="space-y-3">
+          <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+            <div className="space-y-2">
+              <Label>Prepared by</Label>
+              <Select
+                value={formState.preparedBy}
+                onValueChange={(value) => setFormState((prev) => ({ ...prev, preparedBy: value }))}
+                disabled={!isEditing}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select team member" />
+                </SelectTrigger>
+                <SelectContent>
+                  {teamMembers.length === 0 && (
+                    <SelectItem value="__none" disabled>
+                      No team members assigned
+                    </SelectItem>
+                  )}
+                  {teamMembers.map((member) => (
+                    <SelectItem key={member.user_id} value={member.full_name}>
+                      {member.full_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Reviewed by</Label>
+              <Select
+                value={formState.reviewedBy}
+                onValueChange={(value) => setFormState((prev) => ({ ...prev, reviewedBy: value }))}
+                disabled={!isEditing}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select team member" />
+                </SelectTrigger>
+                <SelectContent>
+                  {teamMembers.length === 0 && (
+                    <SelectItem value="__none" disabled>
+                      No team members assigned
+                    </SelectItem>
+                  )}
+                  {teamMembers.map((member) => (
+                    <SelectItem key={member.user_id} value={member.full_name}>
+                      {member.full_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              {isEditing ? (
+                <>
+                  <Button size="sm" variant="outline" onClick={handleSaveChecklist}>
+                    Save
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={handleResetChecklist}>
+                    Reset
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" variant="outline" onClick={handleEditChecklist}>
+                  Edit
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </CardContent>
