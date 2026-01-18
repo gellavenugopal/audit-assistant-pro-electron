@@ -10,6 +10,7 @@ interface Engagement {
   financial_year: string;
   engagement_type: string;
   status: string;
+  partner_id: string | null;
   materiality_amount: number | null;
   performance_materiality: number | null;
 }
@@ -43,7 +44,7 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase
         .from('engagements')
-        .select('id, name, client_id, client_name, financial_year, engagement_type, status, materiality_amount, performance_materiality')
+        .select('id, name, client_id, client_name, financial_year, engagement_type, status, partner_id, materiality_amount, performance_materiality')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -74,6 +75,16 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!currentEngagement || engagements.length === 0) return;
+    const refreshed = engagements.find((item) => item.id === currentEngagement.id);
+    if (!refreshed) return;
+    if (refreshed.partner_id !== currentEngagement.partner_id) {
+      setCurrentEngagementState(refreshed);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(refreshed));
+    }
+  }, [engagements, currentEngagement]);
 
   const setCurrentEngagement = (engagement: Engagement | null) => {
     setCurrentEngagementState(engagement);

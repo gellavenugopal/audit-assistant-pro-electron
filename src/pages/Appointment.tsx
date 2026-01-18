@@ -12,11 +12,13 @@ import { EngagementAcceptanceChecklist } from '@/components/appointment/Engageme
 import { ConfidentialityDeclaration } from '@/components/appointment/ConfidentialityDeclaration';
 import { IndependenceDeclaration } from '@/components/appointment/IndependenceDeclaration';
 import { useEvidenceFiles, EvidenceFile } from '@/hooks/useEvidenceFiles';
+import { PreviousAuditorCommunication } from '@/components/appointment/PreviousAuditorCommunication';
 
 export default function Appointment() {
   const { currentEngagement } = useEngagement();
   const navigate = useNavigate();
   const [showLettersPage, setShowLettersPage] = useState(false);
+  const [showPrevAuditorCommunication, setShowPrevAuditorCommunication] = useState(false);
   const appointmentLetterInputRef = useRef<HTMLInputElement>(null);
   const adt1InputRef = useRef<HTMLInputElement>(null);
   const challanInputRef = useRef<HTMLInputElement>(null);
@@ -154,21 +156,17 @@ export default function Appointment() {
         </TabsContent>
 
         <TabsContent value="appointment" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileSignature className="h-5 w-5" />
-                  Communication with Previous Auditor
-                </CardTitle>
-                <CardDescription>Document communication with the previous auditor.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">Module will be available soon.</p>
-              </CardContent>
-            </Card>
+          <div
+            className={
+              showPrevAuditorCommunication
+                ? 'grid gap-4'
+                : 'grid gap-4 md:grid-cols-2 xl:grid-cols-3'
+            }
+          >
+            <PreviousAuditorCommunication onOpenChange={setShowPrevAuditorCommunication} />
 
-            <Card>
+            {!showPrevAuditorCommunication && (
+              <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <FileSignature className="h-5 w-5" />
@@ -196,53 +194,56 @@ export default function Appointment() {
                 {renderFileList(appointmentFiles)}
               </CardContent>
             </Card>
+            )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ClipboardCheck className="h-5 w-5" />
-                  ADT-1 & Challan
-                </CardTitle>
-                <CardDescription>Capture ADT-1 filing and challan proof.</CardDescription>
-                <p className="text-xs text-muted-foreground">Applicable for Companies only.</p>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <input
-                  ref={adt1InputRef}
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.doc,.docx"
-                  onChange={handleFileUpload('ADT-1', 'adt1')}
-                  className="hidden"
-                />
-                <input
-                  ref={challanInputRef}
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.doc,.docx"
-                  onChange={handleFileUpload('Challan', 'challan')}
-                  className="hidden"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => adt1InputRef.current?.click()}>
-                    <UploadCloud className="h-4 w-4 mr-2" />
-                    Upload ADT-1
-                  </Button>
-                  <Button size="sm" onClick={() => challanInputRef.current?.click()}>
-                    <UploadCloud className="h-4 w-4 mr-2" />
-                    Upload Challan
-                  </Button>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-2">ADT-1 uploads</p>
-                    {renderFileList(adt1Files)}
+            {!showPrevAuditorCommunication && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ClipboardCheck className="h-5 w-5" />
+                    ADT-1 & Challan
+                  </CardTitle>
+                  <CardDescription>Capture ADT-1 filing and challan proof.</CardDescription>
+                  <p className="text-xs text-muted-foreground">Applicable for Companies only.</p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <input
+                    ref={adt1InputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.doc,.docx"
+                    onChange={handleFileUpload('ADT-1', 'adt1')}
+                    className="hidden"
+                  />
+                  <input
+                    ref={challanInputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.doc,.docx"
+                    onChange={handleFileUpload('Challan', 'challan')}
+                    className="hidden"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => adt1InputRef.current?.click()}>
+                      <UploadCloud className="h-4 w-4 mr-2" />
+                      Upload ADT-1
+                    </Button>
+                    <Button size="sm" onClick={() => challanInputRef.current?.click()}>
+                      <UploadCloud className="h-4 w-4 mr-2" />
+                      Upload Challan
+                    </Button>
                   </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-2">Challan uploads</p>
-                    {renderFileList(challanFiles)}
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">ADT-1 uploads</p>
+                      {renderFileList(adt1Files)}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">Challan uploads</p>
+                      {renderFileList(challanFiles)}
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
 

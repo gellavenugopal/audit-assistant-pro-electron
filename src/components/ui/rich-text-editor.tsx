@@ -10,6 +10,7 @@ interface RichTextEditorProps {
   disabled?: boolean;
   placeholder?: string;
   className?: string;
+  normalizeDom?: (root: HTMLDivElement) => void;
 }
 
 const TOOLBAR_ACTIONS = [
@@ -102,6 +103,7 @@ export function RichTextEditor({
   disabled,
   placeholder,
   className,
+  normalizeDom,
 }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
@@ -116,6 +118,9 @@ export function RichTextEditor({
   };
 
   const emitChange = () => {
+    if (normalizeDom && editorRef.current) {
+      normalizeDom(editorRef.current);
+    }
     const html = editorRef.current?.innerHTML ?? '';
     onChange(html);
     updateEmptyState();
