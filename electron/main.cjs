@@ -900,8 +900,9 @@ function createWindow() {
     show: false,
   });
 
-  // Show window when ready to prevent visual flash
+  // Show window maximized when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
     mainWindow.show();
   });
 

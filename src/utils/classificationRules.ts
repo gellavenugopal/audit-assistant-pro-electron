@@ -393,8 +393,12 @@ export function applyClassificationRules(
       'construction sale', 'development sale',
     ];
     const realEstateExclusions = ['rent', 'rental', 'lease', 'leasing', 'maintenance', 'service', 'charges'];
+    const isFixedAssetsGroup = matchesGroup(primary, 'fixed assets') ||
+      matchesGroup(parent, 'fixed assets') ||
+      matchesGroup(group, 'fixed assets');
     if (hasAnyInGroups(ledger, parent, primary, realEstateKeywords) &&
-      !hasAnyInGroups(ledger, parent, primary, realEstateExclusions)) {
+      !hasAnyInGroups(ledger, parent, primary, realEstateExclusions) &&
+      !isFixedAssetsGroup) {
       return addAutoNote({
         ...row,
         'H1': 'Income',
@@ -711,8 +715,12 @@ export function applyClassificationRules(
       'gst withholding', 'gst wht',
     ];
     const advanceTaxExclusions = ['tds payable', 'tcs payable', 'tax payable', 'income tax payable'];
+    const advanceTaxPrimaryExclusions = ['capital account', 'share capital'];
+    const advanceTaxMatchLedgerOrParent = hasAnyInLedgerOrParent(ledger, parent, advanceTaxKeywords);
+    const allowAdvanceTaxFromPrimary = !hasAny(primary, advanceTaxPrimaryExclusions);
+    const advanceTaxMatchPrimary = allowAdvanceTaxFromPrimary && hasAny(primary, advanceTaxKeywords);
     if (normalize(row['H1']) === 'asset' &&
-      hasAnyInGroups(ledger, parent, primary, advanceTaxKeywords) &&
+      (advanceTaxMatchLedgerOrParent || advanceTaxMatchPrimary) &&
       !hasAnyInGroups(ledger, parent, primary, gstTdsTcsExclusions) &&
       !hasAnyInLedgerOrParent(ledger, parent, advanceTaxExclusions) &&
       !matchesPhrase(ledger, 'payable') &&
