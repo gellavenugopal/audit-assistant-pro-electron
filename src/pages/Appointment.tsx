@@ -1,8 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ClipboardCheck, FileSignature, ShieldCheck, UploadCloud, FileDown, Eye } from 'lucide-react';
+import { ClipboardCheck, FileSignature, UploadCloud, FileDown, Eye } from 'lucide-react';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -13,6 +12,7 @@ import { ConfidentialityDeclaration } from '@/components/appointment/Confidentia
 import { IndependenceDeclaration } from '@/components/appointment/IndependenceDeclaration';
 import { useEvidenceFiles, EvidenceFile } from '@/hooks/useEvidenceFiles';
 import { PreviousAuditorCommunication } from '@/components/appointment/PreviousAuditorCommunication';
+import { EligibilityCertificate } from '@/components/appointment/EligibilityCertificate';
 
 export default function Appointment() {
   const { currentEngagement } = useEngagement();
@@ -135,19 +135,8 @@ export default function Appointment() {
         </TabsList>
 
         <TabsContent value="eligibility" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5" />
-                  Auditor Eligibility Certificate
-                </CardTitle>
-                <CardDescription>Record the auditor eligibility certificate for this engagement.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">Module will be available soon.</p>
-              </CardContent>
-            </Card>
+          <div className="grid gap-4">
+            <EligibilityCertificate />
           </div>
         </TabsContent>
 
