@@ -192,10 +192,15 @@ const buildStockDetailRows = (values: ManualInventoryValues): LedgerRow[] => {
   const rows = STOCK_DETAIL_CATEGORIES.map(category => {
     const opening = values[category.key].opening || 0;
     const closing = values[category.key].closing || 0;
+    
+    // For Closing Inventory (Asset):
+    // Opening Balance = -opening (negated, as it's the reversal of previous year's closing)
+    // Closing Balance = closing (the current year's inventory value)
+    // The difference determines Debit/Credit
     return buildStockDetailRow({
       ledgerName: `Closing Inventory [${category.label}]`,
-      opening,
-      closing,
+      opening: -opening,  // NEGATIVE for accounting reversal
+      closing: closing,    // POSITIVE for current inventory
       h1: 'Asset',
       h2: 'Inventories',
       h3: category.label,
@@ -211,6 +216,10 @@ const buildStockDetailRows = (values: ManualInventoryValues): LedgerRow[] => {
     (acc, category) => acc + (values[category.key].closing || 0),
     0
   );
+  
+  // Change in Inventories = Total Opening Stock Debit - Total Closing Stock Credit
+  // If totalClosing > totalOpening, then Credit (negative closing balance)
+  // If totalOpening > totalClosing, then Debit (positive closing balance)
   const changeValue = Number(totalOpening - totalClosing) || 0;
 
   rows.push(
@@ -752,8 +761,20 @@ export default function FinancialReview() {
   }, [manualInventoryDraft, persistManualInventoryValues]);
 
   const resetManualInventoryDraft = useCallback(() => {
-    setManualInventoryDraft(manualInventoryValues || EMPTY_MANUAL_INVENTORY);
-  }, [manualInventoryValues]);
+    setManualInventoryDraft(EMPTY_MANUAL_INVENTORY);
+    // Also clear from localStorage to prevent old data from reloading
+    if (manualInventoryKey) {
+      localStorage.removeItem(manualInventoryKey);
+    }
+    // Reset to imported inventory source
+    setManualInventoryValues(null);
+    setInventorySource('imported');
+    refreshTablesWithStockDetails(null, 'imported');
+    toast({
+      title: 'Stock reset',
+      description: 'All manual inventory entries have been cleared.'
+    });
+  }, [manualInventoryKey, refreshTablesWithStockDetails, toast]);
 
   const handleSaveManualInventory = useCallback(() => {
     persistManualInventoryValues(manualInventoryDraft);
@@ -2257,18 +2278,6 @@ export default function FinancialReview() {
     // Load Classified TB from localStorage
     const savedClassified = localStorage.getItem(`tb_classified_${cacheKeySuffix}`);
     let cachedClassifiedCount = 0;
-    if (savedClassified) {
-      try {
-        const parsedClassified = JSON.parse(savedClassified);
-        if (Array.isArray(parsedClassified) && parsedClassified.length > 0) {
-          cachedClassifiedCount = parsedClassified.length;
-          setCurrentData(enrichRowsWithStockDetails(parsedClassified));
-          hydrated = true;
-        }
-      } catch (e) {
-        console.error('Failed to load classified TB:', e);
-      }
-    }
 
     // Prefer database when available to avoid stale local cache
     if (engagementTrialBalance.lines && engagementTrialBalance.lines.length > 0) {
@@ -5007,7 +5016,7 @@ export default function FinancialReview() {
   }, []);
 
   // Delete selected rows from the active grid (Actual or Classified)
-  const handleDeleteSelected = useCallback(() => {
+  const handleDeleteSelected = useCallback(async () => {
     if (selectedRowIndices.size === 0) {
       toast({ title: 'No selection', description: 'Select ledger rows to delete first.' });
       return;
@@ -5027,16 +5036,34 @@ export default function FinancialReview() {
       return;
     }
 
-    setActualData(prev =>
-      enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
-    );
-    setCurrentData(prev =>
-      enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
-    );
-    setSelectedRowIndices(new Set());
+    try {
+      // Delete from database first
+      const linesToDelete = trialBalanceDB.lines.filter(line => selectedKeys.has(line.account_code));
+      const lineIds = linesToDelete.map(line => line.id);
+      
+      if (lineIds.length > 0) {
+        await trialBalanceDB.deleteLines(lineIds);
+      }
+      
+      // Then clear from UI state
+      setActualData(prev =>
+        enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
+      );
+      setCurrentData(prev =>
+        enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
+      );
+      setSelectedRowIndices(new Set());
 
-    toast({ title: 'Deleted', description: `${selectedKeys.size} row(s) removed from this engagement.` });
-  }, [activeTab, actualData, currentData, selectedRowIndices, toast]);
+      toast({ title: 'Deleted', description: `${selectedKeys.size} row(s) permanently removed from this engagement.` });
+    } catch (error) {
+      console.error('Error deleting rows:', error);
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to delete selected rows from database',
+        variant: 'destructive'
+      });
+    }
+  }, [activeTab, actualData, currentData, selectedRowIndices, trialBalanceDB, toast]);
 
   // Clear Data - clears Actual TB, Classified TB, and Stock Items
   const handleClear = useCallback(async () => {

@@ -2,6 +2,12 @@ import type { LedgerRow } from '@/services/trialBalanceNewClassification';
 
 type ColumnFilters = Record<string, Set<string | number>>;
 
+// Primary groups that should be excluded from trial balance import
+// Stock-in-Hand is managed via manual inventory entry, not imported from TB
+const EXCLUDED_PRIMARY_GROUPS = [
+  'Stock-in-Hand',
+];
+
 export const applyColumnFilters = <T extends Record<string, unknown>>(
   rows: T[],
   columnFilters: ColumnFilters,
@@ -62,6 +68,12 @@ export const filterActualRows = ({
 }: FilterActualRowsArgs) => {
   let filtered = rows;
 
+  // Exclude Stock-in-Hand which is managed via manual inventory entry
+  filtered = filtered.filter((row) => {
+    const primaryGroup = row['Primary Group'] || '';
+    return !EXCLUDED_PRIMARY_GROUPS.includes(primaryGroup);
+  });
+
   if (searchTerm) {
     const searchLower = searchTerm.toLowerCase();
     filtered = filtered.filter((row) => (row.__searchText || '').includes(searchLower));
@@ -105,6 +117,12 @@ export const filterClassifiedRowsByFilters = ({
   getStatusLabel,
 }: FilterClassifiedRowsArgs) => {
   let filtered = rows;
+
+  // Exclude Stock-in-Hand which is managed via manual inventory entry
+  filtered = filtered.filter((row) => {
+    const primaryGroup = row['Primary Group'] || '';
+    return !EXCLUDED_PRIMARY_GROUPS.includes(primaryGroup);
+  });
 
   if (searchTerm) {
     const searchLower = searchTerm.toLowerCase();
