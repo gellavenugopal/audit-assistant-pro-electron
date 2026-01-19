@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -9,12 +9,20 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { Save, Eye, Loader2, Plus, X, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useIFCReportContent, MaterialWeakness, SignificantDeficiency } from '@/hooks/useIFCReportContent';
 import { useAuditReportSetup } from '@/hooks/useAuditReportSetup';
 import { useFirmSettings } from '@/hooks/useFirmSettings';
 import { usePartners } from '@/hooks/usePartners';
+import { useAuditReportDocument } from '@/hooks/useAuditReportDocument';
+import { REPORT_PREVIEW_STYLES } from '@/utils/auditReportPreviewStyles';
+import { buildIfcPreviewHtml } from '@/utils/auditReportPreviewHtml';
+import {
+  IFC_REPORT_PREVIEW_SECTION,
+  IFC_REPORT_PREVIEW_TITLE,
+} from '@/data/auditReportPreviewSections';
 
 interface IFCReportEditorProps {
   engagementId: string;
@@ -27,12 +35,19 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
   const { setup } = useAuditReportSetup(engagementId);
   const { firmSettings } = useFirmSettings();
   const { getPartnerById } = usePartners();
+  const {
+    document: previewDocument,
+    saving: previewSaving,
+    saveDocument: savePreviewDocument,
+  } = useAuditReportDocument(engagementId, IFC_REPORT_PREVIEW_SECTION, IFC_REPORT_PREVIEW_TITLE);
   const opinionInstruction = 'The IFC module does not automatically modify or generate the IFC opinion based on material misstatements or deficiencies reported here. Users are required to independently evaluate the impact and manually modify the IFC opinion and related disclosures, wherever necessary.';
   
   // Get signing partner details
   const signingPartner = setup?.signing_partner_id ? getPartnerById(setup.signing_partner_id) : null;
   
   const [previewMode, setPreviewMode] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [previewSeeded, setPreviewSeeded] = useState(false);
   const [opinionType, setOpinionType] = useState('unmodified');
   const [opinionParagraph, setOpinionParagraph] = useState('');
   const [managementResponsibility, setManagementResponsibility] = useState('');
@@ -82,6 +97,30 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
     }
   }, [opinionType, clientName, financialYear, content]);
 
+  const generatedPreviewHtml = useMemo(
+    () =>
+      buildIfcPreviewHtml({
+        content,
+        setup,
+        firmSettings,
+        signingPartner,
+        clientName,
+        financialYear,
+      }),
+    [content, setup, firmSettings, signingPartner, clientName, financialYear]
+  );
+
+  useEffect(() => {
+    if (!previewMode) {
+      setPreviewSeeded(false);
+      return;
+    }
+    if (previewSeeded) return;
+    const saved = previewDocument?.content_html?.trim();
+    setPreviewHtml(saved || generatedPreviewHtml);
+    setPreviewSeeded(true);
+  }, [previewMode, previewSeeded, previewDocument?.content_html, generatedPreviewHtml]);
+
   const handleSave = async () => {
     setSaving(true);
     const success = await saveContent({
@@ -96,6 +135,20 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
     if (success) {
       toast.success('IFC report saved successfully');
     }
+  };
+
+  const savePreview = async () => {
+    const html = previewHtml.trim();
+    if (!html) {
+      toast.error('Preview is empty.');
+      return;
+    }
+    const saved = await savePreviewDocument(html, IFC_REPORT_PREVIEW_TITLE);
+    if (saved) toast.success('Preview saved');
+  };
+
+  const resetPreview = () => {
+    setPreviewHtml(generatedPreviewHtml);
   };
 
   const handleAddMaterialWeakness = async () => {
@@ -155,108 +208,30 @@ export function IFCReportEditor({ engagementId, clientName, financialYear }: IFC
     return (
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle>IFC Report Preview</CardTitle>
               <CardDescription>Preview of Internal Financial Control Report</CardDescription>
             </div>
-            <Button variant="outline" onClick={() => setPreviewMode(false)}>
-              Back to Edit
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setPreviewMode(false)}>
+                Back to Edit
+              </Button>
+              <Button variant="outline" onClick={resetPreview}>
+                Reset to Template
+              </Button>
+              <Button onClick={savePreview} disabled={previewSaving}>
+                {previewSaving ? 'Saving...' : 'Save Preview'}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-[65vh]">
-            <div className="mx-auto max-w-3xl space-y-6 p-4">
-              {/* Title */}
-              <div className="text-center">
-                <h2 className="text-lg font-bold">ANNEXURE B TO THE INDEPENDENT AUDITOR'S REPORT</h2>
-                <p className="text-sm mt-2">(Referred to in paragraph 2 under 'Report on Other Legal and Regulatory Requirements' section of our report of even date)</p>
-              </div>
-
-              {/* Heading */}
-              <div className="text-center mt-6">
-                <h3 className="text-base font-semibold">Report on the Internal Financial Control with Reference to Standalone Financial Statements under Clause (i) of Sub-section 3 of Section 143 of the Companies Act, 2013</h3>
-              </div>
-
-              {/* Opinion */}
-              <div className="space-y-2">
-                <h4 className="font-semibold">Opinion</h4>
-                <p className="text-sm whitespace-pre-wrap">{opinionParagraph || '[Opinion paragraph not yet entered]'}</p>
-              </div>
-
-              {/* Management's Responsibility */}
-              <div className="space-y-2">
-                <h4 className="font-semibold">Management's Responsibility for Internal Financial Control with Reference to Standalone Financial Statements</h4>
-                <p className="text-sm whitespace-pre-wrap">{managementResponsibility}</p>
-              </div>
-
-              {/* Auditor's Responsibility */}
-              <div className="space-y-2">
-                <h4 className="font-semibold">Auditor's Responsibility</h4>
-                <p className="text-sm whitespace-pre-wrap">{auditorResponsibility}</p>
-              </div>
-
-              {/* Meaning of IFC */}
-              <div className="space-y-2">
-                <h4 className="font-semibold">Meaning of Internal Financial Control with Reference to Standalone Financial Statements</h4>
-                <p className="text-sm whitespace-pre-wrap">{ifcMeaning}</p>
-              </div>
-
-              {/* Inherent Limitations */}
-              <div className="space-y-2">
-                <h4 className="font-semibold">Inherent Limitations of Internal Financial Control with Reference to Standalone Financial Statements</h4>
-                <p className="text-sm whitespace-pre-wrap">{inherentLimitations}</p>
-              </div>
-
-              {/* Material Weaknesses */}
-              {content?.has_material_weaknesses && content.material_weaknesses.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="font-semibold">Material Weaknesses</h4>
-                  {content.material_weaknesses.map((weakness, idx) => (
-                    <div key={weakness.id} className="ml-4 space-y-1">
-                      <p className="text-sm font-medium">{idx + 1}. {weakness.title}</p>
-                      <p className="text-sm ml-4">{weakness.description}</p>
-                      {weakness.impact && <p className="text-sm ml-4"><strong>Impact:</strong> {weakness.impact}</p>}
-                      {weakness.recommendation && <p className="text-sm ml-4"><strong>Recommendation:</strong> {weakness.recommendation}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Significant Deficiencies */}
-              {content?.has_significant_deficiencies && content.significant_deficiencies.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="font-semibold">Significant Deficiencies</h4>
-                  {content.significant_deficiencies.map((deficiency, idx) => (
-                    <div key={deficiency.id} className="ml-4 space-y-1">
-                      <p className="text-sm font-medium">{idx + 1}. {deficiency.title}</p>
-                      <p className="text-sm ml-4">{deficiency.description}</p>
-
-              {/* Signature Table */}
-              <div className="pt-8 mt-8 border-t">
-                <div className="text-right space-y-1 text-sm">
-                  <p className="font-semibold">For {firmSettings?.firm_name || '[Firm Name]'}</p>
-                  <p>Chartered Accountants</p>
-                  <p>Firm's Registration No. {firmSettings?.firm_registration_no || '______'}</p>
-                  <p className="pt-8">______________</p>
-                  <p className="font-semibold">{signingPartner?.name || '[Partner / Proprietor]'}</p>
-                  <p>Partner</p>
-                  <p>Membership No. {signingPartner?.membership_number || '__________'}</p>
-                  {setup?.udin && <p>UDIN: {setup.udin}</p>}
-                  {!setup?.udin && <p>UDIN: </p>}
-                  <p className="pt-4">Place: {setup?.report_city || ''}</p>
-                  <p>Date: {setup?.report_date ? new Date(setup.report_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : ''}</p>
-                </div>
-              </div>
-                      {deficiency.impact && <p className="text-sm ml-4"><strong>Impact:</strong> {deficiency.impact}</p>}
-                      {deficiency.recommendation && <p className="text-sm ml-4"><strong>Recommendation:</strong> {deficiency.recommendation}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+          <style>{REPORT_PREVIEW_STYLES}</style>
+          <RichTextEditor value={previewHtml} onChange={setPreviewHtml} className="report-preview" />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Edits in this preview are used for exports.
+          </p>
         </CardContent>
       </Card>
     );

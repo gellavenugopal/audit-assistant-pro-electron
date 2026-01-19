@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { 
   CheckCircle2, 
   Circle, 
@@ -26,6 +27,13 @@ import { useCAROClauseResponses, CAROClauseResponse } from '@/hooks/useCAROClaus
 import { useCAROStandardAnswers } from '@/hooks/useCAROStandardAnswers';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useAuditReportDocument } from '@/hooks/useAuditReportDocument';
+import { REPORT_PREVIEW_STYLES } from '@/utils/auditReportPreviewStyles';
+import { buildCaroPreviewHtml } from '@/utils/auditReportPreviewHtml';
+import {
+  CARO_REPORT_PREVIEW_SECTION,
+  CARO_REPORT_PREVIEW_TITLE,
+} from '@/data/auditReportPreviewSections';
 
 interface CARONavigatorProps {
   engagementId: string;
@@ -37,6 +45,11 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
   const { clauses, loading: clausesLoading } = useCAROClauseLibrary();
   const { responses, saveResponse, getResponseForClause, loading: responsesLoading } = useCAROClauseResponses(engagementId);
   const { getWording } = useCAROStandardAnswers();
+  const {
+    document: previewDocument,
+    saving: previewSaving,
+    saveDocument: savePreviewDocument,
+  } = useAuditReportDocument(engagementId, CARO_REPORT_PREVIEW_SECTION, CARO_REPORT_PREVIEW_TITLE);
   const [selectedClauseId, setSelectedClauseId] = useState<string | null>(null);
   const [currentAnswers, setCurrentAnswers] = useState<Record<string, any>>({});
   const [conclusionText, setConclusionText] = useState('');
@@ -45,6 +58,8 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
   const [wpRefs, setWpRefs] = useState('');
   const [saving, setSaving] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [previewSeeded, setPreviewSeeded] = useState(false);
 
   // Filter clauses based on CARO applicability
   const applicableClauses = clauses.filter(clause => {
@@ -52,6 +67,11 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
     if (caroApplicableStatus === 'cfs_only_xxi' && clause.clause_id !== '3(xxi)') return false;
     return true;
   });
+
+  const generatedPreviewHtml = useMemo(
+    () => buildCaroPreviewHtml({ responses, clauses: applicableClauses }),
+    [responses, applicableClauses]
+  );
 
   const completedResponses = responses.filter(r => 
     applicableClauses.some(c => c.clause_id === r.clause_id) && 
@@ -92,6 +112,17 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
       setWpRefs('');
     }
   };
+
+  useEffect(() => {
+    if (!previewMode) {
+      setPreviewSeeded(false);
+      return;
+    }
+    if (previewSeeded) return;
+    const saved = previewDocument?.content_html?.trim();
+    setPreviewHtml(saved || generatedPreviewHtml);
+    setPreviewSeeded(true);
+  }, [previewMode, previewSeeded, previewDocument?.content_html, generatedPreviewHtml]);
 
   const handleAnswerChange = (questionId: string, value: any) => {
     setCurrentAnswers(prev => ({ ...prev, [questionId]: value }));
@@ -136,6 +167,20 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
     } finally {
       setSaving(false);
     }
+  };
+
+  const savePreview = async () => {
+    const html = previewHtml.trim();
+    if (!html) {
+      toast.error('Preview is empty.');
+      return;
+    }
+    const saved = await savePreviewDocument(html, CARO_REPORT_PREVIEW_TITLE);
+    if (saved) toast.success('Preview saved');
+  };
+
+  const resetPreview = () => {
+    setPreviewHtml(generatedPreviewHtml);
   };
 
   const getClauseStatus = (clauseId: string): 'not_started' | 'in_progress' | 'ready_for_review' | 'final' => {
@@ -208,59 +253,28 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
     return (
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <CardTitle>CARO 2020 Report Preview</CardTitle>
-            <Button variant="outline" onClick={() => setPreviewMode(false)}>
-              Back to Editor
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setPreviewMode(false)}>
+                Back to Editor
+              </Button>
+              <Button variant="outline" onClick={resetPreview}>
+                Reset to Template
+              </Button>
+              <Button onClick={savePreview} disabled={previewSaving}>
+                {previewSaving ? 'Saving...' : 'Save Preview'}
+              </Button>
+            </div>
           </div>
         </CardHeader>
-        <ScrollArea className="h-[calc(100vh-250px)]">
-          <CardContent className="space-y-6">
-            {/* CARO Report Header */}
-            <div className="space-y-4">
-              <h2 className="text-xl font-bold text-center">
-                Annexure - A to the Auditors' Report
-              </h2>
-              <p className="text-sm text-center text-muted-foreground">
-                (Referred to in paragraph 1 under 'Report on Other Legal and Regulatory Requirements' section of our report of even date)
-              </p>
-            </div>
-
-            {/* All Clause Responses */}
-            <div className="space-y-6">
-              {applicableClauses.map((clause) => {
-                const response = getResponseForClause(clause.clause_id);
-                if (!response) return null;
-
-                return (
-                  <div key={clause.id} className="border-l-4 border-primary pl-4 space-y-2">
-                    <h3 className="font-semibold">
-                      {clause.clause_id}. {clause.clause_title}
-                    </h3>
-                    {!response.is_applicable ? (
-                      <p className="text-sm whitespace-pre-wrap">
-                        {response.na_reason || 'Not applicable'}
-                      </p>
-                    ) : (
-                      <p className="text-sm whitespace-pre-wrap">
-                        {response.conclusion_text || '[No conclusion entered]'}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* No responses message */}
-            {responses.length === 0 && (
-              <div className="text-center py-10 text-muted-foreground">
-                <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No CARO responses have been entered yet.</p>
-              </div>
-            )}
-          </CardContent>
-        </ScrollArea>
+        <CardContent>
+          <style>{REPORT_PREVIEW_STYLES}</style>
+          <RichTextEditor value={previewHtml} onChange={setPreviewHtml} className="report-preview" />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Edits in this preview are used for exports.
+          </p>
+        </CardContent>
       </Card>
     );
   }

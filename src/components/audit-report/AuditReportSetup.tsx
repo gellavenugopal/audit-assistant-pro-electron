@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -14,6 +13,8 @@ import { Building2, CheckCircle2, AlertTriangle, Info, ArrowRight, User, Calenda
 import type { AuditReportSetup as SetupType } from '@/hooks/useAuditReportSetup';
 import { useTrialBalance } from '@/hooks/useTrialBalance';
 import { usePartners } from '@/hooks/usePartners';
+import { useEngagement } from '@/contexts/EngagementContext';
+import { useClient } from '@/hooks/useClient';
 import { cn } from '@/lib/utils';
 
 interface AuditReportSetupProps {
@@ -46,6 +47,19 @@ type TBCrosscheck = {
   borrowingsTB: number;
 };
 
+const mapConstitutionToCompanyType = (value: string | null) => {
+  const normalized = (value || '').toLowerCase();
+  if (!normalized) return '';
+  if (normalized.includes('public')) return 'public_company';
+  if (normalized.includes('private')) return 'private_company';
+  if (normalized.includes('opc') || normalized.includes('one person')) return 'opc';
+  if (normalized.includes('section 8') || normalized.includes('section-8')) return 'section_8';
+  if (normalized.includes('small')) return 'small_company';
+  if (normalized.includes('bank')) return 'banking';
+  if (normalized.includes('insurance')) return 'insurance';
+  return '';
+};
+
 export function AuditReportSetup({
   engagementId,
   setup,
@@ -58,6 +72,8 @@ export function AuditReportSetup({
   const [isEditingSetup, setIsEditingSetup] = useState(false);
   const hasInitialized = useRef(false);
   const { partners, loading: partnersLoading } = usePartners();
+  const { currentEngagement } = useEngagement();
+  const { client } = useClient(currentEngagement?.client_id || null);
   const [formData, setFormData] = useState({
     company_cin: '',
     registered_office: '',
@@ -158,6 +174,21 @@ export function AuditReportSetup({
     }
   }, [setup, isEditingSetup]);
 
+  useEffect(() => {
+    if (!client) return;
+    setFormData((prev) => {
+      const next = { ...prev };
+      if (!next.company_cin && client.cin) next.company_cin = client.cin;
+      if (!next.registered_office && client.address) next.registered_office = client.address;
+      if (!next.nature_of_business && client.industry) next.nature_of_business = client.industry;
+      if (!next.company_type) {
+        const mapped = mapConstitutionToCompanyType(client.constitution);
+        if (mapped) next.company_type = mapped;
+      }
+      return next;
+    });
+  }, [client?.id]);
+
   const isCaroExcludedType = CARO_EXCLUDED_TYPES.includes(formData.company_type as any);
   const isPublicCompanyType = formData.company_type === 'public_company';
   const isPrivateThresholdDisabled = isCaroExcludedType || isPublicCompanyType;
@@ -177,9 +208,28 @@ export function AuditReportSetup({
   };
 
   const calculateCAROApplicability = () => {
+    if (!formData.company_type) {
+      return 'pending';
+    }
+    if (!formData.is_standalone) {
+      return 'cfs_only_xxi';
+    }
+    if (
+      formData.company_type !== 'public_company' &&
+      !CARO_EXCLUDED_TYPES.includes(formData.company_type as any) &&
+      !formData.is_private_company
+    ) {
+      return 'pending';
+    }
     // CARO exclusions based on company type
     if (CARO_EXCLUDED_TYPES.includes(formData.company_type as any)) {
       return 'not_applicable';
+    }
+    if (formData.company_type === 'public_company') {
+      return 'applicable';
+    }
+    if (formData.company_type === 'private_company' && !formData.is_private_company) {
+      return 'pending';
     }
 
     // Private company threshold test
@@ -193,11 +243,6 @@ export function AuditReportSetup({
       ) {
         return 'not_applicable';
       }
-    }
-
-    // CFS rule - only clause 3(xxi) applies
-    if (!formData.is_standalone) {
-      return 'cfs_only_xxi';
     }
 
     return 'applicable';
@@ -244,6 +289,8 @@ export function AuditReportSetup({
         return <Badge variant="secondary" className="gap-1"><AlertTriangle className="h-3 w-3" /> CARO Not Applicable</Badge>;
       case 'cfs_only_xxi':
         return <Badge variant="outline" className="gap-1"><Info className="h-3 w-3" /> CFS - Only Clause 3(xxi)</Badge>;
+      case 'pending':
+        return <Badge variant="outline" className="gap-1"><Info className="h-3 w-3" /> CARO Inactive</Badge>;
       default:
         return <Badge variant="outline">Pending Evaluation</Badge>;
     }
@@ -294,60 +341,31 @@ export function AuditReportSetup({
               <Building2 className="h-5 w-5" />
               Step 1: Client Profile
             </CardTitle>
-            <CardDescription>
+          <CardDescription>
               Enter the basic company information for the audit report
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="cin">Company CIN</Label>
-                <Input
-                  id="cin"
-                  value={formData.company_cin}
-                  onChange={(e) => updateField('company_cin', e.target.value)}
-                  placeholder="Enter CIN"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="company_type">Company Type</Label>
-                <Select 
-                  value={formData.company_type} 
-                  onValueChange={(v) => updateField('company_type', v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select company type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {companyTypes.map((type) => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
             <div className="space-y-2">
-              <Label htmlFor="registered_office">Registered Office Address</Label>
-              <Textarea
-                id="registered_office"
-                value={formData.registered_office}
-                onChange={(e) => updateField('registered_office', e.target.value)}
-                placeholder="Enter registered office address"
-                rows={2}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="nature_of_business">Nature of Business</Label>
-              <Input
-                id="nature_of_business"
-                value={formData.nature_of_business}
-                onChange={(e) => updateField('nature_of_business', e.target.value)}
-                placeholder="E.g., Manufacturing, Trading, Services"
-              />
+              <Label htmlFor="company_type">Company Type</Label>
+              <Select 
+                value={formData.company_type} 
+                onValueChange={(v) => updateField('company_type', v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select company type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companyTypes.map((type) => (
+                    <SelectItem key={type.value} value={type.value}>
+                      {type.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Client master details are auto-fetched for reference.
+              </p>
             </div>
 
             <Separator />
@@ -465,7 +483,7 @@ export function AuditReportSetup({
                 </div>
 
                 {tbLoading ? (
-                  <p className="text-xs text-muted-foreground">Loading Trial Balance cross-check…</p>
+                  <p className="text-xs text-muted-foreground">Loading Trial Balance cross-check...</p>
                 ) : tbCrosscheck.available ? (
                   <Alert className={cn(hasTbMismatch && 'border-warning')}>
                     <Info className="h-4 w-4" />
@@ -488,7 +506,7 @@ export function AuditReportSetup({
                         </ul>
                         {hasTbMismatch && (
                           <p className="text-sm">
-                            Note: Trial Balance amounts differ from your inputs—please cross-check.
+                            Note: Trial Balance amounts differ from your inputs; please cross-check.
                           </p>
                         )}
                       </div>
