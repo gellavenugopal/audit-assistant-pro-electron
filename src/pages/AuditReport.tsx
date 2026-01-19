@@ -26,7 +26,7 @@ export default function AuditReport() {
   const [unlockDialogOpen, setUnlockDialogOpen] = useState(false);
   const canUnlock = role === 'partner' || role === 'manager';
   const headerChipClass = 'bg-muted/60 border-muted-foreground/30 text-foreground';
-  const buttonChipClass = 'h-7 rounded-full px-3 text-xs font-semibold border border-muted-foreground/30 bg-muted/60 text-foreground hover:bg-muted/70';
+  const buttonChipClass = 'h-auto rounded-full px-2.5 py-0.5 text-xs font-semibold border border-muted-foreground/30 bg-muted/60 text-foreground hover:bg-muted/70';
 
   if (!currentEngagement) {
     return (

@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     downloadGstr1: (downloadRequest, token) => ipcRenderer.invoke('gstzen:downloadGstr1', { downloadRequest, token }),
     generateOtp: (requestData, token) => ipcRenderer.invoke('gstzen:generateOtp', { requestData, token }),
     establishSession: (requestData, token) => ipcRenderer.invoke('gstzen:establishSession', { requestData, token }),
+    validateGstins: (gstinList, token) => ipcRenderer.invoke('gstzen:validateGstins', { gstinList, token }),
+    createGstin: (gstinData, token) => ipcRenderer.invoke('gstzen:createGstin', { gstinData, token }),
   },
 
   // ODBC methods
