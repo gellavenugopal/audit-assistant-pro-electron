@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,8 +11,7 @@ import {
   Lock,
   Unlock,
   AlertTriangle,
-  CheckCircle2,
-  FileType
+  CheckCircle2
 } from 'lucide-react';
 import { AuditReportSetup } from '@/hooks/useAuditReportSetup';
 import { useCAROClauseResponses } from '@/hooks/useCAROClauseResponses';
@@ -21,12 +20,16 @@ import { useFirmSettings } from '@/hooks/useFirmSettings';
 import { usePartners } from '@/hooks/usePartners';
 import { useKeyAuditMatters } from '@/hooks/useKeyAuditMatters';
 import { useEngagement } from '@/contexts/EngagementContext';
+import { useAuditReportContent } from '@/hooks/useAuditReportContent';
+import { useIFCReportContent } from '@/hooks/useIFCReportContent';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import {
   Document,
   Packer,
   Paragraph,
+  Table,
   TextRun,
   Header,
   Footer,
@@ -42,7 +45,23 @@ import {
 import caIndiaLogo from '@/assets/ca-india-logo.jpg';
 import { WordIcon } from '@/components/icons/WordIcon';
 import { PdfIcon } from '@/components/icons/PdfIcon';
-import { BASIS_FOR_OPINION_STARTER } from '@/data/auditReportStandardWordings';
+import { AuditReportGenerator } from '@/services/auditReportGenerator';
+import { useAuditReportDocument } from '@/hooks/useAuditReportDocument';
+import { convertHtmlToDocxElements } from '@/utils/htmlToDocx';
+import { REPORT_PREVIEW_STYLES } from '@/utils/auditReportPreviewStyles';
+import {
+  buildCaroPreviewHtml,
+  buildIfcPreviewHtml,
+  buildMainReportPreviewHtml,
+} from '@/utils/auditReportPreviewHtml';
+import {
+  CARO_REPORT_PREVIEW_SECTION,
+  IFC_REPORT_PREVIEW_SECTION,
+  MAIN_REPORT_PREVIEW_SECTION,
+  CARO_REPORT_PREVIEW_TITLE,
+  IFC_REPORT_PREVIEW_TITLE,
+  MAIN_REPORT_PREVIEW_TITLE,
+} from '@/data/auditReportPreviewSections';
 
 const KAM_ENABLED = false;
 
@@ -55,15 +74,63 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
   const { responses } = useCAROClauseResponses(engagementId);
   const { clauses } = useCAROClauseLibrary();
   const { firmSettings } = useFirmSettings();
-  const { partners, getPartnerById } = usePartners();
+  const { getPartnerById } = usePartners();
   const { kams } = useKeyAuditMatters(engagementId);
   const { currentEngagement } = useEngagement();
+  const { content: mainContent } = useAuditReportContent(engagementId);
+  const { content: ifcContent } = useIFCReportContent(engagementId);
+  const { document: mainPreviewDoc } = useAuditReportDocument(
+    engagementId,
+    MAIN_REPORT_PREVIEW_SECTION,
+    MAIN_REPORT_PREVIEW_TITLE
+  );
+  const { document: ifcPreviewDoc } = useAuditReportDocument(
+    engagementId,
+    IFC_REPORT_PREVIEW_SECTION,
+    IFC_REPORT_PREVIEW_TITLE
+  );
+  const { document: caroPreviewDoc } = useAuditReportDocument(
+    engagementId,
+    CARO_REPORT_PREVIEW_SECTION,
+    CARO_REPORT_PREVIEW_TITLE
+  );
   const [generating, setGenerating] = useState(false);
 
   // Get signing partner details
   const signingPartner = (setup as any).signing_partner_id 
     ? getPartnerById((setup as any).signing_partner_id) 
     : null;
+
+  const reportGenerator = useMemo(() => {
+    if (!setup || !mainContent) return null;
+    return new AuditReportGenerator({
+      setup,
+      content: mainContent,
+      kams,
+      clientName: currentEngagement?.client_name || 'Company Name',
+      financialYearLabel: currentEngagement?.financial_year || '2024-25',
+      firmSettings: firmSettings || undefined,
+      signingPartner: signingPartner || undefined,
+    });
+  }, [setup, mainContent, kams, currentEngagement?.client_name, currentEngagement?.financial_year, firmSettings, signingPartner]);
+
+  const previewBlocks = useMemo(() => reportGenerator?.generateBlocks() ?? [], [reportGenerator]);
+  const generatedMainPreviewHtml = useMemo(
+    () => buildMainReportPreviewHtml(previewBlocks),
+    [previewBlocks]
+  );
+  const generatedIfcPreviewHtml = useMemo(
+    () =>
+      buildIfcPreviewHtml({
+        content: ifcContent,
+        setup,
+        firmSettings,
+        signingPartner,
+        clientName: currentEngagement?.client_name || 'Company Name',
+        financialYear: currentEngagement?.financial_year || '2024-25',
+      }),
+    [ifcContent, setup, firmSettings, signingPartner, currentEngagement?.client_name, currentEngagement?.financial_year]
+  );
 
   // Build report data from actual settings
   const reportData = {
@@ -78,8 +145,6 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
     reportDate: (setup as any).report_date || new Date().toISOString().split('T')[0],
   };
 
-  const includeCashFlow = Boolean((setup as any).cash_flow_required);
-
   // Calculate completion stats
   const applicableClauses = clauses.filter(clause => {
     if (setup.caro_applicable_status === 'not_applicable') return false;
@@ -87,296 +152,96 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
     return true;
   });
 
+  const generatedCaroPreviewHtml = useMemo(
+    () => buildCaroPreviewHtml({ responses, clauses: applicableClauses }),
+    [responses, applicableClauses]
+  );
+
+  const resolvedMainPreviewHtml =
+    mainPreviewDoc?.content_html?.trim() || (mainContent ? generatedMainPreviewHtml : '');
+  const resolvedIfcPreviewHtml = ifcPreviewDoc?.content_html?.trim() || generatedIfcPreviewHtml;
+  const resolvedCaroPreviewHtml = caroPreviewDoc?.content_html?.trim() || generatedCaroPreviewHtml;
+
+  const includeIfc = Boolean(setup.ifc_applicable);
+  const includeCaro = setup.caro_applicable_status !== 'not_applicable';
+  const hasProfitOrLoss = Boolean(setup.company_profit_or_loss);
+
   const completedResponses = responses.filter(r => r.status === 'final' || r.status === 'ready_for_review' || r.status === 'in_progress');
   const completionPercentage = applicableClauses.length > 0 
     ? Math.round((completedResponses.length / applicableClauses.length) * 100)
     : 0;
 
-  const canExport = completedResponses.length > 0 || setup.caro_applicable_status === 'not_applicable';
+  const canExport = hasProfitOrLoss && (completedResponses.length > 0 || setup.caro_applicable_status === 'not_applicable');
 
   // Check if report details are complete
   const isReportDetailsComplete = signingPartner && (setup as any).report_date && (setup as any).report_city;
 
+  const buildFullReportSections = () => {
+    const sections = [resolvedMainPreviewHtml];
+    if (includeIfc) sections.push(resolvedIfcPreviewHtml);
+    if (includeCaro) sections.push(resolvedCaroPreviewHtml);
+    return sections.filter((section) => section && section.trim());
+  };
+
+  const renderHtmlToPdf = async (html: string, filename: string) => {
+    if (typeof document === 'undefined') {
+      toast.error('PDF export is not available in this environment.');
+      return;
+    }
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-10000px';
+    container.style.top = '0';
+    container.style.width = '595pt';
+    container.innerHTML = `<style>${REPORT_PREVIEW_STYLES}</style>${html}`;
+    document.body.appendChild(container);
+    try {
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      await doc.html(container, {
+        html2canvas,
+        margin: [40, 40, 40, 40],
+        autoPaging: 'text',
+        width: 515,
+        windowWidth: container.scrollWidth,
+      });
+      doc.save(filename);
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  const buildDocxChildren = (sections: string[]) => {
+    const children: Array<Paragraph | Table> = [];
+    sections.forEach((section) => {
+      if (!section || !section.trim()) return;
+      if (children.length) {
+        children.push(new Paragraph({ children: [new PageBreak()] }));
+      }
+      children.push(...convertHtmlToDocxElements(section));
+    });
+    return children;
+  };
+
 
   const generateFullAuditReportPDF = async () => {
     setGenerating(true);
-    
+
     try {
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 20;
-      const maxWidth = pageWidth - 2 * margin;
-      let y = 25;
-
-      const checkPageBreak = (neededSpace: number = 20) => {
-        if (y > pageHeight - neededSpace - 20) {
-          doc.addPage();
-          y = 25;
-        }
-      };
-
-      const addTitle = (text: string, fontSize: number = 14) => {
-        checkPageBreak(15);
-        doc.setFontSize(fontSize);
-        doc.setFont('helvetica', 'bold');
-        doc.text(text, pageWidth / 2, y, { align: 'center' });
-        y += fontSize * 0.6;
-      };
-
-      const addHeading = (text: string, fontSize: number = 11) => {
-        checkPageBreak(12);
-        doc.setFontSize(fontSize);
-        doc.setFont('helvetica', 'bold');
-        doc.text(text, margin, y);
-        y += fontSize * 0.5 + 2;
-      };
-
-      const addParagraph = (text: string, fontSize: number = 10, indent: number = 0) => {
-        doc.setFontSize(fontSize);
-        doc.setFont('helvetica', 'normal');
-        const lines = doc.splitTextToSize(text, maxWidth - indent);
-        
-        lines.forEach((line: string) => {
-          checkPageBreak(fontSize * 0.5 + 2);
-          doc.text(line, margin + indent, y);
-          y += fontSize * 0.45;
-        });
-        y += 3;
-      };
-
-      // ===== MAIN REPORT =====
-      addTitle('INDEPENDENT AUDITOR\'S REPORT');
-      y += 3;
-      addParagraph(`TO THE MEMBERS OF ${reportData.entityName}`, 11);
-      y += 5;
-
-      addHeading('Report on the Audit of the Standalone Financial Statements');
-      y += 3;
-
-      addHeading('Opinion');
-      const opinionIntro = includeCashFlow
-        ? `We have audited the accompanying standalone financial statements of ${reportData.entityName} ("the Company"), which comprise the Balance Sheet as at March 31, 2025, the Statement of Profit and Loss and the Statement of Cash Flows for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements").`
-        : `We have audited the accompanying standalone financial statements of ${reportData.entityName} ("the Company"), which comprise the Balance Sheet as at March 31, 2025, the Statement of Profit and Loss for the year then ended, and notes to the standalone financial statements, including a summary of significant accounting policies and other explanatory information (hereinafter referred to as "the standalone financial statements").`;
-
-      addParagraph(opinionIntro);
-
-      const opinionConclusion = includeCashFlow
-        ? `In our opinion and to the best of our information and according to the explanations given to us, the aforesaid standalone financial statements give the information required by the Companies Act, 2013 ("the Act") in the manner so required and give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at March 31, 2025, and its profit/loss [delete whichever is not applicable] and its cash flows for the year ended on that date.`
-        : `In our opinion and to the best of our information and according to the explanations given to us, the aforesaid standalone financial statements give the information required by the Companies Act, 2013 ("the Act") in the manner so required and give a true and fair view in conformity with the Accounting Standards specified under section 133 of the Act and other accounting principles generally accepted in India, of the state of affairs of the Company as at March 31, 2025, and its profit/loss [delete whichever is not applicable] for the year ended on that date.`;
-
-      addParagraph(opinionConclusion);
-
-      y += 3;
-      addHeading('Basis for Opinion');
-      addParagraph(`We conducted our audit of the Standalone Financial Statements in accordance with the Standards on Auditing ("SAs") specified under section 143(10) of the Act. Our responsibilities under those Standards are further described in the Auditor's Responsibilities for the Audit of the Standalone Financial Statements section of our report. We are independent of the Company in accordance with the Code of Ethics issued by the Institute of Chartered Accountants of India ("ICAI") together with the ethical requirements that are relevant to our audit of the Standalone Financial Statements under the provisions of the Act and the Rules made thereunder, and we have fulfilled our other ethical responsibilities in accordance with these requirements and the ICAI's Code of Ethics. We believe that the audit evidence obtained by us is sufficient and appropriate to provide a basis for our audit opinion on the Standalone Financial Statements.`);
-
-      // Key Audit Matters from database
-      if (KAM_ENABLED && kams.length > 0) {
-        y += 3;
-        addHeading('Key Audit Matters');
-        addParagraph(`Key audit matters are those matters that, in our professional judgment, were of most significance in our audit of the Standalone Financial Statements of the current period. These matters were addressed in the context of our audit of the Standalone Financial Statements as a whole, and in forming our opinion thereon, and we do not provide a separate opinion on these matters.`);
-
-        kams.forEach((kam, index) => {
-          checkPageBreak(30);
-          addHeading(`${index + 1}. ${kam.title}`, 10);
-          addParagraph(kam.description, 9);
-          
-          checkPageBreak(20);
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(9);
-          doc.text('How our audit addressed the matter:', margin, y);
-          y += 5;
-          addParagraph(kam.audit_response, 9);
-          y += 3;
-        });
+      if (!hasProfitOrLoss) {
+        toast.error('Select Profit or Loss before exporting.');
+        return;
       }
-
-      // Other standard sections
-      y += 3;
-      addHeading('Information Other than the Financial Statements and Auditor\'s Report Thereon');
-      addParagraph(`The Company's Management and Board of Directors are responsible for the other information. The other information comprises the information included in the Company's Annual Report but does not include the Standalone Financial Statements and our auditor's report thereon.`);
-      addParagraph(`Our opinion on the Standalone Financial Statements does not cover the other information and we do not express any form of assurance conclusion thereon.`);
-
-      y += 3;
-      addHeading('Management\'s and Board of Directors\' Responsibilities for the Standalone Financial Statements');
-      addParagraph(`The Company's Management and Board of Directors are responsible for the matters stated in section 134(5) of the Act with respect to the preparation of these Standalone Financial Statements that give a true and fair view of the state of affairs, profit/loss and other comprehensive income, changes in equity and cash flows of the Company in accordance with the accounting principles generally accepted in India, including the Indian Accounting Standards (Ind AS) specified under section 133 of the Act.`);
-
-      y += 3;
-      addHeading('Auditor\'s Responsibilities for the Audit of the Standalone Financial Statements');
-      addParagraph(`Our objectives are to obtain reasonable assurance about whether the Standalone Financial Statements as a whole are free from material misstatement, whether due to fraud or error, and to issue an auditor's report that includes our opinion. Reasonable assurance is a high level of assurance, but is not a guarantee that an audit conducted in accordance with SAs will always detect a material misstatement when it exists.`);
-
-      // Report on Other Legal and Regulatory Requirements
-      doc.addPage();
-      y = 25;
-      addHeading('Report on Other Legal and Regulatory Requirements');
-      addParagraph(`1. As required by Section 143(3) of the Act, based on our audit, we report, to the extent applicable that:`);
-      addParagraph(`(a) We have sought and obtained all the information and explanations which to the best of our knowledge and belief were necessary for the purposes of our audit.`, 10, 10);
-      addParagraph(`(b) In our opinion, proper books of account as required by law have been kept by the Company so far as it appears from our examination of those books.`, 10, 10);
-      addParagraph(`(c) The Balance Sheet, the Statement of Profit and Loss including Other Comprehensive Income, the Statement of Changes in Equity and the Statement of Cash Flows dealt with by this Report are in agreement with the books of account.`, 10, 10);
-      addParagraph(`(d) In our opinion, the aforesaid Standalone Financial Statements comply with the Ind AS specified under Section 133 of the Act.`, 10, 10);
-      addParagraph(`(e) On the basis of the written representations received from the directors as on March 31, 2025 taken on record by the Board of Directors, none of the directors is disqualified as on March 31, 2025 from being appointed as a director in terms of Section 164(2) of the Act.`, 10, 10);
-      addParagraph(`(f) With respect to the adequacy of the internal financial controls with reference to financial statements of the Company and the operating effectiveness of such controls, refer to our separate Report in "Annexure A".`, 10, 10);
-
-      addParagraph(`2. With respect to the other matters to be included in the Auditor's Report in accordance with Rule 11 of the Companies (Audit and Auditors) Rules, 2014, as amended, in our opinion and to the best of our information and according to the explanations given to us:`);
-      addParagraph(`(a) The Company has disclosed the impact of pending litigations as at March 31, 2025 on its financial position in its Standalone Financial Statements.`, 10, 10);
-      addParagraph(`(b) The Company has made provision, as required under the applicable law or accounting standards, for material foreseeable losses, if any, on long-term contracts including derivative contracts.`, 10, 10);
-      addParagraph(`(c) There has been no delay in transferring amounts, required to be transferred, to the Investor Education and Protection Fund by the Company.`, 10, 10);
-
-      addParagraph(`3. With respect to the matter to be included in the Auditor's Report under Section 197(16), as amended: In our opinion and according to the information and explanations given to us, the remuneration paid by the Company to its directors during the current year is in accordance with the provisions of Section 197 of the Act.`);
-
-      // Signature block
-      y += 10;
-      checkPageBreak(40);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      const signX = pageWidth - margin - 60;
-      doc.text(`For ${reportData.auditorFirmName}`, signX, y);
-      y += 5;
-      doc.setFont('helvetica', 'normal');
-      doc.text('Chartered Accountants', signX, y);
-      y += 5;
-      doc.text(`(Firm's Registration No. ${reportData.auditorFirmRegNo})`, signX, y);
-      y += 10;
-      doc.setFont('helvetica', 'bold');
-      doc.text(reportData.auditorName, signX, y);
-      y += 5;
-      doc.setFont('helvetica', 'normal');
-      doc.text('Partner', signX, y);
-      y += 5;
-      doc.text(`(Membership No. ${reportData.auditorMembershipNo})`, signX, y);
-      y += 5;
-      doc.text(`UDIN: ${reportData.auditorUDIN}`, signX, y);
-      y += 10;
-      doc.text(`Place: ${reportData.auditorCity}`, signX, y);
-      y += 5;
-      doc.text(`Date: ${reportData.reportDate}`, signX, y);
-
-      // ===== ANNEXURE A - IFCFR =====
-      doc.addPage();
-      y = 25;
-      addTitle('ANNEXURE "A" TO THE INDEPENDENT AUDITOR\'S REPORT');
-      y += 3;
-      addParagraph('Report on the Internal Financial Controls with reference to Standalone Financial Statements under Clause (i) of sub-section 3 of Section 143 of the Companies Act, 2013 (the "Act")', 10);
-      y += 5;
-
-      addParagraph(`We have audited the internal financial controls with reference to Standalone Financial Statements of ${reportData.entityName} (the "Company") as of March 31, 2025 in conjunction with our audit of the Standalone Financial Statements of the Company for the year ended on that date.`);
-
-      y += 3;
-      addHeading('Management\'s and Board of Directors\' Responsibilities for Internal Financial Controls');
-      addParagraph(`The Company's Management and Board of Directors are responsible for establishing and maintaining internal financial controls with reference to Standalone Financial Statements based on the internal control over financial reporting criteria established by the Company considering the essential components of internal control stated in the Guidance Note on Audit of Internal Financial Controls Over Financial Reporting issued by the Institute of Chartered Accountants of India (the "ICAI").`);
-
-      y += 3;
-      addHeading('Auditor\'s Responsibility');
-      addParagraph(`Our responsibility is to express an opinion on the Company's internal financial controls with reference to Standalone Financial Statements based on our audit. We conducted our audit in accordance with the Guidance Note on Audit of Internal Financial Controls Over Financial Reporting (the "Guidance Note") issued by the ICAI and the Standards on Auditing prescribed under Section 143(10) of the Act, to the extent applicable to an audit of internal financial controls with reference to Standalone Financial Statements.`);
-
-      y += 3;
-      addHeading('Opinion');
-      addParagraph(`In our opinion, to the best of our information and according to the explanations given to us, the Company has, in all material respects, an adequate internal financial controls with reference to Standalone Financial Statements and such internal financial controls with reference to Standalone Financial Statements were operating effectively as at March 31, 2025, based on the criteria for internal financial control with reference to Standalone Financial Statements established by the Company considering the essential components of internal control stated in the Guidance Note on Audit of Internal Financial Controls Over Financial Reporting issued by the ICAI.`);
-
-      // IFCFR Signature
-      y += 10;
-      checkPageBreak(40);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text(`For ${reportData.auditorFirmName}`, signX, y);
-      y += 5;
-      doc.setFont('helvetica', 'normal');
-      doc.text('Chartered Accountants', signX, y);
-      y += 5;
-      doc.text(`(Firm's Registration No. ${reportData.auditorFirmRegNo})`, signX, y);
-      y += 10;
-      doc.setFont('helvetica', 'bold');
-      doc.text(reportData.auditorName, signX, y);
-      y += 5;
-      doc.setFont('helvetica', 'normal');
-      doc.text('Partner', signX, y);
-      y += 5;
-      doc.text(`(Membership No. ${reportData.auditorMembershipNo})`, signX, y);
-      y += 5;
-      doc.text(`UDIN: ${reportData.auditorUDIN}`, signX, y);
-      y += 10;
-      doc.text(`Place: ${reportData.auditorCity}`, signX, y);
-      y += 5;
-      doc.text(`Date: ${reportData.reportDate}`, signX, y);
-
-      // ===== ANNEXURE B - CARO =====
-      doc.addPage();
-      y = 25;
-      addTitle('ANNEXURE \'B\' TO THE INDEPENDENT AUDITOR\'S REPORT');
-      y += 3;
-      addParagraph(`(Referred to in paragraph 2 under 'Report on Other Legal and Regulatory Requirements' section of our report to the Members of ${reportData.entityName} of even date)`, 9);
-      y += 3;
-      addParagraph('To the best of our information and according to the explanations provided to us by the Company and the books of account and records examined by us in the normal course of audit, we state that:', 10);
-      y += 5;
-
-      // CARO Clauses
-      const orderedClauseIds = [
-        '3(i)', '3(ii)', '3(iii)', '3(iv)', '3(v)', '3(vi)', '3(vii)', '3(viii)',
-        '3(ix)', '3(x)', '3(xi)', '3(xii)', '3(xiii)', '3(xiv)', '3(xv)', '3(xvi)',
-        '3(xvii)', '3(xviii)', '3(xix)', '3(xx)', '3(xxi)'
-      ];
-
-      orderedClauseIds.forEach((clauseId, index) => {
-        const response = responses.find(r => r.clause_id === clauseId);
-        const clause = clauses.find(c => c.clause_id === clauseId);
-        
-        checkPageBreak(20);
-        
-        // Roman numeral for main clause
-        const romanNumerals = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 
-                                'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx', 'xxi'];
-        const romanNumeral = romanNumerals[index] || `${index + 1}`;
-        
-        if (clause) {
-          addHeading(`${romanNumeral}. ${clause.clause_title}`, 10);
-        } else {
-          addHeading(`${romanNumeral}. Clause ${clauseId}`, 10);
-        }
-        
-        if (response) {
-          if (!response.is_applicable && response.na_reason) {
-            addParagraph(response.na_reason, 9);
-          } else if (response.conclusion_text) {
-            addParagraph(response.conclusion_text, 9);
-          } else {
-            addParagraph('Response pending.', 9);
-          }
-        } else {
-          addParagraph('Response not completed.', 9);
-        }
-        y += 3;
-      });
-
-      // CARO Signature
-      checkPageBreak(50);
-      y += 10;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text(`For ${reportData.auditorFirmName}`, signX, y);
-      y += 5;
-      doc.setFont('helvetica', 'normal');
-      doc.text('Chartered Accountants', signX, y);
-      y += 5;
-      doc.text(`(Firm's Registration No. ${reportData.auditorFirmRegNo})`, signX, y);
-      y += 10;
-      doc.setFont('helvetica', 'bold');
-      doc.text(reportData.auditorName, signX, y);
-      y += 5;
-      doc.setFont('helvetica', 'normal');
-      doc.text('Partner', signX, y);
-      y += 5;
-      doc.text(`(Membership No. ${reportData.auditorMembershipNo})`, signX, y);
-      y += 5;
-      doc.text(`UDIN: ${reportData.auditorUDIN}`, signX, y);
-      y += 10;
-      doc.text(`Place: ${reportData.auditorCity}`, signX, y);
-      y += 5;
-      doc.text(`Date: ${reportData.reportDate}`, signX, y);
-
-      // Save
-      doc.save(`Audit_Report_${reportData.entityName.replace(/\s+/g, '_')}_FY${reportData.financialYear}.pdf`);
-      toast.success('Full Audit Report Package generated successfully!');
+      const sections = buildFullReportSections();
+      if (!sections.length || !resolvedMainPreviewHtml.trim()) {
+        toast.error('Main report preview is empty.');
+        return;
+      }
+      const html = sections.join('<div class="page-break"></div>');
+      await renderHtmlToPdf(
+        html,
+        `Audit_Report_${reportData.entityName.replace(/\s+/g, '_')}_FY${reportData.financialYear}.pdf`
+      );
+      toast.success('Full Audit Report (PDF) generated successfully!');
     } catch (error) {
       console.error('Error generating PDF:', error);
       toast.error('Failed to generate PDF');
@@ -389,61 +254,16 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
     setGenerating(true);
     
     try {
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const margin = 20;
-      const maxWidth = pageWidth - 2 * margin;
-      let y = 20;
-
-      const addText = (text: string, fontSize: number = 10, bold: boolean = false, align: 'left' | 'center' | 'right' = 'left') => {
-        doc.setFontSize(fontSize);
-        doc.setFont('helvetica', bold ? 'bold' : 'normal');
-        
-        const lines = doc.splitTextToSize(text, maxWidth);
-        
-        lines.forEach((line: string) => {
-          if (y > 270) {
-            doc.addPage();
-            y = 20;
-          }
-          
-          let x = margin;
-          if (align === 'center') x = pageWidth / 2;
-          if (align === 'right') x = pageWidth - margin;
-          
-          doc.text(line, x, y, { align });
-          y += fontSize * 0.5;
-        });
-        y += 3;
-      };
-
-      // Header
-      addText('ANNEXURE B TO THE INDEPENDENT AUDITOR\'S REPORT', 14, true, 'center');
-      y += 5;
-      addText('(Referred to in paragraph 2 under \'Report on Other Legal and Regulatory Requirements\' section of our report of even date)', 10, false, 'center');
-      y += 10;
-
-      // CARO Clauses
-      applicableClauses.forEach((clause) => {
-        const response = responses.find(r => r.clause_id === clause.clause_id);
-        
-        addText(`Clause ${clause.clause_id}: ${clause.clause_title}`, 11, true);
-        
-        if (response) {
-          if (!response.is_applicable) {
-            addText(response.na_reason || `This clause is not applicable to the company.`);
-          } else {
-            addText(response.conclusion_text || 'Response pending.');
-          }
-        } else {
-          addText('Response not completed.');
-        }
-        
-        y += 5;
-      });
-
-      // Save
-      doc.save(`CARO_2020_Annexure_${engagementId.slice(0, 8)}.pdf`);
+      if (!includeCaro) {
+        toast.error('CARO is not applicable for this engagement.');
+        return;
+      }
+      const html = resolvedCaroPreviewHtml;
+      if (!html.trim()) {
+        toast.error('CARO preview is empty.');
+        return;
+      }
+      await renderHtmlToPdf(html, `CARO_2020_Annexure_${engagementId.slice(0, 8)}.pdf`);
       toast.success('CARO Annexure generated successfully');
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -453,7 +273,7 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
     }
   };
 
-  const generateFullAuditReportWord = async () => {
+  const generateFullAuditReportWordLegacy = async () => {
     setGenerating(true);
 
     try {
@@ -1038,6 +858,138 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
     }
   };
 
+  const generateMainReportPDF = async () => {
+    setGenerating(true);
+
+    try {
+      if (!hasProfitOrLoss) {
+        toast.error('Select Profit or Loss before exporting.');
+        return;
+      }
+      const html = resolvedMainPreviewHtml;
+      if (!html.trim()) {
+        toast.error('Main report preview is empty.');
+        return;
+      }
+      await renderHtmlToPdf(
+        html,
+        `Main_Report_${reportData.entityName.replace(/\s+/g, '_')}_FY${reportData.financialYear}.pdf`
+      );
+      toast.success('Main report generated successfully!');
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast.error('Failed to generate PDF');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const generateFullAuditReportWord = async () => {
+    setGenerating(true);
+
+    try {
+      if (!hasProfitOrLoss) {
+        toast.error('Select Profit or Loss before exporting.');
+        return;
+      }
+      const sections = buildFullReportSections();
+      if (!sections.length || !resolvedMainPreviewHtml.trim()) {
+        toast.error('Main report preview is empty.');
+        return;
+      }
+      const logoResponse = await fetch(caIndiaLogo);
+      const logoBuffer = await logoResponse.arrayBuffer();
+
+      const firmName = firmSettings?.firm_name || 'Firm Name';
+      const firmAddress = firmSettings?.address || '';
+
+      const header = new Header({
+        children: [
+          new Paragraph({
+            children: [
+              new ImageRun({
+                data: logoBuffer,
+                transformation: { width: 132, height: 132 },
+                type: 'jpg',
+                floating: {
+                  horizontalPosition: {
+                    offset: 0,
+                    relative: HorizontalPositionRelativeFrom.MARGIN,
+                  },
+                  verticalPosition: {
+                    offset: 0,
+                    relative: VerticalPositionRelativeFrom.PARAGRAPH,
+                  },
+                  wrap: {
+                    type: TextWrappingType.NONE,
+                  },
+                  behindDocument: false,
+                },
+              }),
+            ],
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new TextRun({ text: firmName, bold: true, size: 28 })],
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new TextRun({ text: 'Chartered Accountants', italics: true, size: 22 })],
+          }),
+          new Paragraph({
+            border: {
+              bottom: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
+            },
+            spacing: { after: 200 },
+          }),
+        ],
+      });
+
+      const footer = new Footer({
+        children: [
+          new Paragraph({
+            border: {
+              top: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
+            },
+            spacing: { before: 200 },
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new TextRun({ text: firmAddress, size: 18 })],
+          }),
+        ],
+      });
+
+      const children = buildDocxChildren(sections);
+
+      const doc = new Document({
+        sections: [
+          {
+            properties: {},
+            headers: { default: header },
+            footers: { default: footer },
+            children,
+          },
+        ],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Audit_Report_${reportData.entityName.replace(/\s+/g, '_')}_FY${reportData.financialYear}.docx`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success('Full Audit Report (Word) generated successfully!');
+    } catch (error) {
+      console.error('Error generating Word document:', error);
+      toast.error('Failed to generate Word document');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Completion Status */}
@@ -1072,6 +1024,15 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
               <AlertTriangle className="h-4 w-4 text-warning" />
               <AlertDescription>
                 Some CARO clauses are not yet completed. You can still generate a draft report.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!hasProfitOrLoss && (
+            <Alert className="border-warning">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              <AlertDescription>
+                Select Profit or Loss in the Main Report configuration before exporting.
               </AlertDescription>
             </Alert>
           )}
@@ -1115,7 +1076,7 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
                   <PdfIcon className="h-8 w-8" />
                   <div>
                     <h3 className="font-semibold">Full Report Pack (PDF)</h3>
-                    <p className="text-sm text-muted-foreground">Main + IFCFR + CARO</p>
+                    <p className="text-sm text-muted-foreground">Main + IFC + CARO (as applicable)</p>
                   </div>
                 </div>
                 <Button 
@@ -1138,7 +1099,7 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
                   <WordIcon className="h-8 w-8" />
                   <div>
                     <h3 className="font-semibold">Full Report Pack (Word)</h3>
-                    <p className="text-sm text-muted-foreground">Main + IFCFR + CARO with Letterhead</p>
+                    <p className="text-sm text-muted-foreground">Main + IFC + CARO with Letterhead</p>
                   </div>
                 </div>
                 <Button 
@@ -1170,11 +1131,14 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
                   className="w-full gap-2" 
                   variant="outline"
                   onClick={generateCAROPDF}
-                  disabled={generating}
+                  disabled={generating || !includeCaro}
                 >
                   <Download className="h-4 w-4" />
                   {generating ? 'Generating...' : 'Download CARO PDF'}
                 </Button>
+                {!includeCaro && (
+                  <p className="text-xs text-muted-foreground mt-2 text-center">Not applicable for this engagement.</p>
+                )}
               </CardContent>
             </Card>
 
@@ -1187,9 +1151,14 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
                     <p className="text-sm text-muted-foreground">Independent Auditor's Report</p>
                   </div>
                 </div>
-                <Button className="w-full gap-2" variant="outline" disabled>
+                <Button
+                  className="w-full gap-2"
+                  variant="outline"
+                  onClick={generateMainReportPDF}
+                  disabled={generating}
+                >
                   <Download className="h-4 w-4" />
-                  Coming Soon
+                  {generating ? 'Generating...' : 'Download Main Report PDF'}
                 </Button>
               </CardContent>
             </Card>

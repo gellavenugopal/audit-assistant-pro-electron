@@ -1,8 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ClipboardCheck, FileSignature, ShieldCheck, UploadCloud, FileDown, Eye } from 'lucide-react';
+import { ClipboardCheck, FileSignature, UploadCloud, FileDown, Eye, Trash2 } from 'lucide-react';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -12,33 +11,45 @@ import { EngagementAcceptanceChecklist } from '@/components/appointment/Engageme
 import { ConfidentialityDeclaration } from '@/components/appointment/ConfidentialityDeclaration';
 import { IndependenceDeclaration } from '@/components/appointment/IndependenceDeclaration';
 import { useEvidenceFiles, EvidenceFile } from '@/hooks/useEvidenceFiles';
+import { PreviousAuditorCommunication } from '@/components/appointment/PreviousAuditorCommunication';
+import { EligibilityCertificate } from '@/components/appointment/EligibilityCertificate';
 
 export default function Appointment() {
   const { currentEngagement } = useEngagement();
   const navigate = useNavigate();
   const [showLettersPage, setShowLettersPage] = useState(false);
+  const [showPrevAuditorCommunication, setShowPrevAuditorCommunication] = useState(false);
   const appointmentLetterInputRef = useRef<HTMLInputElement>(null);
   const adt1InputRef = useRef<HTMLInputElement>(null);
   const challanInputRef = useRef<HTMLInputElement>(null);
-  const { files, uploadFile, downloadFile, getFileUrl } = useEvidenceFiles(currentEngagement?.id);
+  const { files, uploadFile, downloadFile, getFileUrl, deleteFile } = useEvidenceFiles(currentEngagement?.id);
 
   const handleFileUpload = (label: string, fileType: string) => {
     return async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const files = event.target.files;
-      if (files && files.length > 0) {
-        const file = files[0];
-        const fileExtension = file.name.split('.').pop()?.toLowerCase();
-        
-        // Validate file type
-        const validExtensions = ['pdf', 'jpg', 'jpeg', 'doc', 'docx'];
-        if (!fileExtension || !validExtensions.includes(fileExtension)) {
-          toast.error('Invalid file format. Only PDF, JPEG, or DOC/DOCX files are allowed.');
-          return;
-        }
+      const selected = Array.from(event.target.files || []);
+      if (selected.length === 0) return;
 
-        if (!currentEngagement) {
-          toast.error('Please select an engagement before uploading.');
-          return;
+      // Validate file type
+      const validExtensions = ['pdf', 'jpg', 'jpeg', 'doc', 'docx'];
+      const invalidFiles = selected.filter((file) => {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        return !fileExtension || !validExtensions.includes(fileExtension);
+      });
+
+      if (invalidFiles.length) {
+        toast.error('Invalid file format. Only PDF, JPEG, or DOC/DOCX files are allowed.');
+      }
+
+      if (!currentEngagement) {
+        toast.error('Please select an engagement before uploading.');
+        event.target.value = '';
+        return;
+      }
+
+      for (const file of selected) {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        if (!fileExtension || !validExtensions.includes(fileExtension)) {
+          continue;
         }
 
         const uploaded = await uploadFile(file, {
@@ -49,15 +60,54 @@ export default function Appointment() {
         if (uploaded) {
           toast.success(`${label} uploaded successfully.`);
         }
-        
-        // Reset input
-        event.target.value = '';
       }
+      
+      // Reset input
+      event.target.value = '';
     };
   };
 
   const handleGenerateEngagementLetter = () => {
     navigate('/appointment/engagement-letter');
+  };
+
+  const handleAppointmentLetterUpload = () => {
+    return async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const selected = Array.from(event.target.files || []);
+      if (selected.length === 0) {
+        return;
+      }
+
+      const validExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
+      const invalidFiles = selected.filter((file) => {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        return !fileExtension || !validExtensions.includes(fileExtension);
+      });
+
+      if (invalidFiles.length) {
+        toast.error('Invalid file format. Only PDF, JPG, JPEG, or PNG files are allowed.');
+      }
+
+      if (!currentEngagement) {
+        toast.error('Please select an engagement before uploading.');
+        event.target.value = '';
+        return;
+      }
+
+      for (const file of selected) {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        if (!fileExtension || !validExtensions.includes(fileExtension)) {
+          continue;
+        }
+
+        await uploadFile(file, {
+          name: file.name,
+          file_type: 'appointment_letter',
+        });
+      }
+
+      event.target.value = '';
+    };
   };
 
 
@@ -103,6 +153,39 @@ export default function Appointment() {
     );
   };
 
+  const renderAppointmentLetterList = (items: EvidenceFile[]) => {
+    if (items.length === 0) {
+      return (
+        <p className="text-xs text-muted-foreground">
+          No uploads yet.
+        </p>
+      );
+    }
+
+    return (
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-900 truncate">{item.name}</p>
+              <p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleDateString()}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => openFilePreview(item)}>
+                <Eye className="h-4 w-4 mr-2" />
+                View
+              </Button>
+              <Button size="sm" variant="destructive" onClick={() => deleteFile(item)}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const appointmentFiles = files.filter((file) => file.file_type === 'appointment_letter');
   const adt1Files = files.filter((file) => file.file_type === 'adt1');
   const challanFiles = files.filter((file) => file.file_type === 'challan');
@@ -133,19 +216,8 @@ export default function Appointment() {
         </TabsList>
 
         <TabsContent value="eligibility" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5" />
-                  Auditor Eligibility Certificate
-                </CardTitle>
-                <CardDescription>Record the auditor eligibility certificate for this engagement.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">Module will be available soon.</p>
-              </CardContent>
-            </Card>
+          <div className="grid gap-4">
+            <EligibilityCertificate />
           </div>
         </TabsContent>
 
@@ -154,21 +226,17 @@ export default function Appointment() {
         </TabsContent>
 
         <TabsContent value="appointment" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileSignature className="h-5 w-5" />
-                  Communication with Previous Auditor
-                </CardTitle>
-                <CardDescription>Document communication with the previous auditor.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">Module will be available soon.</p>
-              </CardContent>
-            </Card>
+          <div
+            className={
+              showPrevAuditorCommunication
+                ? 'grid gap-4'
+                : 'grid gap-4 md:grid-cols-2 xl:grid-cols-3'
+            }
+          >
+            <PreviousAuditorCommunication onOpenChange={setShowPrevAuditorCommunication} />
 
-            <Card>
+            {!showPrevAuditorCommunication && (
+              <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <FileSignature className="h-5 w-5" />
@@ -180,8 +248,9 @@ export default function Appointment() {
                 <input
                   ref={appointmentLetterInputRef}
                   type="file"
-                  accept=".pdf,.jpg,.jpeg,.doc,.docx"
-                  onChange={handleFileUpload('Appointment Letter', 'appointment_letter')}
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  multiple
+                  onChange={handleAppointmentLetterUpload()}
                   className="hidden"
                 />
                 <div className="flex flex-wrap gap-2">
@@ -191,58 +260,63 @@ export default function Appointment() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground font-medium">
-                  Supported formats: PDF (.pdf), JPEG (.jpg, .jpeg), DOC/DOCX
+                  Supported formats: PDF (.pdf), JPG/JPEG (.jpg, .jpeg), PNG (.png)
                 </p>
-                {renderFileList(appointmentFiles)}
+                {renderAppointmentLetterList(appointmentFiles)}
               </CardContent>
             </Card>
+            )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ClipboardCheck className="h-5 w-5" />
-                  ADT-1 & Challan
-                </CardTitle>
-                <CardDescription>Capture ADT-1 filing and challan proof.</CardDescription>
-                <p className="text-xs text-muted-foreground">Applicable for Companies only.</p>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <input
-                  ref={adt1InputRef}
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.doc,.docx"
-                  onChange={handleFileUpload('ADT-1', 'adt1')}
-                  className="hidden"
-                />
-                <input
-                  ref={challanInputRef}
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.doc,.docx"
-                  onChange={handleFileUpload('Challan', 'challan')}
-                  className="hidden"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => adt1InputRef.current?.click()}>
-                    <UploadCloud className="h-4 w-4 mr-2" />
-                    Upload ADT-1
-                  </Button>
-                  <Button size="sm" onClick={() => challanInputRef.current?.click()}>
-                    <UploadCloud className="h-4 w-4 mr-2" />
-                    Upload Challan
-                  </Button>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-2">ADT-1 uploads</p>
-                    {renderFileList(adt1Files)}
+            {!showPrevAuditorCommunication && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ClipboardCheck className="h-5 w-5" />
+                    ADT-1 & Challan
+                  </CardTitle>
+                  <CardDescription>Capture ADT-1 filing and challan proof.</CardDescription>
+                  <p className="text-xs text-muted-foreground">Applicable for Companies only.</p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <input
+                    ref={adt1InputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.doc,.docx"
+                    multiple
+                    onChange={handleFileUpload('ADT-1', 'adt1')}
+                    className="hidden"
+                  />
+                  <input
+                    ref={challanInputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.doc,.docx"
+                    multiple
+                    onChange={handleFileUpload('Challan', 'challan')}
+                    className="hidden"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => adt1InputRef.current?.click()}>
+                      <UploadCloud className="h-4 w-4 mr-2" />
+                      Upload ADT-1
+                    </Button>
+                    <Button size="sm" onClick={() => challanInputRef.current?.click()}>
+                      <UploadCloud className="h-4 w-4 mr-2" />
+                      Upload Challan
+                    </Button>
                   </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-2">Challan uploads</p>
-                    {renderFileList(challanFiles)}
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">ADT-1 uploads</p>
+                      {renderFileList(adt1Files)}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">Challan uploads</p>
+                      {renderFileList(challanFiles)}
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
 

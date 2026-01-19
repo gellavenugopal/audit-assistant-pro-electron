@@ -169,23 +169,32 @@ export function IndependenceDeclaration() {
   };
 
   const handleSignedUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const selected = Array.from(event.target.files || []);
+    if (selected.length === 0) return;
 
-    const fileExtension = file.name.split('.').pop()?.toLowerCase();
     const validExtensions = ['pdf', 'jpg', 'jpeg', 'doc', 'docx'];
-    if (!fileExtension || !validExtensions.includes(fileExtension)) {
+    const invalidFiles = selected.filter((item) => {
+      const fileExtension = item.name.split('.').pop()?.toLowerCase();
+      return !fileExtension || !validExtensions.includes(fileExtension);
+    });
+    if (invalidFiles.length) {
       toast.error('Invalid file format. Only PDF, JPEG, or DOC/DOCX files are allowed.');
-      return;
     }
 
-    const uploaded = await uploadFile(file, {
-      name: file.name,
-      file_type: 'independence_confirmation',
-    });
+    for (const file of selected) {
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      if (!fileExtension || !validExtensions.includes(fileExtension)) {
+        continue;
+      }
 
-    if (uploaded) {
-      toast.success('Signed independence declaration uploaded successfully.');
+      const uploaded = await uploadFile(file, {
+        name: file.name,
+        file_type: 'independence_confirmation',
+      });
+
+      if (uploaded) {
+        toast.success('Signed independence declaration uploaded successfully.');
+      }
     }
 
     event.target.value = '';
@@ -376,13 +385,14 @@ export function IndependenceDeclaration() {
             <CardDescription>Generate engagement-wise independence declarations for team members.</CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
-            <input
-              ref={signedInputRef}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.doc,.docx"
-              onChange={handleSignedUpload}
-              className="hidden"
-            />
+              <input
+                ref={signedInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.doc,.docx"
+                multiple
+                onChange={handleSignedUpload}
+                className="hidden"
+              />
             <Button size="sm" onClick={() => signedInputRef.current?.click()}>
               <UploadCloud className="h-4 w-4 mr-2" />
               Upload signed declaration
