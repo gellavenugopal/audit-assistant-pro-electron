@@ -187,10 +187,15 @@ const buildStockDetailRows = (values: ManualInventoryValues): LedgerRow[] => {
   const rows = STOCK_DETAIL_CATEGORIES.map(category => {
     const opening = values[category.key].opening || 0;
     const closing = values[category.key].closing || 0;
+    
+    // For Closing Inventory (Asset):
+    // Opening Balance = -opening (negated, as it's the reversal of previous year's closing)
+    // Closing Balance = closing (the current year's inventory value)
+    // The difference determines Debit/Credit
     return buildStockDetailRow({
       ledgerName: `Closing Inventory [${category.label}]`,
-      opening,
-      closing,
+      opening: -opening,  // NEGATIVE for accounting reversal
+      closing: closing,    // POSITIVE for current inventory
       h1: 'Asset',
       h2: 'Inventories',
       h3: category.label,
@@ -206,6 +211,10 @@ const buildStockDetailRows = (values: ManualInventoryValues): LedgerRow[] => {
     (acc, category) => acc + (values[category.key].closing || 0),
     0
   );
+  
+  // Change in Inventories = Total Opening Stock Debit - Total Closing Stock Credit
+  // If totalClosing > totalOpening, then Credit (negative closing balance)
+  // If totalOpening > totalClosing, then Debit (positive closing balance)
   const changeValue = Number(totalOpening - totalClosing) || 0;
 
   rows.push(
