@@ -217,47 +217,59 @@ function registerIpcHandlers() {
         return isNaN(num) ? 0 : num;
       };
 
-      const processedData = result.map(row => {
-        const accountHead = row['$Name'] || '';
-        const openingBalance = parseNumeric(row['$OpeningBalance']);
-        let closingBalance = parseNumeric(row['$ClosingBalance']);
-        
-        // For Profit & Loss A/c, use opening balance as closing balance
-        // because Tally's TB shows P&L without current year's profit/loss
-        if (accountHead.toLowerCase() === 'profit & loss a/c' || 
-            accountHead.toLowerCase() === 'profit and loss a/c') {
-          closingBalance = openingBalance;
-        }
-        
-        return {
-          accountHead,
-          openingBalance,
-          totalDebit: parseNumeric(row['$DebitTotals']),
-          totalCredit: parseNumeric(row['$CreditTotals']),
-          closingBalance,
-          accountCode: row['$Code'] || '',
-          branch: row['$Branch'] || 'HO',
-          // Add hierarchy data
-          primaryGroup: row['$_PrimaryGroup'] || '',
-          parent: row['$Parent'] || '',
-          isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
-        };
-      });
+      // IMPORTANT: Filter out Stock-in-Hand ledgers because Tally ODBC returns CURRENT stock value
+      // in $OpeningBalance/$ClosingBalance, NOT the actual opening value. We'll add the correct
+      // Opening Stock entry separately using calculated values from StockItem query.
+      const processedData = result
+        .filter(row => {
+          const primaryGroup = (row['$_PrimaryGroup'] || '').toLowerCase();
+          const accountHead = (row['$Name'] || '').toLowerCase();
+          // Exclude Stock-in-Hand ledgers - we'll add correct Opening Stock separately
+          if (primaryGroup === 'stock-in-hand' || 
+              accountHead.includes('stock-in-hand') ||
+              accountHead === 'stock in hand') {
+            safeLog(`Trial Balance: Excluding ledger "${row['$Name']}" (Stock-in-Hand) - will add corrected stock entry`);
+            return false;
+          }
+          return true;
+        })
+        .map(row => {
+          const accountHead = row['$Name'] || '';
+          const primaryGroup = row['$_PrimaryGroup'] || '';
+          const openingBalance = parseNumeric(row['$OpeningBalance']);
+          let closingBalance = parseNumeric(row['$ClosingBalance']);
+          
+          // For Profit & Loss A/c, use opening balance as closing balance
+          // because Tally's TB shows P&L without current year's profit/loss
+          // This prevents "Net Profit" from appearing in closing balance
+          if (accountHead.toLowerCase() === 'profit & loss a/c' || 
+              accountHead.toLowerCase() === 'profit and loss a/c' ||
+              accountHead.toLowerCase() === 'profit & loss account' ||
+              accountHead.toLowerCase() === 'profit and loss account') {
+            closingBalance = openingBalance;
+          }
+          
+          return {
+            accountHead,
+            openingBalance,
+            totalDebit: parseNumeric(row['$DebitTotals']),
+            totalCredit: parseNumeric(row['$CreditTotals']),
+            closingBalance,
+            accountCode: row['$Code'] || '',
+            branch: row['$Branch'] || 'HO',
+            // Add hierarchy data
+            primaryGroup,
+            parent: row['$Parent'] || '',
+            isRevenue: row['$IsRevenue'] === 'Yes' || row['$IsRevenue'] === true || row['$IsRevenue'] === 1,
+          };
+        });
 
-      // Add opening stock as a separate line item if stock items exist
-      // Check if there's already an "Opening Stock" ledger
-      const hasOpeningStockLedger = processedData.some(line => 
-        line.accountHead?.toLowerCase() === 'opening stock' ||
-        line.accountHead?.toLowerCase().includes('opening stock') ||
-        line.primaryGroup?.toLowerCase().includes('stock-in-hand')
-      );
-
-      if (totalOpeningStock !== 0 && !hasOpeningStockLedger) {
-        // Add opening stock as a ledger entry
-        // Note: Opening Stock is a static account - opening and closing should be SAME
-        // because it represents the stock value at the START of the period only
+      // Add Opening Stock as a separate entry using correctly calculated value from StockItem query
+      // Note: Opening Stock is a STATIC account in Trial Balance - both opening and closing should
+      // show the SAME value (the stock value at START of period). Closing Stock is shown in P&L.
+      if (totalOpeningStock !== 0) {
         processedData.push({
-          accountHead: 'Opening Stock (from Stock Items)',
+          accountHead: 'Opening Stock',
           openingBalance: -totalOpeningStock, // Negative because it's an asset (debit balance in Tally convention)
           totalDebit: 0,
           totalCredit: 0,
@@ -268,9 +280,7 @@ function registerIpcHandlers() {
           parent: 'Current Assets',
           isRevenue: false,
         });
-        safeLog(`Trial Balance: Added opening stock entry: ${totalOpeningStock}`);
-      } else if (totalOpeningStock !== 0 && hasOpeningStockLedger) {
-        safeLog(`Trial Balance: Stock ledger already exists, opening stock value: ${totalOpeningStock}`);
+        safeLog(`Trial Balance: Added Opening Stock entry with correct value: ${totalOpeningStock}`);
       }
 
       safeLog(`Trial Balance: Processed ${processedData.length} ledgers (including stock if applicable)`);
@@ -792,23 +802,44 @@ function registerIpcHandlers() {
 
       // Filter in JavaScript to handle different GSTIN formats and registration types
       // Tally ODBC field names can vary. We normalize/validate before deciding "missing".
-      const normalizeGstin = (value) => {
-        if (value === undefined || value === null) return null;
+      
+      // Check if a registration type should require GSTIN (only "Regular" registration)
+      const isRegularRegistration = (regType) => {
+        if (!regType) return false;
+        const normalized = regType.toString().trim().toLowerCase();
+        // Exclude unregistered, consumer, composition, unknown, etc.
+        // Only exact match for "regular" to avoid false positives
+        if (normalized === 'regular') return true;
+        // Also handle "Regular - ..." variants but NOT "Unregistered" or other types
+        if (normalized.startsWith('regular') && !normalized.includes('unregistered')) return true;
+        return false;
+      };
+
+      // Check if GSTIN value is actually present (more lenient - any 15 char alphanumeric is accepted)
+      const hasValidGstin = (value) => {
+        if (value === undefined || value === null) return false;
         const s = value.toString().trim();
-        if (!s) return null;
+        if (!s) return false;
         const low = s.toLowerCase();
-        if (low === 'null' || low === 'na' || low === 'n/a' || s === '0' || s === '-') return null;
-
-        const upper = s.toUpperCase();
-        // Prefer a valid-looking GSTIN (15 chars). We keep the check permissive but structured.
-        // Common pattern: 2 digits + 10 PAN chars + 1 entity + Z + 1 checksum
-        const looksLikeGstin =
-          upper.length === 15 &&
-          /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/.test(upper);
-
-        if (looksLikeGstin) return upper;
-        // If it's not a valid GSTIN format, treat it as "missing" (avoids false negatives like 'NA')
-        return null;
+        // Reject obvious placeholders/empty values
+        if (low === 'null' || low === 'na' || low === 'n/a' || low === 'nil' || 
+            s === '0' || s === '-' || s === '--' || low === 'not available' ||
+            low === 'not applicable') return false;
+        
+        // Accept any 15-character alphanumeric string as valid GSTIN
+        // This is more lenient to avoid showing ledgers where GSTIN is actually entered
+        const upper = s.toUpperCase().replace(/\s/g, '');
+        if (upper.length === 15 && /^[A-Z0-9]{15}$/.test(upper)) {
+          return true;
+        }
+        
+        // Also accept if it looks like a partial/old format GSTIN (at least has some content)
+        // If user has entered something meaningful (more than 5 chars, alphanumeric), consider it fed
+        if (upper.length >= 10 && /^[A-Z0-9]+$/.test(upper)) {
+          return true;
+        }
+        
+        return false;
       };
 
       const pickBestGstin = (row) => {
@@ -819,10 +850,9 @@ function registerIpcHandlers() {
           row['PartyGSTIN'],
         ];
         for (const c of candidates) {
-          const normalized = normalizeGstin(c);
-          if (normalized) return normalized;
+          if (hasValidGstin(c)) return c.toString().trim().toUpperCase();
         }
-        return null;
+        return '';
       };
 
       const lines = result
@@ -839,12 +869,12 @@ function registerIpcHandlers() {
           };
         })
         .filter(line => {
-          // Filter: GST Registration Type is "Regular" (case-insensitive) but GSTIN is missing
-          const regType = (line.registrationType || '').toString().trim().toLowerCase();
-          const isRegular = regType === 'regular' || regType.startsWith('regular ') || regType.includes('regular');
-          if (!isRegular) return false;
+          // Filter: Only include if GST Registration Type is "Regular" AND GSTIN is missing
+          // Explicitly exclude Unregistered, Consumer, Composition, Unknown, etc.
+          if (!isRegularRegistration(line.registrationType)) return false;
 
-          return !normalizeGstin(line.partyGSTIN);
+          // Check if GSTIN is missing
+          return !hasValidGstin(line.partyGSTIN);
         });
 
       safeLog(`GST Not Feeded: Found ${lines.length} ledgers with Regular GST but no GSTIN out of ${result.length} total ledgers checked`);
@@ -852,8 +882,8 @@ function registerIpcHandlers() {
       // Log sample data for debugging if no results found
       if (lines.length === 0 && result.length > 0) {
         const regularLedgers = result.filter(r => {
-          const regType = (r['$GSTRegistrationType'] || '').toString().trim().toLowerCase();
-          return regType === 'regular';
+          const regType = (r['$GSTRegistrationType'] || r['GSTRegistrationType'] || '').toString().trim();
+          return isRegularRegistration(regType);
         });
         safeLog(`Found ${regularLedgers.length} Regular GST ledgers out of ${result.length} total, all have GSTIN entered`);
         if (regularLedgers.length > 0) {
