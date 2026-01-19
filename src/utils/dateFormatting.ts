@@ -1,8 +1,8 @@
 /**
- * Convert financial year format (e.g., "2024-25") to report date format (e.g., "31 March 2025")
- * In India, financial year is from April 1 to March 31, so FY 2024-25 ends on 31 March 2025
+ * Convert financial year format (e.g., "2024-25") to report date format (e.g., "31st March 2025")
+ * In India, financial year is from April 1 to March 31, so FY 2024-25 ends on 31st March 2025
  * @param financialYear - Financial year in format "YYYY-YY" (e.g., "2024-25")
- * @returns Formatted date as "31 March YYYY"
+ * @returns Formatted date as "31st March YYYY"
  */
 export function formatFinancialYearAsReportDate(financialYear: string): string {
   if (!financialYear) return '';
@@ -15,5 +15,5 @@ export function formatFinancialYearAsReportDate(financialYear: string): string {
   // Convert "25" to "2025"
   const fullYear = endYear.length === 2 ? `20${endYear}` : endYear;
   
-  return `31 March ${fullYear}`;
+  return `31st March ${fullYear}`;
 }

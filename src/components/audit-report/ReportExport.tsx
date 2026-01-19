@@ -49,6 +49,7 @@ import { AuditReportGenerator } from '@/services/auditReportGenerator';
 import { useAuditReportDocument } from '@/hooks/useAuditReportDocument';
 import { convertHtmlToDocxElements } from '@/utils/htmlToDocx';
 import { REPORT_PREVIEW_STYLES } from '@/utils/auditReportPreviewStyles';
+import { formatFinancialYearAsReportDate } from '@/utils/dateFormatting';
 import {
   buildCaroPreviewHtml,
   buildIfcPreviewHtml,
@@ -95,6 +96,8 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
     CARO_REPORT_PREVIEW_TITLE
   );
   const [generating, setGenerating] = useState(false);
+  const rawFinancialYear = currentEngagement?.financial_year || '2024-25';
+  const financialYearLabel = formatFinancialYearAsReportDate(rawFinancialYear) || rawFinancialYear;
 
   // Get signing partner details
   const signingPartner = (setup as any).signing_partner_id 
@@ -108,11 +111,11 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
       content: mainContent,
       kams,
       clientName: currentEngagement?.client_name || 'Company Name',
-      financialYearLabel: currentEngagement?.financial_year || '2024-25',
+      financialYearLabel,
       firmSettings: firmSettings || undefined,
       signingPartner: signingPartner || undefined,
     });
-  }, [setup, mainContent, kams, currentEngagement?.client_name, currentEngagement?.financial_year, firmSettings, signingPartner]);
+  }, [setup, mainContent, kams, currentEngagement?.client_name, financialYearLabel, firmSettings, signingPartner]);
 
   const previewBlocks = useMemo(() => reportGenerator?.generateBlocks() ?? [], [reportGenerator]);
   const generatedMainPreviewHtml = useMemo(
@@ -127,15 +130,16 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
         firmSettings,
         signingPartner,
         clientName: currentEngagement?.client_name || 'Company Name',
-        financialYear: currentEngagement?.financial_year || '2024-25',
+        financialYear: financialYearLabel,
       }),
-    [ifcContent, setup, firmSettings, signingPartner, currentEngagement?.client_name, currentEngagement?.financial_year]
+    [ifcContent, setup, firmSettings, signingPartner, currentEngagement?.client_name, financialYearLabel]
   );
 
   // Build report data from actual settings
   const reportData = {
     entityName: currentEngagement?.client_name || 'Company Name',
-    financialYear: currentEngagement?.financial_year || '2024-25',
+    financialYear: rawFinancialYear,
+    financialYearLabel,
     auditorFirmName: firmSettings?.firm_name || 'Firm Name',
     auditorFirmRegNo: firmSettings?.firm_registration_no || '',
     auditorName: signingPartner?.name || 'Partner Name',
@@ -392,7 +396,7 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
         new Paragraph({
           children: [
             new TextRun(
-              `We have audited the accompanying standalone financial statements of ${reportData.entityName} (the "Company"), which comprise the Balance Sheet as at March 31, 2025, the Statement of Profit and Loss (including Other Comprehensive Income), the Statement of Changes in Equity and the Statement of Cash Flows for the year ended on that date and notes to the financial statements, including a summary of material accounting policies and other explanatory information (hereinafter referred to as the "Standalone Financial Statements").`
+              `We have audited the accompanying standalone financial statements of ${reportData.entityName} (the "Company"), which comprise the Balance Sheet as at ${reportData.financialYearLabel}, the Statement of Profit and Loss (including Other Comprehensive Income), the Statement of Changes in Equity and the Statement of Cash Flows for the year ended on that date and notes to the financial statements, including a summary of material accounting policies and other explanatory information (hereinafter referred to as the "Standalone Financial Statements").`
             ),
           ],
           spacing: { after: 200 },
@@ -403,7 +407,7 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
         new Paragraph({
           children: [
             new TextRun(
-              `In our opinion and to the best of our information and according to the explanations given to us, the aforesaid Standalone Financial Statements give the information required by the Companies Act, 2013 (the "Act") in the manner so required and give a true and fair view in conformity with the Indian Accounting Standards prescribed under section 133 of the Act, ("Ind AS") and other accounting principles generally accepted in India, of the state of affairs of the Company as at March 31, 2025 and its profit, total comprehensive income, changes in equity and its cash flows for the year ended on that date.`
+              `In our opinion and to the best of our information and according to the explanations given to us, the aforesaid Standalone Financial Statements give the information required by the Companies Act, 2013 (the "Act") in the manner so required and give a true and fair view in conformity with the Indian Accounting Standards prescribed under section 133 of the Act, ("Ind AS") and other accounting principles generally accepted in India, of the state of affairs of the Company as at ${reportData.financialYearLabel} and its profit, total comprehensive income, changes in equity and its cash flows for the year ended on that date.`
             ),
           ],
           spacing: { after: 200 },
@@ -566,7 +570,7 @@ export function ReportExport({ engagementId, setup }: ReportExportProps) {
         new Paragraph({
           children: [
             new TextRun(
-              `We have audited the internal financial controls with reference to Standalone Financial Statements of ${reportData.entityName} (the "Company") as of March 31, 2025 in conjunction with our audit of the Standalone Financial Statements of the Company for the year ended on that date.`
+              `We have audited the internal financial controls with reference to Standalone Financial Statements of ${reportData.entityName} (the "Company") as of ${reportData.financialYearLabel} in conjunction with our audit of the Standalone Financial Statements of the Company for the year ended on that date.`
             ),
           ],
           spacing: { after: 200 },
