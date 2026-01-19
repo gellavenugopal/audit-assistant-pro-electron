@@ -546,16 +546,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear, onSe
 
                 <div className="space-y-3">
                   <p className="text-sm font-semibold">Other Attributes (as applicable)</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        checked={Boolean(setup.is_subsidiary)}
-                        disabled={configDisabled}
-                        onCheckedChange={(v) => updateIfcCriteria({ is_subsidiary: !!v })}
-                      />
-                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>is a subsidiary</Label>
-                    </div>
-
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:grid-rows-3 md:grid-flow-col">
                     <div className="flex items-center gap-2">
                       <Checkbox
                         checked={Boolean(setup.is_holding_company)}
@@ -563,6 +554,15 @@ export function MainReportEditor({ engagementId, clientName, financialYear, onSe
                         onCheckedChange={(v) => updateIfcCriteria({ is_holding_company: !!v })}
                       />
                       <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>is a holding company</Label>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={Boolean(setup.is_subsidiary)}
+                        disabled={configDisabled}
+                        onCheckedChange={(v) => updateIfcCriteria({ is_subsidiary: !!v })}
+                      />
+                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>is a subsidiary</Label>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -576,36 +576,23 @@ export function MainReportEditor({ engagementId, clientName, financialYear, onSe
 
                     <div className="flex items-center gap-2">
                       <Checkbox
-                        checked={Boolean(setup.has_branch_auditors)}
-                        disabled={configDisabled}
-                        onCheckedChange={(v) => saveSetupPatch({ has_branch_auditors: !!v })}
-                      />
-                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>Branch auditors involved</Label>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Checkbox
                         checked={Boolean(setup.has_predecessor_auditor)}
                         disabled={configDisabled}
                         onCheckedChange={(v) => saveSetupPatch({ has_predecessor_auditor: !!v })}
                       />
                       <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>Predecessor auditor</Label>
                     </div>
+
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={Boolean(setup.has_branch_auditors)}
+                        disabled={configDisabled}
+                        onCheckedChange={(v) => saveSetupPatch({ has_branch_auditors: !!v })}
+                      />
+                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>Branch auditors involved</Label>
+                    </div>
                   </div>
                 </div>
-
-                {setup.has_branch_auditors && (
-                  <div className="ml-6 space-y-2">
-                    <Label>Branch locations</Label>
-                    <Textarea
-                      value={setup.branch_locations || ''}
-                      disabled={configDisabled}
-                      onChange={(e) => saveSetupPatch({ branch_locations: e.target.value })}
-                      rows={2}
-                      placeholder="List branch locations (comma-separated)"
-                    />
-                  </div>
-                )}
 
                 {setup.has_predecessor_auditor && (
                   <div className="ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -629,27 +616,46 @@ export function MainReportEditor({ engagementId, clientName, financialYear, onSe
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>CARO Report Annexure Number</Label>
-                    <Input
-                      value={setup.caro_annexure_letter || ''}
-                      disabled={configDisabled || setup.caro_applicable_status === 'not_applicable'}
-                      onChange={(e) => saveSetupPatch({ caro_annexure_letter: e.target.value })}
-                      placeholder="A"
+                {setup.has_branch_auditors && (
+                  <div className="ml-6 space-y-2">
+                    <Label>Branch locations</Label>
+                    <Textarea
+                      value={setup.branch_locations || ''}
+                      disabled={configDisabled}
+                      onChange={(e) => saveSetupPatch({ branch_locations: e.target.value })}
+                      rows={2}
+                      placeholder="List branch locations (comma-separated)"
                     />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Label>CARO Report Annexure Number</Label>
+                      <Input
+                        value={setup.caro_annexure_letter || ''}
+                        disabled={configDisabled || setup.caro_applicable_status === 'not_applicable'}
+                        onChange={(e) => saveSetupPatch({ caro_annexure_letter: e.target.value })}
+                        placeholder="A"
+                        className="w-24 text-center"
+                      />
+                    </div>
                     {setup.caro_applicable_status === 'not_applicable' && (
                       <p className="text-xs text-muted-foreground">Disabled because CARO is not applicable.</p>
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label>IFC Report Annexure Number</Label>
-                    <Input
-                      value={setup.ifc_annexure_letter || ''}
-                      disabled={configDisabled || !setup.ifc_applicable}
-                      onChange={(e) => saveSetupPatch({ ifc_annexure_letter: e.target.value })}
-                      placeholder="B"
-                    />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Label>IFC Report Annexure Number</Label>
+                      <Input
+                        value={setup.ifc_annexure_letter || ''}
+                        disabled={configDisabled || !setup.ifc_applicable}
+                        onChange={(e) => saveSetupPatch({ ifc_annexure_letter: e.target.value })}
+                        placeholder="B"
+                        className="w-24 text-center"
+                      />
+                    </div>
                     {!setup.ifc_applicable && (
                       <p className="text-xs text-muted-foreground">Disabled because IFC reporting is not applicable.</p>
                     )}
