@@ -16,6 +16,10 @@ interface Engagement {
   performance_materiality: number | null;
 }
 
+type EngagementRow = Engagement & {
+  client?: { name?: string | null } | null;
+};
+
 interface EngagementContextType {
   currentEngagement: Engagement | null;
   engagements: Engagement[];
@@ -45,11 +49,15 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase
         .from('engagements')
-        .select('id, name, client_id, client_name, financial_year, engagement_type, status, partner_id, materiality_amount, performance_materiality')
+        .select('id, name, client_id, client_name, financial_year, engagement_type, status, partner_id, materiality_amount, performance_materiality, client:clients(name)')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setEngagements(data || []);
+      const resolved = (data as EngagementRow[] | null)?.map(({ client, ...item }) => ({
+        ...item,
+        client_name: client?.name || item.client_name,
+      })) || [];
+      setEngagements(resolved);
     } catch (error) {
       console.error('Error fetching engagements:', error);
     } finally {
@@ -81,7 +89,19 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     if (!currentEngagement || engagements.length === 0) return;
     const refreshed = engagements.find((item) => item.id === currentEngagement.id);
     if (!refreshed) return;
-    if (refreshed.partner_id !== currentEngagement.partner_id) {
+    const fieldsToCheck: Array<keyof Engagement> = [
+      'client_id',
+      'client_name',
+      'name',
+      'financial_year',
+      'engagement_type',
+      'status',
+      'partner_id',
+      'materiality_amount',
+      'performance_materiality',
+    ];
+    const shouldUpdate = fieldsToCheck.some((field) => refreshed[field] !== currentEngagement[field]);
+    if (shouldUpdate) {
       setCurrentEngagementState(refreshed);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(refreshed));
     }
