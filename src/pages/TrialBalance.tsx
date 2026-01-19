@@ -38,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { useExportedFileDialog } from '@/contexts/ExportedFileDialogContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useTrialBalance, TrialBalanceLine, TrialBalanceLineInput } from '@/hooks/useTrialBalance';
 import { TrialBalanceLineDialog } from '@/components/trial-balance/TrialBalanceLineDialog';
@@ -68,11 +69,16 @@ import { QuickAssignmentDialog } from '@/components/trial-balance/QuickAssignmen
 
 const TRIAL_BALANCE_TABS = ['trial-balance', 'rule-engine', 'uncategorized', 'capital-notes', 'balance-sheet', 'profit-loss', 'cash-flow'];
 
+const normalizeEngagementName = (name?: string) => {
+  return (name || 'export').replace(/[^a-z0-9]/gi, '_');
+};
+
 export default function TrialBalance() {
   const { currentEngagement } = useEngagement();
   const { lines, loading, currentVersion, addLine, updateLine, deleteLine, deleteLines, updateLines, importLines } = useTrialBalance(currentEngagement?.id);
   const { clients } = useClients();
   const { toast } = useToast();
+  const { confirmExportedFile } = useExportedFileDialog();
   
   const [activeTab, setActiveTab] = useState('trial-balance');
   const [searchTerm, setSearchTerm] = useState('');
@@ -103,7 +109,7 @@ export default function TrialBalance() {
   // Enable tab keyboard shortcuts (Ctrl+1-5, Alt+Arrow)
   useTabShortcuts(TRIAL_BALANCE_TABS, activeTab, setActiveTab);
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (lines.length === 0) {
       toast({
         title: 'No data to export',
@@ -154,13 +160,14 @@ export default function TrialBalance() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Trial Balance');
 
-    const fileName = `TrialBalance_${currentEngagement?.name?.replace(/[^a-z0-9]/gi, '_') || 'export'}_v${currentVersion}.xlsx`;
+    const fileName = `TrialBalance_${normalizeEngagementName(currentEngagement?.name)}_v${currentVersion}.xlsx`;
     XLSX.writeFile(workbook, fileName);
 
     toast({
       title: 'Export successful',
       description: `Downloaded ${fileName}`,
     });
+    await confirmExportedFile(fileName);
   };
 
   const filteredLines = useMemo(() => lines.filter(
@@ -360,7 +367,7 @@ export default function TrialBalance() {
     toast({ title: 'Trial Balance Cleared', description: `All ${ids.length} entries have been removed.` });
   };
 
-  const handleExportBS = () => {
+  const handleExportBS = async () => {
     exportBalanceSheet(currentPeriodLines.length > 0 ? currentPeriodLines : lines, previousPeriodLines, {
       engagementName: currentEngagement?.name || 'export', 
       clientName: currentEngagement?.client_name || '',
@@ -370,9 +377,10 @@ export default function TrialBalance() {
       startingNoteNumber: bsStartingNote,
     });
     toast({ title: 'Balance Sheet exported with Notes' });
+    await confirmExportedFile(`BalanceSheet_${normalizeEngagementName(currentEngagement?.name)}.xlsx`);
   };
 
-  const handleExportPL = () => {
+  const handleExportPL = async () => {
     exportProfitLoss(currentPeriodLines.length > 0 ? currentPeriodLines : lines, previousPeriodLines, {
       engagementName: currentEngagement?.name || 'export', 
       clientName: currentEngagement?.client_name || '',
@@ -382,9 +390,10 @@ export default function TrialBalance() {
       startingNoteNumber: plStartingNote,
     });
     toast({ title: 'Profit & Loss exported with Notes' });
+    await confirmExportedFile(`ProfitLoss_${normalizeEngagementName(currentEngagement?.name)}.xlsx`);
   };
 
-  const handleExportCFS = () => {
+  const handleExportCFS = async () => {
     exportCashFlowStatement(lines, {
       engagementName: currentEngagement?.name || 'export', 
       clientName: currentEngagement?.client_name || '',
@@ -392,6 +401,7 @@ export default function TrialBalance() {
       reportingScale,
     });
     toast({ title: 'Cash Flow Statement exported' });
+    await confirmExportedFile(`CashFlow_${normalizeEngagementName(currentEngagement?.name)}.xlsx`);
   };
 
 

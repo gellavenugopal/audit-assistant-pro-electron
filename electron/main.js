@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -179,6 +179,7 @@ function createWindow() {
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
     setupGstzenHandlers();
+    setupAppHandlers();
     createWindow();
 
     app.on('activate', () => {
@@ -196,4 +197,14 @@ app.on('window-all-closed', () => {
         app.quit();
     }
 });
+
+function setupAppHandlers() {
+    ipcMain.handle('app:getDownloadsPath', () => {
+        return app.getPath('downloads');
+    });
+
+    ipcMain.handle('app:openPath', async (event, targetPath) => {
+        return await shell.openPath(targetPath);
+    });
+}
 

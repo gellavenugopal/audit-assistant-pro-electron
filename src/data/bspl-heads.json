@@ -409,6 +409,11 @@
   },
   {
     "H1": "Liability",
+    "H2": "Unclassified Liabilities",
+    "H3": "Unclassified payables"
+  },
+  {
+    "H1": "Liability",
     "H2": "Long-term Provisions",
     "H3": "Provision for Gratuity"
   },
@@ -1244,6 +1249,11 @@
     "H1": "Asset",
     "H2": "Other Current Assets",
     "H3": "Other current assets"
+  },
+  {
+    "H1": "Asset",
+    "H2": "Unclassified Assets",
+    "H3": "Unclassified assets"
   },
   {
     "H1": "Asset",

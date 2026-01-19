@@ -6,6 +6,7 @@ import { HashRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { EngagementProvider } from "@/contexts/EngagementContext";
 import { TallyProvider } from "@/contexts/TallyContext";
+import { ExportedFileDialogProvider } from "@/contexts/ExportedFileDialogContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ProtectedEngagementRoute } from "@/components/auth/ProtectedEngagementRoute";
 import { ProtectedAdminRoute } from "@/components/auth/ProtectedAdminRoute";
@@ -27,7 +28,6 @@ import AuditTrail from "./pages/AuditTrail";
 import Completion from "./pages/Completion";
 import Settings from "./pages/Settings";
 import Feedback from "./pages/Feedback";
-import SRMPro from "./pages/SrmPro";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
@@ -38,18 +38,18 @@ import GstzenLogin from "./pages/GstzenLogin";
 import Gstr1Dashboard from "./pages/Gstr1Dashboard";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
-import SrmPro from "./pages/SrmPro";
 import { EngagementLetterGenerator } from "@/components/appointment/EngagementLetterGenerator";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <HashRouter>
-        <AuthProvider>
+    <ExportedFileDialogProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <HashRouter>
+          <AuthProvider>
           <EngagementProvider>
             <TallyProvider>
               <Routes>
@@ -279,16 +279,6 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="/srm-pro"
-                  element={
-                    <ProtectedEngagementRoute>
-                      <MainLayout>
-                        <SrmPro />
-                      </MainLayout>
-                    </ProtectedEngagementRoute>
-                  }
-                />
-                <Route
                   path="/gstr1-integration"
                   element={
                     <ProtectedRoute>
@@ -346,16 +336,6 @@ const App = () => (
                     </ProtectedEngagementRoute>
                   }
                 />
-                <Route
-                  path="/srm-pro"
-                  element={
-                    <ProtectedRoute>
-                      <MainLayout>
-                        <SRMPro />
-                      </MainLayout>
-                    </ProtectedRoute>
-                  }
-                />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </TallyProvider>
@@ -363,7 +343,8 @@ const App = () => (
         </AuthProvider>
       </HashRouter>
     </TooltipProvider>
-  </QueryClientProvider>
+  </ExportedFileDialogProvider>
+</QueryClientProvider>
 );
 
 export default App;

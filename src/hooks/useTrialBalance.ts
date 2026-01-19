@@ -195,12 +195,17 @@ export function useTrialBalance(engagementId: string | undefined) {
 
   const deleteLines = async (ids: string[]) => {
     try {
-      const { error } = await supabase
-        .from('trial_balance_lines')
-        .delete()
-        .in('id', ids);
+      // Batch delete in chunks to avoid URL length limits
+      const batchSize = 100;
+      for (let i = 0; i < ids.length; i += batchSize) {
+        const batch = ids.slice(i, i + batchSize);
+        const { error } = await supabase
+          .from('trial_balance_lines')
+          .delete()
+          .in('id', batch);
 
-      if (error) throw error;
+        if (error) throw error;
+      }
 
       setLines(prev => prev.filter(line => !ids.includes(line.id)));
       toast({
@@ -276,14 +281,19 @@ export function useTrialBalance(engagementId: string | undefined) {
           }
         }
 
-        // Delete duplicates
+        // Delete duplicates in batches to avoid URL length limits
         if (duplicateKeys.size > 0) {
-          const { error: deleteError } = await supabase
-            .from('trial_balance_lines')
-            .delete()
-            .in('id', Array.from(duplicateKeys));
+          const duplicateArray = Array.from(duplicateKeys);
+          const batchSize = 100;
+          for (let i = 0; i < duplicateArray.length; i += batchSize) {
+            const batch = duplicateArray.slice(i, i + batchSize);
+            const { error: deleteError } = await supabase
+              .from('trial_balance_lines')
+              .delete()
+              .in('id', batch);
 
-          if (deleteError) throw deleteError;
+            if (deleteError) throw deleteError;
+          }
         }
 
         // Insert new/updated lines

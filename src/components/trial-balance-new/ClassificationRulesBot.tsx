@@ -337,8 +337,8 @@ export function ClassificationRulesBot({
           </div>
 
           <datalist id="tally-group-options">
-            {groupOptions.map(group => (
-              <option key={group} value={group} />
+            {groupOptions.map((group, index) => (
+              <option key={`${group}-${index}`} value={group} />
             ))}
           </datalist>
 

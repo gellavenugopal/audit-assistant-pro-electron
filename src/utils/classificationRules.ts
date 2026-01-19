@@ -1,4 +1,4 @@
-import { LedgerRow } from '@/services/trialBalanceNewClassification';
+import type { LedgerRow } from '../services/trialBalanceNewClassification.ts';
 
 export type RuleScope = 'global' | 'client';
 
@@ -116,6 +116,93 @@ function matchesWord(value: string, word: string): boolean {
 
 function matchesGroup(value: string, phrase: string): boolean {
   return matchesPhrase(value, phrase);
+}
+
+const INCOME_DOMAIN_KEYWORDS = [
+  'sales accounts',
+  'revenue',
+  'direct incomes',
+  'indirect incomes',
+  'direct income',
+  'indirect income',
+  'service income',
+  'operating revenue',
+  'income from operations',
+];
+
+const EXPENSE_DOMAIN_KEYWORDS = [
+  'expense',
+  'direct expenses',
+  'indirect expenses',
+  'purchase accounts',
+  'cost of materials',
+  'other expenses',
+];
+
+const ASSET_DOMAIN_KEYWORDS = [
+  'asset',
+  'current assets',
+  'loans & advances',
+  'loans and advances',
+  'fixed assets',
+  'investments',
+  'inventory',
+  'stock',
+  'deposits',
+  'receivables',
+  'advances',
+];
+
+const LIABILITY_DOMAIN_KEYWORDS = [
+  'liability',
+  'capital',
+  'equity',
+  'payables',
+  'reserves',
+  'provisions',
+];
+
+const INCOME_SALES_CONTEXT_KEYWORDS = [
+  ...INCOME_DOMAIN_KEYWORDS,
+  'sales',
+  'sale of goods',
+  'sales accounts',
+  'sale of services',
+  'operating income',
+  'operating revenue',
+];
+
+function determineBaseH1(primary: string, parent: string): 'Income' | 'Expense' | 'Asset' | 'Liability' | 'Unknown' {
+  const groupCombined = `${primary} ${parent}`;
+  const matchesDomain = (keywords: string[]) =>
+    keywords.some((phrase) =>
+      matchesGroup(primary, phrase) ||
+      matchesGroup(parent, phrase) ||
+      matchesGroup(groupCombined, phrase)
+    );
+
+  if (matchesDomain(INCOME_DOMAIN_KEYWORDS)) {
+    return 'Income';
+  }
+  if (matchesDomain(EXPENSE_DOMAIN_KEYWORDS)) {
+    return 'Expense';
+  }
+  if (matchesDomain(ASSET_DOMAIN_KEYWORDS)) {
+    return 'Asset';
+  }
+  if (matchesDomain(LIABILITY_DOMAIN_KEYWORDS)) {
+    return 'Liability';
+  }
+  return 'Unknown';
+}
+
+function isIncomeSalesContext(primary: string, parent: string): boolean {
+  const groupCombined = `${primary} ${parent}`;
+  return INCOME_SALES_CONTEXT_KEYWORDS.some((phrase) =>
+    matchesGroup(primary, phrase) ||
+    matchesGroup(parent, phrase) ||
+    matchesGroup(groupCombined, phrase)
+  );
 }
 
 function hasAnyInLedgerOrParent(ledger: string, parent: string, needles: string[]): boolean {
@@ -324,6 +411,10 @@ export function applyClassificationRules(
   const parent = normalize(row['Parent Group']);
   const group = primary || parent;
   const ledger = normalize(row['Ledger Name']);
+
+  const baseH1 = determineBaseH1(primary, parent);
+  const baseDomainIsIncome = baseH1 === 'Income';
+  const incomeSalesContext = baseDomainIsIncome && isIncomeSalesContext(primary, parent);
   const businessType = normalize(context.businessType);
   const entityType = context.entityType;
   const isTrading = businessType.includes('trading');
@@ -430,9 +521,12 @@ export function applyClassificationRules(
     const isFixedAssetsGroup = matchesGroup(primary, 'fixed assets') ||
       matchesGroup(parent, 'fixed assets') ||
       matchesGroup(group, 'fixed assets');
+    // Only apply income/sales keywords when the ledger already belongs to Income/Sales domain.
+    const canApplyRealEstateIncomeRule = baseDomainIsIncome && incomeSalesContext;
     if (hasAnyInGroups(ledger, parent, primary, realEstateKeywords) &&
       !hasAnyInGroups(ledger, parent, primary, realEstateExclusions) &&
-      !isFixedAssetsGroup) {
+      !isFixedAssetsGroup &&
+      canApplyRealEstateIncomeRule) {
       return addAutoNote({
         ...row,
         'H1': 'Income',
@@ -1655,12 +1749,12 @@ export function applyClassificationRules(
   if (allowAutoOverride) {
     const h1Value = normalize(row['H1']);
     if (h1Value === 'asset') {
-      return addAutoNote({
-        ...row,
-        'H1': 'Asset',
-        'H2': 'Other Current Assets',
-        'H3': 'Other current assets',
-      }, 'Fallback Asset');
+    return addAutoNote({
+      ...row,
+      'H1': 'Asset',
+      'H2': 'Unclassified Assets',
+      'H3': 'Unclassified assets',
+    }, 'Fallback Asset');
     }
     if (h1Value === 'income') {
       return addAutoNote({
@@ -1671,12 +1765,12 @@ export function applyClassificationRules(
       }, 'Fallback Income');
     }
     if (h1Value === 'liability') {
-      return addAutoNote({
-        ...row,
-        'H1': 'Liability',
-        'H2': 'Other Current Liabilities',
-        'H3': 'Other payables',
-      }, 'Fallback Liability');
+    return addAutoNote({
+      ...row,
+      'H1': 'Liability',
+      'H2': 'Unclassified Liabilities',
+      'H3': 'Unclassified payables',
+    }, 'Fallback Liability');
     }
     if (h1Value === 'expense') {
       return addAutoNote({

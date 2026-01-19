@@ -10,6 +10,7 @@ interface Engagement {
   financial_year: string;
   engagement_type: string;
   status: string;
+  created_by?: string | null;
   materiality_amount: number | null;
   performance_materiality: number | null;
 }

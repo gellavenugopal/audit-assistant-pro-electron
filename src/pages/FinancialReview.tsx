@@ -17,7 +17,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
@@ -28,39 +27,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
-import { ColumnFilter } from '@/components/ui/column-filter';
-import {
-  Database,
-  FileSpreadsheet,
-  Download,
-  Upload,
-  Search,
-  Save,
-  Trash2,
-  Settings,
-  Package,
-  Cog,
-  Plus,
-  ChevronDown,
-  Calendar,
-  Sparkles,
-} from 'lucide-react';
+import { FileSpreadsheet, ChevronUp, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTallyODBC } from '@/hooks/useTallyODBC';
 import { useEngagement } from '@/contexts/EngagementContext';
@@ -70,26 +38,34 @@ import { useTrialBalance, TrialBalanceLineInput } from '@/hooks/useTrialBalance'
 import { LedgerRow, generateLedgerKey } from '@/services/trialBalanceNewClassification';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
-import * as XLSX from 'xlsx';
-import { StockItemsTab } from '@/components/trial-balance-new/StockItemsTab';
-import { BulkUpdateDialog } from '@/components/trial-balance-new/BulkUpdateDialog';
-import { FilterModal } from '@/components/trial-balance-new/FilterModal';
-import { LedgerAnnexureDialog, LedgerItem } from '@/components/trial-balance-new/LedgerAnnexureDialog';
+import { useExportedFileDialog } from '@/contexts/ExportedFileDialogContext';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getActualBalanceSign } from '@/utils/naturalBalance';
-import { BsplHeadsManager } from '@/components/trial-balance-new/BsplHeadsManager';
 import {
   DEFAULT_BSPL_HEADS,
   BsplHeadRow,
   buildBsplOptions,
   filterBsplHeadsByEntityType,
 } from '@/utils/bsplHeads';
-import { ClassificationRulesBot } from '@/components/trial-balance-new/ClassificationRulesBot';
-import { applyClassificationRules, ClassificationRule } from '@/utils/classificationRules';
+import { applyClassificationRules, ClassificationRule, RuleScope } from '@/utils/classificationRules';
 import { TALLY_DEFAULT_GROUPS } from '@/utils/tallyGroupMaster';
 import { buildNoteStructure, getNoteH2Options, getScaleFactor, isZeroAfterScale } from '@/utils/noteBuilder';
 import { buildFaceFromNotes, buildPreparedNotes } from '@/utils/noteFaceBuilder';
 import { detectFormulaCycles, evaluateFormula, extractRowRefs, extractVariableRefs } from '@/utils/statementFormula';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { buildSearchText } from '@/utils/financialReview/search';
+import { filterActualRows, filterClassifiedRowsByFilters } from '@/utils/financialReview/filters';
+import { filterClassifiedRows } from '@/utils/financialReview/rows';
+import { computeTotals } from '@/utils/financialReview/totals';
+import { buildKeyToIndexMap, computeSelectedFilteredCount } from '@/utils/financialReview/selection';
+import { FinancialReviewToolbar } from '@/components/financial-review/FinancialReviewToolbar';
+import { ClassificationRulesBot } from '@/components/trial-balance-new/ClassificationRulesBot';
+import { ActualTBTable } from '@/components/financial-review/ActualTBTable';
+import { ClassifiedTBTable } from '@/components/financial-review/ClassifiedTBTable';
+import { TotalsBar } from '@/components/financial-review/TotalsBar';
+import { BulkUpdateDialogComponent } from '@/components/financial-review/BulkUpdateDialog';
+import { BsplHeadsManager } from '@/components/trial-balance-new/BsplHeadsManager';
+import { LedgerAnnexureDialog, LedgerItem } from '@/components/trial-balance-new/LedgerAnnexureDialog';
 
 // Entity Types
 const ENTITY_TYPES = [
@@ -116,6 +92,31 @@ const BUSINESS_TYPES = [
 // Disabled entity types (not supported in this phase)
 const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
 
+const ACTUAL_SEARCH_FIELDS: Array<keyof LedgerRow> = [
+  'Ledger Name',
+  'Primary Group',
+  'Parent Group',
+  'Opening Balance',
+  'Debit',
+  'Credit',
+  'Closing Balance',
+];
+
+const CLASSIFIED_SEARCH_FIELDS: Array<keyof LedgerRow> = [
+  'Ledger Name',
+  'Primary Group',
+  'Parent Group',
+  'Is Revenue',
+  'H1',
+  'H2',
+  'H3',
+  'Notes',
+  'Opening Balance',
+  'Debit',
+  'Credit',
+  'Closing Balance',
+];
+
 type ManualInventoryValues = {
   rawMaterials: { opening: number; closing: number };
   workInProgress: { opening: number; closing: number };
@@ -129,6 +130,104 @@ const EMPTY_MANUAL_INVENTORY: ManualInventoryValues = {
   finishedGoods: { opening: 0, closing: 0 },
   stockInTrade: { opening: 0, closing: 0 },
 };
+
+const STOCK_DETAIL_NOTE = 'Stock Details';
+
+const STOCK_DETAIL_CATEGORIES: Array<{
+  key: keyof ManualInventoryValues;
+  label: string;
+}> = [
+  { key: 'rawMaterials', label: 'Raw Materials' },
+  { key: 'workInProgress', label: 'Work-in-Progress' },
+  { key: 'finishedGoods', label: 'Finished Goods' },
+  { key: 'stockInTrade', label: 'Stock-in-Trade' },
+];
+
+const normalizeStockDetailKey = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+const createStockDetailCompositeKey = (label: string) =>
+  `stock_detail_${normalizeStockDetailKey(label)}`;
+
+const buildStockDetailRow = (params: {
+  ledgerName: string;
+  opening: number;
+  closing: number;
+  h1: string;
+  h2: string;
+  h3: string;
+  isRevenue: boolean;
+  parentGroup?: string;
+}): LedgerRow => {
+  const closingValue = Number(params.closing) || 0;
+  const debit = Math.max(0, closingValue);
+  const credit = Math.max(0, -closingValue);
+  return {
+    'Ledger Name': params.ledgerName,
+    'Parent Group': params.parentGroup || 'Inventories',
+    'Primary Group': 'Inventories',
+    'Composite Key': createStockDetailCompositeKey(params.ledgerName),
+    'Opening Balance': Number(params.opening) || 0,
+    'Debit': debit,
+    'Credit': credit,
+    'Closing Balance': closingValue,
+    'Is Revenue': params.isRevenue ? 'Yes' : 'No',
+    'H1': params.h1,
+    'H2': params.h2,
+    'H3': params.h3,
+    'Notes': STOCK_DETAIL_NOTE,
+    'Auto': 'Manual',
+  };
+};
+
+const buildStockDetailRows = (values: ManualInventoryValues): LedgerRow[] => {
+  const rows = STOCK_DETAIL_CATEGORIES.map(category => {
+    const opening = values[category.key].opening || 0;
+    const closing = values[category.key].closing || 0;
+    return buildStockDetailRow({
+      ledgerName: `Closing Inventory [${category.label}]`,
+      opening,
+      closing,
+      h1: 'Asset',
+      h2: 'Inventories',
+      h3: category.label,
+      isRevenue: false,
+    });
+  });
+
+  const totalOpening = STOCK_DETAIL_CATEGORIES.reduce(
+    (acc, category) => acc + (values[category.key].opening || 0),
+    0
+  );
+  const totalClosing = STOCK_DETAIL_CATEGORIES.reduce(
+    (acc, category) => acc + (values[category.key].closing || 0),
+    0
+  );
+  const changeValue = Number(totalOpening - totalClosing) || 0;
+
+  rows.push(
+    buildStockDetailRow({
+      ledgerName: 'Change in Inventories',
+      opening: 0,
+      closing: changeValue,
+      h1: 'Expense',
+      h2: 'Change in Inventories',
+      h3: 'Change in Inventories',
+      isRevenue: true,
+      parentGroup: 'Change in Inventories',
+    })
+  );
+
+  return rows;
+};
+
+const isStockDetailRow = (row: LedgerRow) => (row['Notes'] || '') === STOCK_DETAIL_NOTE;
+
+const stripStockDetailRows = (rows: LedgerRow[]) =>
+  rows.filter(row => !isStockDetailRow(row));
 
 const parseFinancialYearRange = (yearCode?: string | null) => {
   if (!yearCode) return null;
@@ -211,17 +310,7 @@ const formatFyLabel = (yearCode?: string | null) => {
   return `FY ${startYear}-${endShort}`;
 };
 
-type InlineComboboxProps = {
-  value: string;
-  options: string[];
-  placeholder: string;
-  disabled?: boolean;
-  onChange: (value: string) => void;
-  className?: string;
-  inputStyle?: React.CSSProperties;
-};
-
-type TableTabKey = 'actual' | 'classified' | 'stock';
+type TableTabKey = 'actual' | 'classified';
 
 type TableTabSettings = {
   rowHeight: number;
@@ -297,7 +386,7 @@ const PL_FACE_TEMPLATE_VERSION = 1;
 
 const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
   actual: {
-    rowHeight: 28,
+    rowHeight: 26,
     widths: {
       'Ledger Name': 160,
       'Parent Group': 120,
@@ -309,18 +398,18 @@ const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
       'Is Revenue': 80,
     },
     fonts: {
-      'Ledger Name': 10,
-      'Parent Group': 10,
-      'Primary Group': 10,
-      'Opening Balance': 10,
-      'Debit': 10,
-      'Credit': 10,
-      'Closing Balance': 10,
-      'Is Revenue': 10,
+      'Ledger Name': 12,
+      'Parent Group': 12,
+      'Primary Group': 12,
+      'Opening Balance': 12,
+      'Debit': 12,
+      'Credit': 12,
+      'Closing Balance': 12,
+      'Is Revenue': 12,
     },
   },
   classified: {
-    rowHeight: 28,
+    rowHeight: 26,
     widths: {
       'Ledger Name': 120,
       'Parent Group': 100,
@@ -333,15 +422,15 @@ const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
       'Status': 140,
     },
     fonts: {
-      'Ledger Name': 10,
-      'Parent Group': 10,
-      'Primary Group': 10,
-      'Opening Balance': 10,
-      'Closing Balance': 10,
-      'H1': 11,
-      'H2': 11,
-      'H3': 11,
-      'Status': 10,
+      'Ledger Name': 12,
+      'Parent Group': 12,
+      'Primary Group': 12,
+      'Opening Balance': 12,
+      'Closing Balance': 12,
+      'H1': 12,
+      'H2': 12,
+      'H3': 12,
+      'Status': 12,
     },
   },
   stock: {
@@ -367,91 +456,10 @@ const DEFAULT_TABLE_SETTINGS: Record<TableTabKey, TableTabSettings> = {
   },
 };
 
-function InlineCombobox({
-  value,
-  options,
-  placeholder,
-  disabled = false,
-  onChange,
-  className,
-  inputStyle,
-}: InlineComboboxProps) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-
-  useEffect(() => {
-    if (open) {
-      setSearch('');
-    }
-  }, [open, value]);
-
-  const filteredOptions = useMemo(() => {
-    const needle = search.toLowerCase().trim();
-    if (!needle) return options;
-    return options.filter(option => option.toLowerCase().includes(needle));
-  }, [options, search]);
-
-  return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        if (disabled) {
-          setOpen(false);
-          return;
-        }
-        setOpen(next);
-        if (next) {
-          setSearch('');
-        }
-      }}
-    >
-      <PopoverTrigger asChild>
-        <Input
-          value={value}
-          onChange={(e) => {
-            const nextValue = e.target.value;
-            onChange(nextValue);
-            setSearch(nextValue);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onClick={(e) => e.stopPropagation()}
-          placeholder={placeholder}
-          disabled={disabled}
-          className={`${className} truncate whitespace-nowrap overflow-hidden`}
-          style={inputStyle}
-        />
-      </PopoverTrigger>
-      <PopoverContent className="w-64 p-0 z-[9999]" align="start" sideOffset={4}>
-        <Command>
-          <CommandList className="max-h-56 overflow-auto" onWheel={(e) => e.stopPropagation()}>
-            {filteredOptions.length === 0 && (
-              <CommandEmpty>No matches found.</CommandEmpty>
-            )}
-            <CommandGroup>
-              {filteredOptions.map(option => (
-                <CommandItem
-                  key={option}
-                  value={option}
-                  onSelect={() => {
-                    onChange(option);
-                    setOpen(false);
-                  }}
-                >
-                  {option}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 export default function FinancialReview() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
+  const { confirmExportedFile } = useExportedFileDialog();
   const { role } = useAuth();
   const isProUser = role === 'partner' || role === 'manager';
   const odbcConnection = useTallyODBC();
@@ -463,7 +471,6 @@ export default function FinancialReview() {
   const [entityTypeDraft, setEntityTypeDraft] = useState<string>('');
   const [entityName, setEntityName] = useState<string>('');
   const [businessType, setBusinessType] = useState<string>('');
-  const [includeStockItems, setIncludeStockItems] = useState<boolean>(false);
   const [isBusinessDialogOpen, setIsBusinessDialogOpen] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   
@@ -472,6 +479,7 @@ export default function FinancialReview() {
   const [currentData, setCurrentData] = useState<LedgerRow[]>([]); // Classified data
   const [previousData, setPreviousData] = useState<LedgerRow[]>([]);
   const [currentStockData, setCurrentStockData] = useState<any[]>([]);
+  const [stockSelectedCount, setStockSelectedCount] = useState(0);
   const [importPeriodType, setImportPeriodType] = useState<'current' | 'previous'>('current');
   const [isPeriodDialogOpen, setIsPeriodDialogOpen] = useState(false);
   const [isAddLineDialogOpen, setIsAddLineDialogOpen] = useState(false);
@@ -498,7 +506,7 @@ export default function FinancialReview() {
   } = useResizableColumns({
     'Ledger Name': 160,
     'Parent Group': 120,
-    'Primary Group': 120,
+    'Primary Group': 156,
     'Opening Balance': 100,
     'Debit': 100,
     'Credit': 100,
@@ -515,7 +523,7 @@ export default function FinancialReview() {
   } = useResizableColumns({
     'Ledger Name': 120,
     'Parent Group': 100,
-    'Primary Group': 110,
+    'Primary Group': 143,
     'Opening Balance': 85,
     'Debit': 85,
     'Credit': 85,
@@ -540,6 +548,7 @@ export default function FinancialReview() {
   }, []);
   
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebouncedValue(searchTerm, 200);
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [balanceFilter, setBalanceFilter] = useState<string>('all'); // all, positive, negative, zero
   const [fromDate, setFromDate] = useState<string>('2024-04-01');
@@ -574,11 +583,13 @@ export default function FinancialReview() {
   const [manualInventoryValues, setManualInventoryValues] = useState<ManualInventoryValues | null>(null);
   const [manualInventoryDraft, setManualInventoryDraft] = useState<ManualInventoryValues>(EMPTY_MANUAL_INVENTORY);
   const [isManualInventoryDialogOpen, setIsManualInventoryDialogOpen] = useState(false);
+  const [stockDetailsCollapsed, setStockDetailsCollapsed] = useState(false);
   const [isInventoryImportPromptOpen, setIsInventoryImportPromptOpen] = useState(false);
   const [pendingInventoryImport, setPendingInventoryImport] = useState<{ rows: LedgerRow[]; isPrevious: boolean } | null>(null);
   const [showNoteSettings, setShowNoteSettings] = useState(false);
   const [showFaceSettings, setShowFaceSettings] = useState(false);
   const [isNoteLedgerDialogOpen, setIsNoteLedgerDialogOpen] = useState(false);
+  const [useHierarchicalNoteView, setUseHierarchicalNoteView] = useState(false);
   const [noteNewRowLabel, setNoteNewRowLabel] = useState('');
   const [noteSelectedLabel, setNoteSelectedLabel] = useState('');
   const [noteParentAnchorId, setNoteParentAnchorId] = useState<string | null>(null);
@@ -599,12 +610,46 @@ export default function FinancialReview() {
   const [selectedNoteRowId, setSelectedNoteRowId] = useState<string | null>(null);
   const noteListRef = useRef<HTMLDivElement | null>(null);
   const saveNoteLayoutsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dataLoadedToastRef = useRef<string | null>(null);
   const [noteNumberStart, setNoteNumberStart] = useState(3);
   const [noteNumberStartDraft, setNoteNumberStartDraft] = useState('3');
   const [statementVariables, setStatementVariables] = useState<Record<string, { type: 'number' | 'percent' | 'text'; value: string }>>({});
   const [isVariablesDialogOpen, setIsVariablesDialogOpen] = useState(false);
   const [newVariableName, setNewVariableName] = useState('');
   const [newVariableType, setNewVariableType] = useState<'number' | 'percent' | 'text'>('number');
+
+  const stockColumns = useMemo(() => ([
+    'Item Name',
+    'Stock Group',
+    'Primary Group',
+    'Opening Value',
+    'Closing Value',
+    'Stock Category',
+    'Actions',
+  ]), []);
+
+  // Define enrichRowsWithStockDetails first (needed by refreshTablesWithStockDetails)
+  const enrichRowsWithStockDetails = useCallback(
+    (rows: LedgerRow[], overrideValues?: ManualInventoryValues | null, overrideSource?: 'manual' | 'imported') => {
+      const base = stripStockDetailRows(rows);
+      const source = overrideSource ?? inventorySource;
+      const values = overrideValues ?? manualInventoryValues;
+      if (source === 'manual' && values) {
+        return [...base, ...buildStockDetailRows(values)];
+      }
+      return base;
+    },
+    [inventorySource, manualInventoryValues]
+  );
+
+  // Define refreshTablesWithStockDetails (used by manual inventory handlers)
+  const refreshTablesWithStockDetails = useCallback(
+    (overrideValues?: ManualInventoryValues | null, overrideSource?: 'manual' | 'imported') => {
+      setActualData(prev => enrichRowsWithStockDetails(prev, overrideValues, overrideSource));
+      setCurrentData(prev => enrichRowsWithStockDetails(prev, overrideValues, overrideSource));
+    },
+    [enrichRowsWithStockDetails]
+  );
 
   useEffect(() => {
     if (!manualInventoryKey) {
@@ -622,6 +667,7 @@ export default function FinancialReview() {
       const parsed = JSON.parse(raw) as ManualInventoryValues;
       setManualInventoryValues(parsed);
       setInventorySource('manual');
+      refreshTablesWithStockDetails(parsed, 'manual');
     } catch {
       setManualInventoryValues(null);
       setInventorySource('imported');
@@ -633,20 +679,53 @@ export default function FinancialReview() {
       setManualInventoryDraft(manualInventoryValues || EMPTY_MANUAL_INVENTORY);
     }
   }, [isManualInventoryDialogOpen, manualInventoryValues]);
-  const handleSaveManualInventory = useCallback(() => {
+
+  useEffect(() => {
+    setManualInventoryDraft(manualInventoryValues || EMPTY_MANUAL_INVENTORY);
+  }, [manualInventoryValues]);
+  
+  useEffect(() => {
+    dataLoadedToastRef.current = null;
+  }, [currentEngagement?.id]);
+  const persistManualInventoryValues = useCallback((values: ManualInventoryValues) => {
     if (!manualInventoryKey) {
-      setIsManualInventoryDialogOpen(false);
-      return;
+      return false;
     }
-    setManualInventoryValues(manualInventoryDraft);
+    setManualInventoryValues(values);
     setInventorySource('manual');
-    localStorage.setItem(manualInventoryKey, JSON.stringify(manualInventoryDraft));
-    setIsManualInventoryDialogOpen(false);
+    localStorage.setItem(manualInventoryKey, JSON.stringify(values));
     toast({
       title: 'Manual inventory saved',
       description: 'Inventory values will be used for notes and face statements.'
     });
-  }, [manualInventoryKey, manualInventoryDraft, toast]);
+    refreshTablesWithStockDetails(values, 'manual');
+    return true;
+  }, [manualInventoryKey, toast, refreshTablesWithStockDetails]);
+
+  const handleManualInventorySave = useCallback(() => {
+    persistManualInventoryValues(manualInventoryDraft);
+  }, [manualInventoryDraft, persistManualInventoryValues]);
+
+  const resetManualInventoryDraft = useCallback(() => {
+    setManualInventoryDraft(manualInventoryValues || EMPTY_MANUAL_INVENTORY);
+  }, [manualInventoryValues]);
+
+  const handleSaveManualInventory = useCallback(() => {
+    persistManualInventoryValues(manualInventoryDraft);
+    setIsManualInventoryDialogOpen(false);
+  }, [manualInventoryDraft, persistManualInventoryValues]);
+
+  const manualInventoryTotals = useMemo(() => {
+    const opening = STOCK_DETAIL_CATEGORIES.reduce(
+      (acc, category) => acc + (manualInventoryDraft[category.key].opening || 0),
+      0
+    );
+    const closing = STOCK_DETAIL_CATEGORIES.reduce(
+      (acc, category) => acc + (manualInventoryDraft[category.key].closing || 0),
+      0
+    );
+    return { opening, closing };
+  }, [manualInventoryDraft]);
 
   const handleClearManualInventory = useCallback((closePrompt?: boolean) => {
     if (manualInventoryKey) {
@@ -654,13 +733,17 @@ export default function FinancialReview() {
     }
     setManualInventoryValues(null);
     setInventorySource('imported');
+    refreshTablesWithStockDetails(null, 'imported');
     if (closePrompt) {
       setIsInventoryImportPromptOpen(false);
     }
-  }, [manualInventoryKey]);
+  }, [manualInventoryKey, refreshTablesWithStockDetails]);
 
   const handleKeepManualInventory = useCallback(() => {
     setIsInventoryImportPromptOpen(false);
+  }, []);
+  const toggleStockDetails = useCallback(() => {
+    setStockDetailsCollapsed(prev => !prev);
   }, []);
   const updateManualInventoryDraftValue = useCallback((
     key: keyof ManualInventoryValues,
@@ -723,22 +806,9 @@ export default function FinancialReview() {
     'H3',
     'Status',
   ]), []);
-  const stockColumns = useMemo(() => ([
-    'Item Name',
-    'Stock Group',
-    'Primary Group',
-    'Opening Value',
-    'Closing Value',
-    'Stock Category',
-    'Actions',
-  ]), []);
-  
   const [bsplHeads, setBsplHeads] = useState(DEFAULT_BSPL_HEADS);
   const [classificationRules, setClassificationRules] = useState<ClassificationRule[]>([]);
   const [tallyGroups, setTallyGroups] = useState<string[]>(TALLY_DEFAULT_GROUPS);
-  const [stockSelectedCount, setStockSelectedCount] = useState(0);
-  const [stockBulkUpdateRequestId, setStockBulkUpdateRequestId] = useState(0);
-  const [stockDeleteRequestId, setStockDeleteRequestId] = useState(0);
   const previousFromDate = useMemo(() => shiftDateByYears(fromDate, -1), [fromDate]);
   const previousToDate = useMemo(() => shiftDateByYears(toDate, -1), [toDate]);
   const currentFyLabel = useMemo(() => formatFyLabel(currentEngagement?.financial_year), [currentEngagement?.financial_year]);
@@ -755,7 +825,6 @@ export default function FinancialReview() {
     return `FY ${prevStart}-${prevEndShort}`;
   }, [currentEngagement?.financial_year]);
   const visiblePeriodLabel = useMemo(() => {
-    if (activeTab === 'stock-items') return '';
     const isPrevious = importPeriodType === 'previous';
     const prefix = isPrevious ? 'Previous' : 'Current';
     const fyLabel = isPrevious ? previousFyLabel : currentFyLabel;
@@ -919,6 +988,7 @@ export default function FinancialReview() {
         const response = await fetch('/classification_logics.xlsx', { cache: 'no-store' });
         if (!response.ok) return;
         const buffer = await response.arrayBuffer();
+        const XLSX = await import('xlsx');
         const workbook = XLSX.read(buffer, { type: 'array' });
         const bsplSheet = workbook.Sheets['BSPL Heads'];
         const tallySheet = workbook.Sheets['Tally Default Groups'];
@@ -1156,7 +1226,7 @@ export default function FinancialReview() {
     if (typeof locked === 'number') {
       return locked;
     }
-    return 10;
+    return 12;
   }, [tableSettings]);
 
   const getActualColumnWidth = useCallback((columnName: string) => {
@@ -1173,7 +1243,7 @@ export default function FinancialReview() {
     if (typeof override === 'number') {
       return override;
     }
-    return 10;
+    return 12;
   }, [tableSettings]);
 
   const getActualRowHeight = useCallback(() => {
@@ -1191,9 +1261,11 @@ export default function FinancialReview() {
   const handleApplyClassificationRules = useCallback((rules: ClassificationRule[]) => {
     setClassificationRules(rules);
     setCurrentData(prev =>
-      prev.map(row => applyClassificationRules(row, rules, { businessType, entityType, userDefinedExpenseThreshold }))
+      enrichRowsWithStockDetails(
+        prev.map(row => applyClassificationRules(row, rules, { businessType, entityType, userDefinedExpenseThreshold }))
+      )
     );
-  }, [businessType, entityType]);
+  }, [businessType, entityType, enrichRowsWithStockDetails]);
 
   const handleAddTallyGroup = useCallback((value: string, scope: 'client' | 'global') => {
     const trimmed = value.trim();
@@ -1211,13 +1283,15 @@ export default function FinancialReview() {
   }, [currentEngagement?.id]);
 
   const handleReapplyAutoClassification = useCallback(() => {
-    setCurrentData(prev => prev.map(row => {
-      if (row.Auto === 'Manual') {
-        return row;
-      }
-      const cleared = { ...row, Auto: undefined, 'Auto Reason': undefined };
-      return applyClassificationRules(cleared, classificationRules, { businessType, entityType, force: true, userDefinedExpenseThreshold });
-    }));
+    setCurrentData(prev => enrichRowsWithStockDetails(
+      prev.map(row => {
+        if (row.Auto === 'Manual') {
+          return row;
+        }
+        const cleared = { ...row, Auto: undefined, 'Auto Reason': undefined };
+        return applyClassificationRules(cleared, classificationRules, { businessType, entityType, force: true, userDefinedExpenseThreshold });
+      })
+    ));
     toast({
       title: 'Auto classification updated',
       description: 'Reapplied auto rules to classified rows.',
@@ -1255,54 +1329,10 @@ export default function FinancialReview() {
       return updated;
     });
     if (changed) {
-      setCurrentData(next);
+      setCurrentData(enrichRowsWithStockDetails(next));
     }
   }, [currentData, classificationRules, businessType, entityType, userDefinedExpenseThreshold]);
   
-  // Compute stock item counts and totals directly via useMemo (avoids infinite loop from callbacks)
-  const { stockItemCount, stockTotals } = useMemo(() => {
-    // Safety check for array
-    if (!currentStockData || !Array.isArray(currentStockData)) {
-      return {
-        stockItemCount: { filtered: 0, total: 0 },
-        stockTotals: { opening: 0, closing: 0 }
-      };
-    }
-    
-    // Filter out items where both opening AND closing are 0
-    const nonZeroItems = currentStockData.filter(item => {
-      if (!item) return false;
-      const opening = Math.abs(item['Opening Value'] || 0);
-      const closing = Math.abs(item['Closing Value'] || 0);
-      return !(opening === 0 && closing === 0);
-    });
-    
-    const stockSearchTerm = activeTab === 'stock-items' ? searchTerm : '';
-
-    // Apply search filter with null safety
-    const filtered = stockSearchTerm
-      ? nonZeroItems.filter(item => {
-          if (!item) return false;
-          const itemName = (item['Item Name'] || '').toLowerCase();
-          const stockGroup = (item['Stock Group'] || '').toLowerCase();
-          const primaryGroup = (item['Primary Group'] || '').toLowerCase();
-          const search = stockSearchTerm.toLowerCase();
-          return itemName.includes(search) || stockGroup.includes(search) || primaryGroup.includes(search);
-        })
-      : nonZeroItems;
-    
-    // Calculate totals from filtered items - use Math.abs since stock values are assets (Dr)
-    const totals = filtered.reduce((acc, item) => ({
-      opening: acc.opening + Math.abs(item?.['Opening Value'] || 0),
-      closing: acc.closing + Math.abs(item?.['Closing Value'] || 0),
-    }), { opening: 0, closing: 0 });
-    
-    return {
-      stockItemCount: { filtered: filtered.length, total: nonZeroItems.length },
-      stockTotals: totals
-    };
-  }, [currentStockData, searchTerm, activeTab]);
-
   const filteredBsplHeads = useMemo(() => {
     return filterBsplHeadsByEntityType(bsplHeads, entityType);
   }, [bsplHeads, entityType]);
@@ -1342,36 +1372,12 @@ export default function FinancialReview() {
 
   const isNonCompanyEntityType = useMemo(() => !isCompanyEntityType, [isCompanyEntityType]);
 
-  const buildManualInventoryRows = useCallback((values: ManualInventoryValues): LedgerRow[] => {
-    const makeRow = (label: string, h3: string, opening: number, closing: number): LedgerRow => ({
-      'Ledger Name': label,
-      'Parent Group': 'Inventories',
-      'Primary Group': 'Inventories',
-      'Opening Balance': opening,
-      'Debit': 0,
-      'Credit': 0,
-      'Closing Balance': closing,
-      'H1': 'Asset',
-      'H2': 'Inventories',
-      'H3': h3,
-      'Notes': '',
-      'Is Revenue': 'No',
-      'Auto': 'Manual',
-    });
-
-    return [
-      makeRow('Manual Inventory - Raw Materials', 'Raw Materials', values.rawMaterials.opening, values.rawMaterials.closing),
-      makeRow('Manual Inventory - Work-in-Progress', 'Work-in-Progress', values.workInProgress.opening, values.workInProgress.closing),
-      makeRow('Manual Inventory - Finished Goods', 'Finished Goods', values.finishedGoods.opening, values.finishedGoods.closing),
-      makeRow('Manual Inventory - Stock-in-Trade', 'Stock-in-Trade', values.stockInTrade.opening, values.stockInTrade.closing),
-    ];
-  }, []);
-
   const applyManualInventoryRows = useCallback((rows: LedgerRow[]) => {
     if (inventorySource !== 'manual' || !manualInventoryValues) return rows;
-    const filtered = rows.filter(row => row['H2'] !== 'Inventories');
-    return [...filtered, ...buildManualInventoryRows(manualInventoryValues)];
-  }, [inventorySource, manualInventoryValues, buildManualInventoryRows]);
+    const hasStockDetails = rows.some(isStockDetailRow);
+    if (hasStockDetails) return rows;
+    return [...rows, ...buildStockDetailRows(manualInventoryValues)];
+  }, [inventorySource, manualInventoryValues]);
 
   const hasInventoryInRows = useCallback((rows: LedgerRow[]) => {
     return rows.some(row =>
@@ -1475,14 +1481,6 @@ export default function FinancialReview() {
     return (value || '').toLowerCase().replace(/\s+/g, '_') === 'user_defined';
   }, []);
 
-  const filterClassifiedRows = useCallback((rows: LedgerRow[]) => {
-    return rows.filter(row => {
-      const opening = row['Opening Balance'] || 0;
-      const closing = row['Closing Balance'] || 0;
-      return opening !== 0 || closing !== 0;
-    });
-  }, []);
-  
   // Column filters and sorting state for Actual TB
   const [actualTbColumnFilters, setActualTbColumnFilters] = useState<Record<string, Set<string | number>>>({});
   const [actualTbSortColumn, setActualTbSortColumn] = useState<string | null>(null);
@@ -1493,87 +1491,44 @@ export default function FinancialReview() {
   const [classifiedTbSortColumn, setClassifiedTbSortColumn] = useState<string | null>(null);
   const [classifiedTbSortDirection, setClassifiedTbSortDirection] = useState<'asc' | 'desc' | null>(null);
   
+  const actualDataWithSearch = useMemo(() => {
+    return actualData.map((row) => ({
+      ...row,
+      __searchText: buildSearchText(row, ACTUAL_SEARCH_FIELDS),
+    }));
+  }, [actualData]);
+
+  const baseClassifiedData = useMemo(() => filterClassifiedRows(currentData), [currentData]);
+
+  const classifiedDataWithSearch = useMemo(() => {
+    return baseClassifiedData.map((row) => ({
+      ...row,
+      __searchText: buildSearchText(row, CLASSIFIED_SEARCH_FIELDS),
+    }));
+  }, [baseClassifiedData]);
+
   // Filtered data for Actual TB
   const filteredActualData = useMemo(() => {
-    let filtered = actualData;
-    
-    // UNIVERSAL SEARCH FILTER - Works on ALL columns including numeric
-    const actualSearch = activeTab === 'actual-tb' ? searchTerm : '';
-    if (actualSearch) {
-      const searchLower = actualSearch.toLowerCase();
-      filtered = filtered.filter(row => {
-        // Build searchable string including ALL text and numeric columns
-        const searchableString = [
-          row['Ledger Name'] || '',
-          row['Primary Group'] || '',
-          row['Parent Group'] || '',
-          // Include numeric columns as formatted strings
-          (row['Opening Balance'] || 0).toString(),
-          (row['Debit'] || 0).toString(),
-          (row['Credit'] || 0).toString(),
-          (row['Closing Balance'] || 0).toString()
-        ].join('|').toLowerCase();
-        
-        return searchableString.includes(searchLower);
-      });
-    }
-    
-    // Group filter
-    const appliedGroupFilter = activeTab === 'actual-tb' ? groupFilter : 'all';
-    if (appliedGroupFilter !== 'all') {
-      filtered = filtered.filter(row => (row['Primary Group'] || '') === appliedGroupFilter);
-    }
-    
-    // Balance filter
-    const appliedBalanceFilter = activeTab === 'actual-tb' ? balanceFilter : 'all';
-    if (appliedBalanceFilter !== 'all') {
-      filtered = filtered.filter(row => {
-        const balance = row['Closing Balance'] || 0;
-        if (appliedBalanceFilter === 'positive') return balance > 0;
-        if (appliedBalanceFilter === 'negative') return balance < 0;
-        if (appliedBalanceFilter === 'zero') return balance === 0;
-        return true;
-      });
-    }
-    
-    // Apply column filters
-    Object.entries(actualTbColumnFilters).forEach(([column, selectedValues]) => {
-      if (selectedValues.size > 0) {
-        filtered = filtered.filter(row => {
-          const value = row[column as keyof LedgerRow];
-          return selectedValues.has(value as string | number);
-        });
-      }
+    const actualSearch = activeTab === 'actual-tb' ? debouncedSearchTerm : '';
+    return filterActualRows({
+      rows: actualDataWithSearch,
+      searchTerm: actualSearch,
+      groupFilter: activeTab === 'actual-tb' ? groupFilter : 'all',
+      balanceFilter: activeTab === 'actual-tb' ? balanceFilter : 'all',
+      columnFilters: actualTbColumnFilters,
+      sortColumn: actualTbSortColumn,
+      sortDirection: actualTbSortDirection,
     });
-    
-    // Apply sorting
-    if (actualTbSortColumn && actualTbSortDirection) {
-      filtered = [...filtered].sort((a, b) => {
-        const aVal = a[actualTbSortColumn as keyof LedgerRow];
-        const bVal = b[actualTbSortColumn as keyof LedgerRow];
-        
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          return actualTbSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-        }
-        
-        const aStr = String(aVal || '');
-        const bStr = String(bVal || '');
-        return actualTbSortDirection === 'asc' 
-          ? aStr.localeCompare(bStr) 
-          : bStr.localeCompare(aStr);
-      });
-    }
-    
-    return filtered;
-  }, [actualData, searchTerm, groupFilter, balanceFilter, actualTbColumnFilters, actualTbSortColumn, actualTbSortDirection, activeTab]);
-  
-  const baseClassifiedData = useMemo(() => {
-    return currentData.filter(row => {
-      const opening = row['Opening Balance'] || 0;
-      const closing = row['Closing Balance'] || 0;
-      return opening !== 0 || closing !== 0;
-    });
-  }, [currentData]);
+  }, [
+    actualDataWithSearch,
+    debouncedSearchTerm,
+    groupFilter,
+    balanceFilter,
+    actualTbColumnFilters,
+    actualTbSortColumn,
+    actualTbSortDirection,
+    activeTab,
+  ]);
 
   const normalizeMappingValue = useCallback((value?: string) => {
     return (value || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
@@ -1628,6 +1583,7 @@ export default function FinancialReview() {
     'Trade Payables',
     'Other Long-term Liabilities',
     'Other Current Liabilities',
+    'Unclassified Liabilities',
     'Long-term Provisions',
     'Short-term Provisions',
     'Deferred Tax Liabilities (Net)',
@@ -1644,6 +1600,7 @@ export default function FinancialReview() {
     'Short-term Loans and Advances',
     'Other Non-current Assets',
     'Other Current Assets',
+    'Unclassified Assets',
     'Deferred Tax Assets (Net)',
     'Revenue from Operations',
     'Other Income',
@@ -1682,112 +1639,40 @@ export default function FinancialReview() {
 
   // Filtered data for Classified TB
   const filteredData = useMemo(() => {
-    let filtered = baseClassifiedData;
-    
-    // UNIVERSAL SEARCH FILTER - Works on ALL columns including numeric
-    const classifiedSearch = activeTab === 'classified-tb' ? searchTerm : '';
-    if (classifiedSearch) {
-      const searchLower = classifiedSearch.toLowerCase();
-      filtered = filtered.filter(row => {
-        // Build searchable string including ALL text and numeric columns
-        const searchableString = [
-          row['Ledger Name'] || '',
-          row['Primary Group'] || '',
-          row['Parent Group'] || '',
-          row['Is Revenue'] || '',
-          row['H1'] || '',
-          row['H2'] || '',
-          row['H3'] || '',
-          row['Notes'] || '',
-          // Include numeric columns as formatted strings
-          (row['Opening Balance'] || 0).toString(),
-          (row['Debit'] || 0).toString(),
-          (row['Credit'] || 0).toString(),
-          (row['Closing Balance'] || 0).toString()
-        ].join('|').toLowerCase();
-        
-        return searchableString.includes(searchLower);
-      });
-    }
-    
-    // Apply column filters
-    Object.entries(classifiedTbColumnFilters).forEach(([column, selectedValues]) => {
-      if (selectedValues.size > 0) {
-        filtered = filtered.filter(row => {
-          const value = column === 'Status'
-            ? getStatusLabel(row)
-            : row[column as keyof LedgerRow];
-          return selectedValues.has(value as string | number);
-        });
-      }
+    const classifiedSearch = activeTab === 'classified-tb' ? debouncedSearchTerm : '';
+    return filterClassifiedRowsByFilters({
+      rows: classifiedDataWithSearch,
+      searchTerm: classifiedSearch,
+      columnFilters: classifiedTbColumnFilters,
+      sortColumn: classifiedTbSortColumn,
+      sortDirection: classifiedTbSortDirection,
+      getStatusLabel,
     });
+  }, [
+    classifiedDataWithSearch,
+    debouncedSearchTerm,
+    classifiedTbColumnFilters,
+    classifiedTbSortColumn,
+    classifiedTbSortDirection,
+    activeTab,
+    getStatusLabel,
+  ]);
 
-    // Apply sorting (only when user explicitly sets a sort column)
-    if (classifiedTbSortColumn && classifiedTbSortDirection) {
-      filtered = [...filtered].sort((a, b) => {
-        const aVal = a[classifiedTbSortColumn as keyof LedgerRow];
-        const bVal = b[classifiedTbSortColumn as keyof LedgerRow];
-        
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          return classifiedTbSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-        }
-        
-        const aStr = String(aVal || '');
-        const bStr = String(bVal || '');
-        return classifiedTbSortDirection === 'asc' 
-          ? aStr.localeCompare(bStr) 
-          : bStr.localeCompare(aStr);
-      });
-    }
-    
-    return filtered;
-  }, [baseClassifiedData, searchTerm, classifiedTbColumnFilters, classifiedTbSortColumn, classifiedTbSortDirection, activeTab, getStatusLabel]);
-  
+  const actualKeyToIndexMap = useMemo(() => buildKeyToIndexMap(actualData), [actualData]);
+  const currentKeyToIndexMap = useMemo(() => buildKeyToIndexMap(currentData), [currentData]);
+
   // Selected rows that are in filtered view (for accurate bulk action count)
   const selectedFilteredCount = useMemo(() => {
-    // Get indices of filtered rows
-    const filteredIndices = new Set(
-      filteredData.map(row => 
-        currentData.findIndex(r => r['Composite Key'] === row['Composite Key'])
-      ).filter(idx => idx !== -1)
-    );
-    
-    // Count how many selected indices are in filtered set
-    return Array.from(selectedRowIndices).filter(idx => filteredIndices.has(idx)).length;
-  }, [selectedRowIndices, filteredData, currentData]);
-  
+    return computeSelectedFilteredCount(selectedRowIndices, filteredData, currentKeyToIndexMap);
+  }, [selectedRowIndices, filteredData, currentKeyToIndexMap]);
 
-  
   // Totals calculation - based on active tab
   const totals = useMemo(() => {
     if (activeTab === 'actual-tb') {
-      // Calculate from actual TB filtered data
-      return filteredActualData.reduce((acc, row) => {
-        acc.opening += row['Opening Balance'] || 0;
-        acc.debit += row['Debit'] || 0;
-        acc.credit += row['Credit'] || 0;
-        acc.closing += row['Closing Balance'] || 0;
-        return acc;
-      }, { opening: 0, debit: 0, credit: 0, closing: 0 });
-    } else if (activeTab === 'stock-items') {
-      // Use filtered stock totals from StockItemsTab
-      return { 
-        opening: stockTotals.opening, 
-        debit: 0, 
-        credit: 0, 
-        closing: stockTotals.closing 
-      };
-    } else {
-      // Default to classified TB filtered data
-      return filteredData.reduce((acc, row) => {
-        acc.opening += row['Opening Balance'] || 0;
-        acc.debit += row['Debit'] || 0;
-        acc.credit += row['Credit'] || 0;
-        acc.closing += row['Closing Balance'] || 0;
-        return acc;
-      }, { opening: 0, debit: 0, credit: 0, closing: 0 });
+      return computeTotals(filteredActualData);
     }
-  }, [activeTab, filteredActualData, filteredData, stockTotals]);
+    return computeTotals(filteredData);
+  }, [activeTab, filteredActualData, filteredData]);
   
   // Helper to get unique column values for filters
   const getActualTbColumnValues = useCallback((column: string) => {
@@ -1829,9 +1714,6 @@ export default function FinancialReview() {
         return;
       }
     }
-    
-    // Set default stock items to true
-    setIncludeStockItems(true);
     
     // Check if entity type is selected
     if (!entityType) {
@@ -1909,14 +1791,6 @@ export default function FinancialReview() {
           'Is Revenue': line.isRevenue ? 'Yes' : 'No',
           'Sheet Name': 'TB CY'
         }))
-        .filter(row => {
-          // HARD FILTER: Hide completely inactive ledgers (Opening=0 AND Debit=0 AND Credit=0 AND Closing=0)
-          const opening = row['Opening Balance'] || 0;
-          const debit = row['Debit'] || 0;
-          const credit = row['Credit'] || 0;
-          const closing = row['Closing Balance'] || 0;
-          return !(opening === 0 && debit === 0 && credit === 0 && closing === 0);
-        })
         .map(row => {
           const baseRow: LedgerRow = {
             ...row,
@@ -1927,8 +1801,8 @@ export default function FinancialReview() {
           return applyClassificationRules(baseRow, classificationRules, { businessType, entityType, userDefinedExpenseThreshold });
         });
       
-      // Store actual data (unclassified) - FILTERED DATA (no completely inactive ledgers)
-      setActualData(processedData);
+      // Store actual data (unclassified) - NO BALANCE FILTERS (all ledgers included, including Opening=0 and Closing=0)
+      setActualData(enrichRowsWithStockDetails(processedData));
       
             // Import directly based on selected period type
       const classifiedRows = filterClassifiedRows(processedData);
@@ -1941,28 +1815,9 @@ export default function FinancialReview() {
 
       if (isPreviousImport) {
         setPreviousData(sortedClassifiedRows);
-        setCurrentData(sortedClassifiedRows);
+        setCurrentData(enrichRowsWithStockDetails(sortedClassifiedRows));
       } else {
-        setCurrentData(sortedClassifiedRows);
-      }
-      
-      // Fetch stock items if required
-      if (includeStockItems && (businessType === 'Trading - Wholesale and Retail' || businessType === 'Manufacturing')) {
-        try {
-          const stockItems = await odbcConnection.fetchStockItems();
-          const transformedStockItems = stockItems.map((item: any) => ({
-            'Item Name': item['Item Name'] || '',
-            'Stock Group': item['Stock Group'] || '',
-            'Primary Group': item['Primary Group'] || '',
-            'Opening Value': parseFloat(item['Opening Value'] || 0),
-            'Closing Value': parseFloat(item['Closing Value'] || 0),
-            'Stock Category': item['Stock Category'] || '',
-            'Composite Key': item['Composite Key'] || `STOCK|${item['Item Name']}`
-          }));
-          setCurrentStockData(transformedStockItems);
-        } catch (error) {
-          console.error('Failed to fetch stock items:', error);
-        }
+        setCurrentData(enrichRowsWithStockDetails(sortedClassifiedRows));
       }
       
       // Save to database if engagement exists
@@ -2051,9 +1906,9 @@ export default function FinancialReview() {
 
     if (isPreviousImport) {
       setPreviousData(sortedClassifiedRows);
-      setCurrentData(sortedClassifiedRows);
+      setCurrentData(enrichRowsWithStockDetails(sortedClassifiedRows));
     } else {
-      setCurrentData(sortedClassifiedRows);
+      setCurrentData(enrichRowsWithStockDetails(sortedClassifiedRows));
     }
     
     // Save to database
@@ -2077,25 +1932,6 @@ export default function FinancialReview() {
       await trialBalanceDB.importLines(dbLines, false);
     }
     
-    // Fetch stock items if required
-    if (includeStockItems && (businessType === 'Trading' || businessType === 'Manufacturing')) {
-      try {
-        const stockItems = await odbcConnection.fetchStockItems();
-        const transformedStockItems = stockItems.map((item: any) => ({
-          'Item Name': item['Item Name'] || '',
-          'Stock Group': item['Stock Group'] || '',
-          'Primary Group': item['Primary Group'] || '',
-          'Opening Value': parseFloat(item['Opening Value'] || 0),
-          'Closing Value': parseFloat(item['Closing Value'] || 0),
-          'Stock Category': item['Stock Category'] || '',
-          'Composite Key': item['Composite Key'] || `STOCK|${item['Item Name']}`
-        }));
-        setCurrentStockData(transformedStockItems);
-      } catch (error) {
-        console.error('Failed to fetch stock items:', error);
-      }
-    }
-    
     toast({
       title: 'Success',
       description: `Imported ${pendingImportData.length} ledgers as ${importPeriodType === 'current' ? 'Current' : 'Previous'} Period`
@@ -2103,7 +1939,7 @@ export default function FinancialReview() {
     
     setPendingImportData(null);
     setIsPeriodDialogOpen(false);
-  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, previousToDate, includeStockItems, businessType, odbcConnection, trialBalanceDB, toast, filterClassifiedRows, sortClassifiedByDefaultH2]);
+  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, previousToDate, odbcConnection, trialBalanceDB, toast, filterClassifiedRows, sortClassifiedByDefaultH2]);
   
   // Handle adding a new line item
   const handleAddLineItem = useCallback(() => {
@@ -2130,7 +1966,7 @@ export default function FinancialReview() {
     }, classificationRules, { businessType, entityType, userDefinedExpenseThreshold })];
     
     if (newLineForm.periodType === 'current') {
-      setCurrentData(prev => [...prev, classified[0]]);
+      setCurrentData(prev => enrichRowsWithStockDetails([...prev, classified[0]]));
     } else {
       setPreviousData(prev => [...prev, classified[0]]);
     }
@@ -2167,12 +2003,14 @@ export default function FinancialReview() {
     const updatedData = [...currentData];
     const updateCount = selectedRowIndices.size;
     const updatedKeys = new Set<string>();
-    
+
     const shouldRecalcH1 = 'Is Revenue' in updates && !('H1' in updates);
     const finalUpdates: Partial<LedgerRow> = { ...updates };
     const isUpdatingH1 = 'H1' in updates;
     const isUpdatingH2 = 'H2' in updates;
     const isUpdatingH3 = 'H3' in updates;
+    const firstSelectedIndex = Array.from(selectedRowIndices)[0];
+    const baseRowForPrompt = typeof firstSelectedIndex === 'number' ? updatedData[firstSelectedIndex] : undefined;
 
     if (isUpdatingH1 || isUpdatingH2 || isUpdatingH3) {
       finalUpdates['Auto'] = 'Manual';
@@ -2190,7 +2028,10 @@ export default function FinancialReview() {
     if (isUserDefinedValue(finalUpdates['H2']) || isUserDefinedValue(finalUpdates['H3'])) {
       finalUpdates['H2'] = isUserDefinedValue(finalUpdates['H2']) ? '' : finalUpdates['H2'];
       finalUpdates['H3'] = isUserDefinedValue(finalUpdates['H3']) ? '' : finalUpdates['H3'];
-      const note = window.prompt('Enter note for User_Defined classification:', baseRow['Notes'] || '');
+      const note = window.prompt(
+        'Enter note for User_Defined classification:',
+        baseRowForPrompt?.['Notes'] ?? ''
+      );
       finalUpdates['Notes'] = note && note.trim().length > 0 ? note.trim() : 'User_Defined - set H2/H3 manually';
     }
     
@@ -2210,13 +2051,15 @@ export default function FinancialReview() {
       }
     });
 
-    setCurrentData(updatedData);
+    setCurrentData(enrichRowsWithStockDetails(updatedData));
     if (updatedKeys.size > 0) {
       setActualData(prev =>
-        prev.map(row =>
-          row['Composite Key'] && updatedKeys.has(row['Composite Key'] as string)
-            ? { ...row, ...finalUpdates }
-            : row
+        enrichRowsWithStockDetails(
+          prev.map(row =>
+            row['Composite Key'] && updatedKeys.has(row['Composite Key'] as string)
+              ? { ...row, ...finalUpdates }
+              : row
+          )
         )
       );
     }
@@ -2258,14 +2101,16 @@ export default function FinancialReview() {
       const updatedRow = { ...prev[index], ...finalUpdates };
       const next = [...prev];
       next[index] = updatedRow;
-      return next;
+      return enrichRowsWithStockDetails(next);
     });
 
     const compositeKey = baseRow['Composite Key'];
     if (compositeKey) {
       setActualData(prev =>
-        prev.map(row =>
-          row['Composite Key'] === compositeKey ? { ...row, ...finalUpdates } : row
+        enrichRowsWithStockDetails(
+          prev.map(row =>
+            row['Composite Key'] === compositeKey ? { ...row, ...finalUpdates } : row
+          )
         )
       );
     }
@@ -2349,7 +2194,7 @@ export default function FinancialReview() {
         const parsedActual = JSON.parse(savedActual);
         if (Array.isArray(parsedActual) && parsedActual.length > 0) {
           cachedActualCount = parsedActual.length;
-          setActualData(parsedActual);
+          setActualData(enrichRowsWithStockDetails(parsedActual));
           hydrated = true;
         }
       } catch (e) {
@@ -2365,7 +2210,7 @@ export default function FinancialReview() {
         const parsedClassified = JSON.parse(savedClassified);
         if (Array.isArray(parsedClassified) && parsedClassified.length > 0) {
           cachedClassifiedCount = parsedClassified.length;
-          setCurrentData(parsedClassified);
+          setCurrentData(enrichRowsWithStockDetails(parsedClassified));
           hydrated = true;
         }
       } catch (e) {
@@ -2400,16 +2245,20 @@ export default function FinancialReview() {
         return applyClassificationRules(row, classificationRules, { businessType, entityType, userDefinedExpenseThreshold });
       });
       
-      setActualData(loadedData);
-      setCurrentData(filterClassifiedRows(loadedData));
+      setActualData(enrichRowsWithStockDetails(loadedData));
+      setCurrentData(enrichRowsWithStockDetails(filterClassifiedRows(loadedData)));
       
-      toast({
-        title: 'Data Loaded',
-        description: `Loaded ${loadedData.length} ledgers from saved data`,
-      });
+      const engagementId = currentEngagement?.id || '';
+      if (dataLoadedToastRef.current !== engagementId) {
+        toast({
+          title: 'Data Loaded',
+          description: `Loaded ${loadedData.length} ledgers from saved data`,
+        });
+        dataLoadedToastRef.current = engagementId;
+      }
       }
     }
-  }, [currentEngagement?.id, trialBalanceDB.lines, classificationRules, deriveH1FromRevenueAndBalance, filterClassifiedRows]);
+  }, [currentEngagement?.id, trialBalanceDB.lines, classificationRules, deriveH1FromRevenueAndBalance]);
   
   // Save entity info to localStorage when it changes
   useEffect(() => {
@@ -2748,6 +2597,48 @@ export default function FinancialReview() {
       }));
   }, [noteSourceData, selectedNoteH2, noteStatementType]);
 
+  const hierarchicalNoteLedgerItems = useMemo<LedgerItem[]>(() => {
+    if (!selectedNoteH2) return [];
+    const allowedH1 = noteStatementType === 'PL' ? new Set(['Income', 'Expense']) : new Set(['Asset', 'Liability']);
+    const itemsByH3 = new Map<string, LedgerItem[]>();
+    
+    noteSourceData
+      .filter(row => allowedH1.has(String(row['H1'] || '')) && String(row['H2'] || '') === selectedNoteH2)
+      .forEach(row => {
+        const h3 = String(row['H3'] || '(Unclassified)');
+        const item: LedgerItem = {
+          ledgerName: String(row['Ledger Name'] || ''),
+          groupName: String(row['Parent Group'] || row['Primary Group'] || ''),
+          openingBalance: Number(row['Opening Balance'] || 0),
+          closingBalance: Number(row['Closing Balance'] || 0),
+          classification: h3,
+        };
+        if (!itemsByH3.has(h3)) {
+          itemsByH3.set(h3, []);
+        }
+        itemsByH3.get(h3)!.push(item);
+      });
+
+    // Flatten with hierarchical structure markers
+    const result: LedgerItem[] = [];
+    let sortedH3Keys = Array.from(itemsByH3.keys()).sort();
+    sortedH3Keys.forEach(h3 => {
+      // Add H3 header row (special marker)
+      result.push({
+        ledgerName: `[H3] ${h3}`,
+        groupName: '',
+        openingBalance: 0,
+        closingBalance: 0,
+        classification: h3,
+      });
+      // Add ledgers under this H3
+      itemsByH3.get(h3)!.forEach(item => {
+        result.push(item);
+      });
+    });
+    return result;
+  }, [noteSourceData, selectedNoteH2, noteStatementType]);
+
   const faceSummaryBS = useMemo(() => buildFaceFromNotes(preparedNotesBS, 'BS'), [preparedNotesBS]);
   const faceSummaryPL = useMemo(() => buildFaceFromNotes(preparedNotesPL, 'PL'), [preparedNotesPL]);
   const faceNoteMetaMapBS = useMemo(() => {
@@ -2852,6 +2743,7 @@ export default function FinancialReview() {
       'Short-term Borrowings',
       'Trade Payables',
       'Other Current Liabilities',
+      'Unclassified Liabilities',
       'Short-term Provisions',
     ].forEach((h2) => {
       if (hasH2(h2)) order.push(`face:Liability:${h2}`);
@@ -2887,6 +2779,7 @@ export default function FinancialReview() {
       'Cash and Bank Balances',
       'Short-term Loans and Advances',
       'Other Current Assets',
+      'Unclassified Assets',
     ].forEach((h2) => {
       if (hasH2(h2)) order.push(`face:Asset:${h2}`);
     });
@@ -3089,6 +2982,7 @@ export default function FinancialReview() {
       liabilityH2List.forEach((h2) => {
         const meta = faceNoteMetaMapBS.get(h2);
         const amount = meta?.total ?? 0;
+        const isUnclassifiedLiability = h2 === 'Unclassified Liabilities';
         rows.push({
           id: `face:Liability:${h2}`,
           label: h2,
@@ -3096,7 +2990,7 @@ export default function FinancialReview() {
           formattedAmount: formatNumber(amount),
           indent: 1,
           bold: false,
-          italic: false,
+          italic: isUnclassifiedLiability,
           align: 'left',
           isParent: false,
           isManual: false,
@@ -3136,6 +3030,7 @@ export default function FinancialReview() {
       assetH2List.forEach((h2) => {
         const meta = faceNoteMetaMapBS.get(h2);
         const amount = meta?.total ?? 0;
+        const isUnclassifiedAsset = h2 === 'Unclassified Assets';
         rows.push({
           id: `face:Asset:${h2}`,
           label: h2,
@@ -3143,7 +3038,7 @@ export default function FinancialReview() {
           formattedAmount: formatNumber(amount),
           indent: 1,
           bold: false,
-          italic: false,
+          italic: isUnclassifiedAsset,
           align: 'left',
           isParent: false,
           isManual: false,
@@ -4632,8 +4527,9 @@ export default function FinancialReview() {
   }, [noteLayoutPayload, noteLayouts, statementVariables, toast]);
 
   // Export Template for Excel Import
-  const handleExportTemplate = useCallback(() => {
+  const handleExportTemplate = useCallback(async () => {
     try {
+      const XLSX = await import('xlsx');
       const templateData = [
         {
           'Ledger Name': 'Cash',
@@ -4736,6 +4632,7 @@ export default function FinancialReview() {
         title: 'Template Downloaded',
         description: 'Trial Balance import template has been downloaded. Fill it with your data and import.'
       });
+      await confirmExportedFile('Trial_Balance_Import_Template.xlsx');
     } catch (error) {
       toast({
         title: 'Export Failed',
@@ -4756,6 +4653,7 @@ export default function FinancialReview() {
       
       try {
         const arrayBuffer = await file.arrayBuffer();
+        const XLSX = await import('xlsx');
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
@@ -4804,9 +4702,9 @@ export default function FinancialReview() {
             return row['Opening Balance'] !== 0 || row['Closing Balance'] !== 0;
           });
         
-        setActualData(processedData);
+        setActualData(enrichRowsWithStockDetails(processedData));
         const classifiedRows = filterClassifiedRows(processedData);
-        setCurrentData(sortClassifiedByDefaultH2(classifiedRows));
+        setCurrentData(enrichRowsWithStockDetails(sortClassifiedByDefaultH2(classifiedRows)));
         const userDefinedCount = classifiedRows.filter(row => (row['Notes'] || '').toLowerCase().includes('user_defined')).length;
         
         // Save to database
@@ -4852,7 +4750,7 @@ export default function FinancialReview() {
   }, [toast, entityType, classificationRules, businessType, userDefinedExpenseThreshold, deriveH1FromRevenueAndBalance, currentEngagement?.id, toDate, trialBalanceDB, filterClassifiedRows, sortClassifiedByDefaultH2]);
 
   // Excel Export - Actual TB
-  const handleExportActualTB = useCallback(() => {
+  const handleExportActualTB = useCallback(async () => {
     if (filteredActualData.length === 0) {
       toast({
         title: 'No Data',
@@ -4863,8 +4761,13 @@ export default function FinancialReview() {
     }
     
     try {
+      const XLSX = await import('xlsx');
+      const exportRows = filteredActualData.map((row) => {
+        const { __searchText, ...rest } = row as LedgerRow & { __searchText?: string };
+        return rest;
+      });
       const workbook = XLSX.utils.book_new();
-      const worksheet = XLSX.utils.json_to_sheet(filteredActualData);
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
       
       // Set column widths based on current widths
       worksheet['!cols'] = [
@@ -4903,6 +4806,7 @@ export default function FinancialReview() {
         title: 'Export Successful',
         description: 'Actual TB exported to Excel'
       });
+      await confirmExportedFile(filename);
     } catch (error) {
       toast({
         title: 'Export Failed',
@@ -4913,7 +4817,7 @@ export default function FinancialReview() {
   }, [filteredActualData, actualTbColumnWidths, currentEngagement, toast]);
   
   // Excel Export - Classified TB
-  const handleExportClassifiedTB = useCallback(() => {
+  const handleExportClassifiedTB = useCallback(async () => {
     if (filteredData.length === 0) {
       toast({
         title: 'No Data',
@@ -4924,8 +4828,13 @@ export default function FinancialReview() {
     }
     
     try {
+      const XLSX = await import('xlsx');
+      const exportRows = filteredData.map((row) => {
+        const { __searchText, ...rest } = row as LedgerRow & { __searchText?: string };
+        return rest;
+      });
       const workbook = XLSX.utils.book_new();
-      const worksheet = XLSX.utils.json_to_sheet(filteredData);
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
       
       // Set column widths based on current widths
       const colWidths = [
@@ -4984,6 +4893,7 @@ export default function FinancialReview() {
         title: 'Export Successful',
         description: 'Classified TB exported to Excel'
       });
+      await confirmExportedFile(filename);
     } catch (error) {
       toast({
         title: 'Export Failed',
@@ -5062,8 +4972,12 @@ export default function FinancialReview() {
       return;
     }
 
-    setActualData(prev => prev.filter(row => !selectedKeys.has(buildKey(row))));
-    setCurrentData(prev => prev.filter(row => !selectedKeys.has(buildKey(row))));
+    setActualData(prev =>
+      enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
+    );
+    setCurrentData(prev =>
+      enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
+    );
     setSelectedRowIndices(new Set());
 
     toast({ title: 'Deleted', description: `${selectedKeys.size} row(s) removed from this engagement.` });
@@ -5155,6 +5069,16 @@ export default function FinancialReview() {
           >
             Ledger Details
           </Button>
+          <Button
+            size="sm"
+            variant={useHierarchicalNoteView ? "default" : "outline"}
+            className="h-7 text-xs px-2"
+            onClick={() => setUseHierarchicalNoteView(!useHierarchicalNoteView)}
+            disabled={!selectedNoteH2}
+            title="Toggle between flat list and hierarchical H2-H3-Ledger view"
+          >
+            {useHierarchicalNoteView ? 'Hierarchical View' : 'Flat List'}
+          </Button>
           {isProUser && (
             <Button
               size="sm"
@@ -5162,7 +5086,7 @@ export default function FinancialReview() {
               className="h-7 text-xs px-2"
               onClick={() => setActiveTab(noteStatementType === 'PL' ? 'face-pl' : 'face-bs')}
             >
-              Back to {noteStatementType === 'PL' ? 'P&amp;L Face' : 'Balance Sheet Face'}
+              Back to {noteStatementType === 'PL' ? 'Profit & Loss' : 'Balance Sheet'}
             </Button>
           )}
           {isProUser && (
@@ -5740,7 +5664,10 @@ export default function FinancialReview() {
                           </div>
                         </TableCell>
                         <TableCell
-                          className="text-right font-mono"
+                          className={cn(
+                            'text-right font-medium',
+                            row.italic && 'italic'
+                          )}
                           style={{ width: noteTableSettings.amountWidth, fontSize: `${noteTableSettings.fontSize}px` }}
                         >
                           {noteEditMode && row.rowType === 'INPUT' ? (
@@ -5806,7 +5733,7 @@ export default function FinancialReview() {
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-xs font-semibold">
-            {statementType === 'PL' ? 'Profit & Loss Face' : 'Balance Sheet Face'}
+            {statementType === 'PL' ? 'Profit & Loss' : 'Balance Sheet'}
           </div>
           {isProUser && (
             <Button
@@ -6422,331 +6349,124 @@ export default function FinancialReview() {
     );
   };
   
+  const handleToolbarBulkUpdate = useCallback(() => {
+    if (activeTab === 'stock-items') {
+      setStockBulkUpdateRequestId((prev) => prev + 1);
+    } else {
+      setIsBulkUpdateDialogOpen(true);
+    }
+  }, [activeTab]);
+
+  const handleToolbarDeleteSelected = useCallback(() => {
+    if (activeTab === 'stock-items') {
+      setStockDeleteRequestId((prev) => prev + 1);
+    } else {
+      handleDeleteSelected();
+    }
+  }, [activeTab, handleDeleteSelected]);
+
+  const handleOpenFilterModal = useCallback(() => {
+    setIsFilterModalOpen(true);
+  }, []);
+
+  const handleOpenRulesBot = useCallback(() => {
+    setIsRulesBotOpen(true);
+  }, []);
+
+  const handleOpenEntityDialog = useCallback(() => {
+    setIsEntityDialogOpen(true);
+  }, []);
+
+  const handleOpenOdbcDialog = useCallback(() => {
+    setIsOdbcDialogOpen(true);
+  }, []);
+
+  const handleOpenBsplHeads = useCallback(() => {
+    setIsBsplHeadsOpen(true);
+  }, []);
+
+  const handleOpenTableSettings = useCallback(() => {
+    setIsTableSettingsOpen(true);
+  }, []);
+
+  const handleOpenVariablesDialog = useCallback(() => {
+    setIsVariablesDialogOpen(true);
+  }, []);
+
+  const handleOpenAddLineDialog = useCallback(() => {
+    setIsAddLineDialogOpen(true);
+  }, []);
+
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchTerm(value);
+  }, []);
+
+  const handleOpenNoteNumberDialog = useCallback(() => {
+    setNoteNumberStartDraft(String(noteNumberStart));
+    setIsNoteNumberDialogOpen(true);
+  }, [noteNumberStart]);
+
+  const handleSetNumberScale = useCallback((value: string) => {
+    setNumberScale(value as typeof numberScale);
+  }, [numberScale]);
+
+  const handleSetImportPeriodType = useCallback((value: 'current' | 'previous') => {
+    setImportPeriodType(value);
+  }, []);
+  
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Consolidated Header - Two Compact Rows */}
-      
-      {/* Row 1: Actions + Date + Status */}
-      <div className="flex items-center justify-between px-1 py-0.5 bg-white border-b" style={{ minHeight: '28px' }}>
-        {/* Left: Action Buttons */}
-        <div className="flex items-center gap-1">
-          {/* Import Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-7 text-xs px-2">
-                <Upload className="w-3 h-3 mr-1.5" />
-                Import
-                <ChevronDown className="w-3 h-3 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={handleConnectTally} disabled={isFetching || odbcConnection.isConnecting}>
-                <Database className="w-3 h-3 mr-2" />
-                {isFetching || odbcConnection.isConnecting ? 'Connecting...' : 'From Tally (ODBC)'}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleExcelImport}>
-                <Upload className="w-3 h-3 mr-2" />
-                From Excel
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleExportTemplate}>
-                <Download className="w-3 h-3 mr-2" />
-                Download Template
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+      <FinancialReviewToolbar
+        activeTab={activeTab}
+        isFetching={isFetching}
+        isConnecting={odbcConnection.isConnecting}
+        isConnected={odbcConnection.isConnected}
+        importPeriodType={importPeriodType}
+        visiblePeriodLabel={visiblePeriodLabel}
+        classificationRulesCount={classificationRules.length}
+        selectedFilteredCount={selectedFilteredCount}
+        stockSelectedCount={stockSelectedCount}
+        selectedRowIndicesSize={selectedRowIndices.size}
+        currentDataLength={currentData.length}
+        filteredDataLength={filteredData.length}
+        actualDataLength={actualData.length}
+        currentStockDataLength={currentStockData.length}
+        searchTerm={searchTerm}
+        groupFilter={groupFilter}
+        balanceFilter={balanceFilter}
+        numberScale={numberScale}
+        onSearchChange={handleSearchChange}
+        onOpenFilterModal={handleOpenFilterModal}
+        onOpenRulesBot={handleOpenRulesBot}
+        onOpenEntityDialog={handleOpenEntityDialog}
+        onOpenOdbcDialog={handleOpenOdbcDialog}
+        onOpenBsplHeads={handleOpenBsplHeads}
+        onOpenTableSettings={handleOpenTableSettings}
+        onOpenNoteNumberDialog={handleOpenNoteNumberDialog}
+        onOpenVariablesDialog={handleOpenVariablesDialog}
+        onOpenAddLineDialog={handleOpenAddLineDialog}
+        onDeleteSelected={handleToolbarDeleteSelected}
+        onConnectTally={handleConnectTally}
+        onExcelImport={handleExcelImport}
+        onExportTemplate={handleExportTemplate}
+        onExportActualTB={handleExportActualTB}
+        onExportClassifiedTB={handleExportClassifiedTB}
+        onBulkUpdate={handleToolbarBulkUpdate}
+        onSave={handleSave}
+        onSaveNotePreviewDefaults={handleSaveNotePreviewDefaults}
+        onClearAll={handleClearWithConfirmation}
+        onSetImportPeriodType={handleSetImportPeriodType}
+        onReapplyAutoClassification={handleReapplyAutoClassification}
+        onSaveManualRules={handleSaveManualRules}
+        hasManualRows={hasManualRows}
+        onSetNumberScale={handleSetNumberScale}
+        toast={toast}
+      />
 
-          {/* Bulk Update (with count) */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const activeSelectionCount = activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount;
-              if (activeSelectionCount === 0) {
-                toast({
-                  title: 'No Selection',
-                  description: activeTab === 'stock-items'
-                    ? 'Please select stock items to update'
-                    : 'Please select visible filtered rows to update',
-                  variant: 'destructive'
-                });
-                return;
-              }
-              if (activeTab === 'stock-items') {
-                setStockBulkUpdateRequestId(prev => prev + 1);
-              } else {
-                setIsBulkUpdateDialogOpen(true);
-              }
-            }}
-            disabled={activeTab === 'stock-items' ? stockSelectedCount === 0 : (currentData.length === 0 || selectedFilteredCount === 0)}
-            className="h-7 text-xs px-2"
-          >
-            <Settings className="w-3 h-3 mr-1.5" />
-            {(() => {
-              if (activeTab === 'stock-items') {
-                return stockSelectedCount === 1 ? 'Update Stock' : 'Bulk Update Stock';
-              }
-              return selectedFilteredCount === 1 ? 'Update Ledger' : 'Bulk Update Ledgers';
-            })()} {(activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount) > 0 &&
-              `(${activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount})`}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsRulesBotOpen(true)}
-            className="h-8"
-          >
-            <Sparkles className="w-3 h-3 mr-1.5" />
-            Rules Bot {classificationRules.length > 0 ? `(${classificationRules.length})` : ''}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleReapplyAutoClassification}
-            disabled={currentData.length === 0}
-            className="h-8"
-          >
-            Auto Apply
-          </Button>
-          <Button
-            variant={hasManualRows ? 'default' : 'outline'}
-            size="sm"
-            onClick={handleSaveManualRules}
-            disabled={!hasManualRows}
-            className="h-8"
-          >
-            Save Manual Rules
-          </Button>
-
-          {/* Export Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="default"
-                size="sm"
-                disabled={currentData.length === 0}
-                className="h-7 text-xs px-2"
-              >
-                <Download className="w-3 h-3 mr-1.5" />
-                Export
-                <ChevronDown className="w-3 h-3 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={handleExportActualTB}>
-                <Download className="w-3 h-3 mr-2" />
-                Export Actual TB to Excel
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleExportClassifiedTB}>
-                <Download className="w-3 h-3 mr-2" />
-                Export Classified TB to Excel
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {activeTab !== 'stock-items' && (
-            <div className="flex items-center gap-1 rounded border bg-white p-0.5">
-              <Button
-                type="button"
-                size="sm"
-                variant={importPeriodType === 'current' ? 'default' : 'ghost'}
-                className="h-6 px-2 text-[10px]"
-                onClick={() => setImportPeriodType('current')}
-              >
-                Current
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={importPeriodType === 'previous' ? 'default' : 'ghost'}
-                className="h-6 px-2 text-[10px]"
-                onClick={() => setImportPeriodType('previous')}
-              >
-                Previous
-              </Button>
-            </div>
-          )}
-          {visiblePeriodLabel && (
-            <Badge variant="secondary" className="h-6 px-2 text-[10px]">
-              {visiblePeriodLabel}
-            </Badge>
-          )}
-        </div>
-
-        {/* Right: Tally Status + Settings */}
-        <div className="flex items-center gap-2">
-          <div className={cn(
-            "flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium",
-            odbcConnection.isConnected 
-              ? "bg-green-50 text-green-700" 
-              : "bg-gray-100 text-gray-500"
-          )}>
-            <Database className="w-3 h-3" />
-            {odbcConnection.isConnected ? 'Tally Connected' : 'Not Connected'}
-          </div>
-
-          {/* Settings Menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <Settings className="w-4 h-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onClick={() => setIsEntityDialogOpen(true)}>
-                <Cog className="w-4 h-4 mr-2" />
-                Configure Entity
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsOdbcDialogOpen(true)}>
-                <Database className="w-4 h-4 mr-2" />
-                ODBC Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsBsplHeadsOpen(true)}>
-                <Settings className="w-4 h-4 mr-2" />
-                Manage BSPL Heads
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsTableSettingsOpen(true)}>
-                <Settings className="w-4 h-4 mr-2" />
-                Table Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleSave} disabled={currentData.length === 0}>
-                <Save className="w-4 h-4 mr-2" />
-                Save Data
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleSaveNotePreviewDefaults}>
-                <Save className="w-4 h-4 mr-2" />
-                Save Note Preview Defaults
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                setNoteNumberStartDraft(String(noteNumberStart));
-                setIsNoteNumberDialogOpen(true);
-              }}>
-                <Settings className="w-4 h-4 mr-2" />
-                Note Number Start
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsVariablesDialogOpen(true)}>
-                <Settings className="w-4 h-4 mr-2" />
-                Statement Variables
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem 
-                onClick={handleClearWithConfirmation} 
-                disabled={currentData.length === 0 && actualData.length === 0 && currentStockData.length === 0}
-                className="text-destructive"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Clear All Data
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-      
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Modern Filter Bar */}
-      <div className="flex items-center gap-2 px-1 py-0.5 bg-white border-b" style={{ minHeight: '28px' }}>
-          {/* Search */}
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-            <Input
-              placeholder="Search ledgers, groups..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-7 pl-7 text-xs"
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  setSearchTerm('');
-                }
-              }}
-            />
-          </div>
-
-          {/* Filter Button with Active Count */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsFilterModalOpen(true)}
-            className="h-7 text-xs px-2"
-          >
-            <Settings className="w-4 h-4 mr-2" />
-            Filters
-            {(() => {
-              const activeCount = [
-                groupFilter !== 'all',
-                balanceFilter !== 'all',
-              ].filter(Boolean).length;
-              return activeCount > 0 ? (
-                <Badge variant="secondary" className="ml-2 h-5 px-1.5">
-                  {activeCount}
-                </Badge>
-              ) : null;
-            })()}
-          </Button>
-
-          {/* Active Filter Chips */}
-          <div className="flex items-center gap-2 flex-1">
-          </div>
-
-          {/* Selection Info & Add Line */}
-          <div className="flex items-center gap-2">
-            {(activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount) > 0 && (
-              <Badge variant="default" className="h-7 px-2 text-xs">
-                {activeTab === 'stock-items'
-                  ? `${stockSelectedCount} selected`
-                  : `${selectedFilteredCount} of ${filteredData.length} selected`}
-              </Badge>
-            )}
-            <Select value={numberScale} onValueChange={(value) => setNumberScale(value as typeof numberScale)}>
-              <SelectTrigger className="h-7 px-2 text-xs w-[150px]">
-                <SelectValue placeholder="Scale" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="actual">Actual</SelectItem>
-                <SelectItem value="tens">Tens (0)</SelectItem>
-                <SelectItem value="hundreds">Hundreds (00)</SelectItem>
-                <SelectItem value="thousands">Thousands ('000)</SelectItem>
-                <SelectItem value="lakhs">Lakhs ('00000)</SelectItem>
-                <SelectItem value="millions">Millions (000000)</SelectItem>
-                <SelectItem value="crores">Crores (0000000)</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button 
-              size="sm" 
-              variant="outline" 
-              onClick={() => setIsAddLineDialogOpen(true)}
-              className="h-7 text-xs px-2"
-            >
-              <Plus className="w-4 h-4 mr-1" />
-              {activeTab === 'stock-items' ? 'Add Item' : 'Add Ledger'}
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => {
-                if (activeTab === 'stock-items') {
-                  setStockDeleteRequestId(prev => prev + 1);
-                } else {
-                  handleDeleteSelected();
-                }
-              }}
-              className="h-7 text-xs px-2"
-              disabled={activeTab === 'stock-items' ? stockSelectedCount === 0 : selectedRowIndices.size === 0}
-            >
-              <Trash2 className="w-4 h-4 mr-1" />
-              Delete Selected
-            </Button>
-          </div>
-        </div>
-        
-        {/* Totals Bar */}
-        <div className="flex items-center justify-end gap-4 px-2 py-0.5 bg-gray-50 border-b text-[10px]" style={{ minHeight: '20px' }}>
-          <span className="text-muted-foreground">Opening: <strong className="text-foreground font-semibold">{formatNumber(totals.opening)}</strong></span>
-          <span className="text-muted-foreground">Debit: <strong className="text-foreground font-semibold">{formatNumber(totals.debit)}</strong></span>
-          <span className="text-muted-foreground">Credit: <strong className="text-foreground font-semibold">{formatNumber(totals.credit)}</strong></span>
-          <span className="text-muted-foreground">Closing: <strong className="text-foreground font-semibold">{formatNumber(totals.closing)}</strong></span>
-        </div>
+        <TotalsBar totals={totals} formatNumber={formatNumber} />
       
         {/* Modern Tabs Navigation */}
         <div className="bg-white border-b py-0.5">
@@ -6772,7 +6492,7 @@ export default function FinancialReview() {
                   className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
                 >
                   <FileSpreadsheet className="w-3 h-3 mr-1" />
-                  Balance Sheet Face
+                  Balance Sheet
                 </TabsTrigger>
               )}
               {isProUser && (
@@ -6781,7 +6501,7 @@ export default function FinancialReview() {
                   className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
                 >
                   <FileSpreadsheet className="w-3 h-3 mr-1" />
-                  P&amp;L Face
+                  Profit & Loss
                 </TabsTrigger>
               )}
               <TabsTrigger 
@@ -6798,18 +6518,6 @@ export default function FinancialReview() {
                 <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Notes (PL)
               </TabsTrigger>
-              <TabsTrigger 
-                value="stock-items"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
-              >
-                <Package className="w-3 h-3 mr-1" />
-                Stock Items
-                {stockItemCount.total > 0 && (
-                  <span className="ml-1 text-[10px] text-gray-500">
-                    ({stockItemCount.filtered}/{stockItemCount.total})
-                  </span>
-                )}
-              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -6820,577 +6528,140 @@ export default function FinancialReview() {
             
             {/* ACTUAL TRIAL BALANCE TAB */}
             <TabsContent value="actual-tb" className="mt-0 p-1">
-              <div className="border rounded overflow-y-auto relative" style={{ height: 'calc(100vh - 180px)' }}>
-            <Table className="table-fixed">
-              <TableHeader className="sticky top-0 bg-white z-20 shadow-sm">
-                <TableRow>
-                  <TableHead className="w-8 sticky top-0 bg-white p-0" style={{ left: actualStickyOffsets.selection, zIndex: 20 }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedRowIndices.size === actualData.length && actualData.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedRowIndices(new Set(actualData.map((_, i) => i)));
-                        } else {
-                          setSelectedRowIndices(new Set());
-                        }
-                      }}
-                      title="Select All / Deselect All"
-                    />
-                  </TableHead>
-                  <TableHead
-                    className="sticky top-0 bg-white relative"
-                    style={{ width: getActualColumnWidth('Ledger Name'), left: actualStickyOffsets.ledger, zIndex: 19 }}
-                  >
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Ledger Name')}px` }}>
-                      Ledger Name
-                      <ColumnFilter
-                        column="Ledger Name"
-                        values={getActualTbColumnValues('Ledger Name')}
-                        selectedValues={actualTbColumnFilters['Ledger Name'] || new Set()}
-                        onFilterChange={(values) => handleActualTbFilterChange('Ledger Name', values)}
-                        sortDirection={actualTbSortColumn === 'Ledger Name' ? actualTbSortDirection : null}
-                        onSort={(dir) => handleActualTbSort('Ledger Name', dir)}
-                      />
-                    </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => actualTbHandleMouseDown('Ledger Name', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Parent Group') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Parent Group')}px` }}>
-                      Parent Group
-                      <ColumnFilter
-                        column="Parent Group"
-                        values={getActualTbColumnValues('Parent Group')}
-                        selectedValues={actualTbColumnFilters['Parent Group'] || new Set()}
-                        onFilterChange={(values) => handleActualTbFilterChange('Parent Group', values)}
-                        sortDirection={actualTbSortColumn === 'Parent Group' ? actualTbSortDirection : null}
-                        onSort={(dir) => handleActualTbSort('Parent Group', dir)}
-                      />
-                    </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => actualTbHandleMouseDown('Parent Group', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Primary Group') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Primary Group')}px` }}>
-                      Primary Group
-                      <ColumnFilter
-                        column="Primary Group"
-                        values={getActualTbColumnValues('Primary Group')}
-                        selectedValues={actualTbColumnFilters['Primary Group'] || new Set()}
-                        onFilterChange={(values) => handleActualTbFilterChange('Primary Group', values)}
-                        sortDirection={actualTbSortColumn === 'Primary Group' ? actualTbSortDirection : null}
-                        onSort={(dir) => handleActualTbSort('Primary Group', dir)}
-                      />
-                    </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => actualTbHandleMouseDown('Primary Group', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
-                  </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Opening Balance') }}>
-                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Opening Balance')}px` }}>
-                      Opening
-                      <ColumnFilter
-                        column="Opening Balance"
-                        values={getActualTbColumnValues('Opening Balance')}
-                        selectedValues={actualTbColumnFilters['Opening Balance'] || new Set()}
-                        onFilterChange={(values) => handleActualTbFilterChange('Opening Balance', values)}
-                        sortDirection={actualTbSortColumn === 'Opening Balance' ? actualTbSortDirection : null}
-                        onSort={(dir) => handleActualTbSort('Opening Balance', dir)}
-                        isNumeric
-                      />
-                    </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => actualTbHandleMouseDown('Opening Balance', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
-                  </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Debit') }}>
-                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Debit')}px` }}>
-                      Debit
-                      <ColumnFilter
-                        column="Debit"
-                        values={getActualTbColumnValues('Debit')}
-                        selectedValues={actualTbColumnFilters['Debit'] || new Set()}
-                        onFilterChange={(values) => handleActualTbFilterChange('Debit', values)}
-                        sortDirection={actualTbSortColumn === 'Debit' ? actualTbSortDirection : null}
-                        onSort={(dir) => handleActualTbSort('Debit', dir)}
-                        isNumeric
-                      />
-                    </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => actualTbHandleMouseDown('Debit', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
-                  </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Credit') }}>
-                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Credit')}px` }}>
-                      Credit
-                      <ColumnFilter
-                        column="Credit"
-                        values={getActualTbColumnValues('Credit')}
-                        selectedValues={actualTbColumnFilters['Credit'] || new Set()}
-                        onFilterChange={(values) => handleActualTbFilterChange('Credit', values)}
-                        sortDirection={actualTbSortColumn === 'Credit' ? actualTbSortDirection : null}
-                        onSort={(dir) => handleActualTbSort('Credit', dir)}
-                        isNumeric
-                      />
-                    </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => actualTbHandleMouseDown('Credit', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
-                  </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Closing Balance') }}>
-                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getActualFontSize('Closing Balance')}px` }}>
-                      Closing
-                      <ColumnFilter
-                        column="Closing Balance"
-                        values={getActualTbColumnValues('Closing Balance')}
-                        selectedValues={actualTbColumnFilters['Closing Balance'] || new Set()}
-                        onFilterChange={(values) => handleActualTbFilterChange('Closing Balance', values)}
-                        sortDirection={actualTbSortColumn === 'Closing Balance' ? actualTbSortDirection : null}
-                        onSort={(dir) => handleActualTbSort('Closing Balance', dir)}
-                        isNumeric
-                      />
-                    </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => actualTbHandleMouseDown('Closing Balance', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getActualColumnWidth('Is Revenue') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getActualFontSize('Is Revenue')}px` }}>
-                      Is Revenue
-                      <ColumnFilter
-                        column="Is Revenue"
-                        values={getActualTbColumnValues('Is Revenue')}
-                        selectedValues={actualTbColumnFilters['Is Revenue'] || new Set()}
-                        onFilterChange={(values) => handleActualTbFilterChange('Is Revenue', values)}
-                        sortDirection={actualTbSortColumn === 'Is Revenue' ? actualTbSortDirection : null}
-                        onSort={(dir) => handleActualTbSort('Is Revenue', dir)}
-                      />
-                    </div>
-                    <div 
-                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-600 transition-colors"
-                      onMouseDown={(e) => actualTbHandleMouseDown('Is Revenue', e)}
-                      style={{ userSelect: 'none' }}
-                      title="Drag to resize column"
-                    />
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredActualData.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
-                      No data loaded. Import from Tally or Excel to get started.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredActualData.map((row, index) => {
-                    const originalIndex = actualData.findIndex(r => 
-                      r['Composite Key'] === row['Composite Key']
-                    );
-                    const isSelected = originalIndex !== -1 && selectedRowIndices.has(originalIndex);
-                    
-                    return (
-                      <TableRow 
-                        key={row['Composite Key'] || index}
-                        className={cn(
-                          isSelected && "bg-blue-100/50",
-                          "cursor-pointer hover:bg-gray-50"
-                        )}
-                        style={{ height: `${getActualRowHeight()}px` }}
-                        onClick={(e) => toggleRowSelection(originalIndex, e)}
-                      >
-                        <TableCell className="sticky left-0 bg-white z-10 p-0" style={{ left: actualStickyOffsets.selection, width: 32 }}>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleRowSelection(originalIndex, e as unknown as React.MouseEvent);
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell
-                          className="font-medium sticky bg-white z-10 truncate"
-                          style={{ left: actualStickyOffsets.ledger, width: getActualColumnWidth('Ledger Name'), fontSize: `${getActualFontSize('Ledger Name')}px` }}
-                          title={row['Ledger Name']}
-                        >
-                          {row['Ledger Name']}
-                        </TableCell>
-                        <TableCell
-                          className="text-gray-600 max-w-[180px] truncate"
-                          style={{ width: getActualColumnWidth('Parent Group'), fontSize: `${getActualFontSize('Parent Group')}px` }}
-                          title={row['Parent Group']}
-                        >
-                          {row['Parent Group']}
-                        </TableCell>
-                        <TableCell
-                          className="max-w-[180px] truncate"
-                          style={{ width: getActualColumnWidth('Primary Group'), fontSize: `${getActualFontSize('Primary Group')}px` }}
-                          title={row['Primary Group']}
-                        >
-                          {row['Primary Group']}
-                        </TableCell>
-                        <TableCell className="text-right" style={{ width: getActualColumnWidth('Opening Balance'), fontSize: `${getActualFontSize('Opening Balance')}px` }}>
-                          {formatNumber(row['Opening Balance'])}
-                        </TableCell>
-                        <TableCell className="text-right" style={{ width: getActualColumnWidth('Debit'), fontSize: `${getActualFontSize('Debit')}px` }}>
-                          {formatNumber(row['Debit'])}
-                        </TableCell>
-                        <TableCell className="text-right" style={{ width: getActualColumnWidth('Credit'), fontSize: `${getActualFontSize('Credit')}px` }}>
-                          {formatNumber(row['Credit'])}
-                        </TableCell>
-                        <TableCell className="text-right font-medium" style={{ width: getActualColumnWidth('Closing Balance'), fontSize: `${getActualFontSize('Closing Balance')}px` }}>
-                          {formatNumber(row['Closing Balance'])}
-                        </TableCell>
-                        <TableCell style={{ width: getActualColumnWidth('Is Revenue'), fontSize: `${getActualFontSize('Is Revenue')}px` }}>
-                          {row['Is Revenue']}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
+              <div className="h-full w-full" style={{ height: 'calc(100vh - 180px)' }}>
+                <ActualTBTable
+                  rows={filteredActualData}
+                  allRows={actualData}
+                  keyToIndexMap={actualKeyToIndexMap}
+                  selectedRowIndices={selectedRowIndices}
+                  setSelectedRowIndices={setSelectedRowIndices}
+                  toggleRowSelection={toggleRowSelection}
+                  actualStickyOffsets={actualStickyOffsets}
+                  getActualColumnWidth={getActualColumnWidth}
+                  getActualFontSize={getActualFontSize}
+                  getActualRowHeight={getActualRowHeight}
+                  getActualTbColumnValues={getActualTbColumnValues}
+                  actualTbColumnFilters={actualTbColumnFilters}
+                  actualTbSortColumn={actualTbSortColumn}
+                  actualTbSortDirection={actualTbSortDirection}
+                  handleActualTbFilterChange={handleActualTbFilterChange}
+                  handleActualTbSort={handleActualTbSort}
+                  actualTbHandleMouseDown={actualTbHandleMouseDown}
+                  formatNumber={formatNumber}
+                  cn={cn}
+                />
               </div>
             </TabsContent>
 
             {/* CLASSIFIED TRIAL BALANCE TAB */}
             <TabsContent value="classified-tb" className="mt-0 p-1">
-              <div className="border rounded-lg overflow-auto relative h-[calc(100vh-300px)]">
-            <Table className="table-fixed w-full border-collapse">
-              <TableHeader className="sticky top-0 bg-white z-20 shadow-sm">
-                <TableRow>
-                  <TableHead className="w-8 sticky top-0 bg-white p-0" style={{ zIndex: 20 }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedFilteredCount === filteredData.length && filteredData.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          // Select all VISIBLE FILTERED rows
-                          const visibleIndices = filteredData.map(row => 
-                            currentData.findIndex(r => r['Composite Key'] === row['Composite Key'])
-                          ).filter(idx => idx !== -1);
-                          setSelectedRowIndices(new Set(visibleIndices));
-                        } else {
-                          setSelectedRowIndices(new Set());
-                        }
-                      }}
-                      title="Select All Visible / Deselect All"
-                    />
-                  </TableHead>
-                  <TableHead
-                    className="sticky top-0 bg-white relative"
-                    style={{ width: getColumnWidth('Ledger Name'), zIndex: 19 }}
-                  >
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Ledger Name')}px` }}>
-                      Ledger Name
-                      <ColumnFilter
-                        column="Ledger Name"
-                        values={getClassifiedTbColumnValues('Ledger Name')}
-                        selectedValues={classifiedTbColumnFilters['Ledger Name'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('Ledger Name', values)}
-                        sortDirection={classifiedTbSortColumn === 'Ledger Name' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('Ledger Name', dir)}
-                      />
+              <div className="h-full w-full flex flex-col gap-2" style={{ height: 'calc(100vh - 180px)' }}>
+                <div className="rounded-md border border-gray-200 bg-white p-3 shadow-sm space-y-2">
+                  <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">Stock Details</p>
+                      <p className="text-xs text-muted-foreground">
+                        Enter opening and closing values for each inventory bucket. Saving will add closing inventory rows and the Change in Inventories line automatically.
+                      </p>
                     </div>
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('Parent Group') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Parent Group')}px` }}>
-                      Parent Group
-                      <ColumnFilter
-                        column="Parent Group"
-                        values={getClassifiedTbColumnValues('Parent Group')}
-                        selectedValues={classifiedTbColumnFilters['Parent Group'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('Parent Group', values)}
-                        sortDirection={classifiedTbSortColumn === 'Parent Group' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('Parent Group', dir)}
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('Primary Group') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Primary Group')}px` }}>
-                      Primary Group
-                      <ColumnFilter
-                        column="Primary Group"
-                        values={getClassifiedTbColumnValues('Primary Group')}
-                        selectedValues={classifiedTbColumnFilters['Primary Group'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('Primary Group', values)}
-                        sortDirection={classifiedTbSortColumn === 'Primary Group' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('Primary Group', dir)}
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getColumnWidth('Opening Balance') }}>
-                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getColumnFontSize('Opening Balance')}px` }}>
-                      Opening
-                      <ColumnFilter
-                        column="Opening Balance"
-                        values={getClassifiedTbColumnValues('Opening Balance')}
-                        selectedValues={classifiedTbColumnFilters['Opening Balance'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('Opening Balance', values)}
-                        sortDirection={classifiedTbSortColumn === 'Opening Balance' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('Opening Balance', dir)}
-                        isNumeric
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead className="text-right sticky top-0 bg-white relative" style={{ width: getColumnWidth('Closing Balance') }}>
-                    <div className="flex items-center justify-end gap-1" style={{ fontSize: `${getColumnFontSize('Closing Balance')}px` }}>
-                      Closing
-                      <ColumnFilter
-                        column="Closing Balance"
-                        values={getClassifiedTbColumnValues('Closing Balance')}
-                        selectedValues={classifiedTbColumnFilters['Closing Balance'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('Closing Balance', values)}
-                        sortDirection={classifiedTbSortColumn === 'Closing Balance' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('Closing Balance', dir)}
-                        isNumeric
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('H1') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('H1')}px` }}>
-                      H1
-                      <ColumnFilter
-                        column="H1"
-                        values={getClassifiedTbColumnValues('H1')}
-                        selectedValues={classifiedTbColumnFilters['H1'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('H1', values)}
-                        sortDirection={classifiedTbSortColumn === 'H1' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('H1', dir)}
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('H2') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('H2')}px` }}>
-                      H2
-                      <ColumnFilter
-                        column="H2"
-                        values={getClassifiedTbColumnValues('H2')}
-                        selectedValues={classifiedTbColumnFilters['H2'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('H2', values)}
-                        sortDirection={classifiedTbSortColumn === 'H2' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('H2', dir)}
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('H3') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('H3')}px` }}>
-                      H3
-                      <ColumnFilter
-                        column="H3"
-                        values={getClassifiedTbColumnValues('H3')}
-                        selectedValues={classifiedTbColumnFilters['H3'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('H3', values)}
-                        sortDirection={classifiedTbSortColumn === 'H3' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('H3', dir)}
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead className="sticky top-0 bg-white relative" style={{ width: getColumnWidth('Status') }}>
-                    <div className="flex items-center gap-1" style={{ fontSize: `${getColumnFontSize('Status')}px` }}>
-                      Status
-                      <ColumnFilter
-                        column="Status"
-                        values={getClassifiedTbColumnValues('Status')}
-                        selectedValues={classifiedTbColumnFilters['Status'] || new Set()}
-                        onFilterChange={(values) => handleClassifiedTbFilterChange('Status', values)}
-                        sortDirection={classifiedTbSortColumn === 'Status' ? classifiedTbSortDirection : null}
-                        onSort={(dir) => handleClassifiedTbSort('Status', dir)}
-                      />
-                    </div>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredData.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
-                      {currentData.length === 0 
-                        ? "No classified data. Import from Tally to get started."
-                        : "No results match your search criteria."}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredData.map((row, index) => {
-                    // Find the original index in currentData for selection
-                    const originalIndex = currentData.findIndex(r => 
-                      r['Composite Key'] === row['Composite Key']
-                    );
-                    const isSelected = originalIndex !== -1 && selectedRowIndices.has(originalIndex);
-                    const isFocused = focusedClassifiedRowIndex === originalIndex;
-                    const mappingStatus = getMappingStatus(row);
-                    
-                    return (
-                      <TableRow 
-                        key={row['Composite Key'] || index}
-                        className={cn(
-                          !isSelected && mappingStatus === 'Mapped' && "bg-emerald-50",
-                          !isSelected && mappingStatus === 'Partial' && "bg-amber-50",
-                          !isSelected && mappingStatus === 'Unmapped' && "bg-red-50",
-                          isSelected && "bg-blue-50",
-                          isFocused && "ring-2 ring-blue-400 ring-inset",
-                          "cursor-pointer hover:bg-gray-50 transition-colors"
-                        )}
-                        style={{ height: `${getClassifiedRowHeight()}px` }}
-                        onClick={(e) => {
-                          setFocusedClassifiedRowIndex(originalIndex);
-                          toggleRowSelection(originalIndex, e);
-                        }}
-                        tabIndex={0}
-                        onFocus={() => setFocusedClassifiedRowIndex(originalIndex)}
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <Button size="sm" variant="outline" onClick={resetManualInventoryDraft}>
+                        Reset
+                      </Button>
+                      <Button size="sm" onClick={handleManualInventorySave}>
+                        Save
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={toggleStockDetails}
+                        className="inline-flex items-center gap-1 rounded border border-transparent px-3 py-1 text-xs font-medium text-blue-600 shadow-sm hover:text-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                       >
-                        <TableCell onClick={(e) => e.stopPropagation()} className="p-0" style={{ width: 28 }}>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleRowSelection(originalIndex, e as unknown as React.MouseEvent);
-                            }}
+                        {stockDetailsCollapsed ? 'Expand' : 'Collapse'}
+                        {stockDetailsCollapsed ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronUp className="h-3 w-3" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  {!stockDetailsCollapsed ? (
+                    <>
+                      <div className="grid grid-cols-[2fr_1fr_1fr] text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-dashed pb-2">
+                        <div>Category</div>
+                        <div className="text-right">Opening Inventories</div>
+                        <div className="text-right">Closing Inventories</div>
+                      </div>
+                      {STOCK_DETAIL_CATEGORIES.map(category => (
+                        <div
+                          key={category.key}
+                          className="grid grid-cols-[2fr_1fr_1fr] items-center border-dashed border-b last:border-b-0 py-1.5"
+                        >
+                          <div className="text-sm font-medium text-gray-800">{category.label}</div>
+                          <Input
+                            type="number"
+                            value={manualInventoryDraft[category.key].opening}
+                            onChange={(e) => updateManualInventoryDraftValue(category.key, 'opening', e.target.value)}
+                            className="h-8 text-xs text-right px-2"
                           />
-                        </TableCell>
-                        <TableCell
-                          className="font-medium truncate px-2 py-1"
-                          style={{ width: getColumnWidth('Ledger Name'), fontSize: `${getColumnFontSize('Ledger Name')}px` }}
-                          title={row['Ledger Name']}
-                        >
-                          {row['Ledger Name']}
-                        </TableCell>
-                        <TableCell
-                          className="text-gray-600 truncate px-2 py-1"
-                          style={{ width: getColumnWidth('Parent Group'), fontSize: `${getColumnFontSize('Parent Group')}px` }}
-                          title={row['Parent Group'] || row['Primary Group'] || '-'}
-                        >
-                          {row['Parent Group'] || row['Primary Group'] || '-'}
-                        </TableCell>
-                        <TableCell
-                          className="truncate px-2 py-1"
-                          style={{ width: getColumnWidth('Primary Group'), fontSize: `${getColumnFontSize('Primary Group')}px` }}
-                          title={row['Primary Group']}
-                        >
-                          {row['Primary Group']}
-                        </TableCell>
-                        <TableCell className="text-right px-2 py-1" style={{ width: getColumnWidth('Opening Balance'), fontSize: `${getColumnFontSize('Opening Balance')}px` }}>
-                          {formatNumber(row['Opening Balance'])}
-                        </TableCell>
-                        <TableCell className="text-right font-medium px-2 py-1" style={{ width: getColumnWidth('Closing Balance'), fontSize: `${getColumnFontSize('Closing Balance')}px` }}>
-                          {formatNumber(row['Closing Balance'])}
-                        </TableCell>
-                        <TableCell className="px-2 py-1" style={{ width: getColumnWidth('H1'), fontSize: `${getColumnFontSize('H1')}px` }}>
-                          <Select
-                            value={row['H1'] || ''}
-                            onValueChange={(value) => updateRowAtIndex(originalIndex, { 'H1': value, 'H2': '', 'H3': '' })}
-                          >
-                            <SelectTrigger className="h-4 px-1" style={{ fontSize: `${getColumnFontSize('H1')}px` }}>
-                              <SelectValue placeholder="Select H1" />
-                            </SelectTrigger>
-                            <SelectContent position="popper" className="z-[9999]" sideOffset={4}>
-                              {bsplOptions.h1Options.map(option => (
-                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="px-2 py-1 truncate text-left" style={{ width: getColumnWidth('H2'), fontSize: `${getColumnFontSize('H2')}px` }}>
-                          <InlineCombobox
-                            value={row['H2'] || ''}
-                            options={[
-                              ...getFilteredH2Options(row),
-                              'User_Defined',
-                            ]}
-                            placeholder={row['H1'] ? 'H2' : 'Select H1'}
-                            disabled={!row['H1']}
-                            onChange={(value) => updateRowAtIndex(originalIndex, { 'H2': value })}
-                            className="h-4 px-1 w-full text-gray-900 leading-none py-0"
-                            inputStyle={{ fontSize: `${getColumnFontSize('H2')}px`, textAlign: 'left' }}
+                          <Input
+                            type="number"
+                            value={manualInventoryDraft[category.key].closing}
+                            onChange={(e) => updateManualInventoryDraftValue(category.key, 'closing', e.target.value)}
+                            className="h-8 text-xs text-right px-2"
                           />
-                        </TableCell>
-                        <TableCell className="px-2 py-1 truncate text-left" style={{ width: getColumnWidth('H3'), fontSize: `${getColumnFontSize('H3')}px` }}>
-                          {(() => {
-                            const resolvedH2 = resolveH2Key(row['H1'], row['H2']);
-                            const baseOptions = (bsplOptions.h3Options[row['H1'] || ''] || {})[resolvedH2 || row['H2'] || ''] || [];
-                            const options = getFilteredH3Options(row, baseOptions);
-                            return (
-                              <>
-                                <InlineCombobox
-                                  value={row['H3'] || ''}
-                                  options={[...options, 'User_Defined']}
-                                  placeholder={row['H1'] && row['H2'] ? 'H3' : 'Select H1/H2'}
-                                  disabled={!row['H1'] || !row['H2']}
-                                  onChange={(value) => updateRowAtIndex(originalIndex, { 'H3': value })}
-                                  className="h-4 px-1 w-full text-gray-900 leading-none py-0"
-                                  inputStyle={{ fontSize: `${getColumnFontSize('H3')}px`, textAlign: 'left' }}
-                                />
-                              </>
-                            );
-                          })()}
-                        </TableCell>
-                        <TableCell className="px-2 py-1" style={{ width: getColumnWidth('Status'), fontSize: `${getColumnFontSize('Status')}px` }}>
-                          {(() => {
-                            const mapping = getMappingStatus(row);
-                            const confidence = getConfidenceStatus(row);
-                            const label = getStatusLabel(row);
-                            if (confidence === 'Confident Auto') {
-                              return (
-                                <Badge variant="secondary" title={`${mapping} - Auto classification looks complete`} className="h-4 px-1 text-[10px]">
-                                  {label}
-                                </Badge>
-                              );
-                            }
-                            if (confidence === 'Review Auto') {
-                              return (
-                                <Badge variant="outline" title={`${mapping} - Auto classification needs review`} className="h-4 px-1 text-[10px]">
-                                  {label}
-                                </Badge>
-                              );
-                            }
-                            if (confidence === 'Manual') {
-                              return (
-                                <Badge variant="outline" title={`${mapping} - Manually classified`} className="h-4 px-1 text-[10px]">
-                                  {label}
-                                </Badge>
-                              );
-                            }
-                            return <span className="text-muted-foreground">{label}</span>;
-                          })()}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div className="py-1 text-xs text-muted-foreground">
+                      Enter values to show the rows. Totals shown below.
+                    </div>
+                  )}
+                  <div className="grid grid-cols-[2fr_1fr_1fr] items-center text-sm font-semibold text-gray-900 pt-1">
+                    <div>Total</div>
+                    <div className="text-right">{formatNumber(manualInventoryTotals.opening)}</div>
+                    <div className="text-right">{formatNumber(manualInventoryTotals.closing)}</div>
+                  </div>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <div className="h-full w-full">
+                    <ClassifiedTBTable
+                      rows={filteredData}
+                      allRows={currentData}
+                      keyToIndexMap={currentKeyToIndexMap}
+                      selectedRowIndices={selectedRowIndices}
+                      selectedFilteredCount={selectedFilteredCount}
+                      setSelectedRowIndices={setSelectedRowIndices}
+                      toggleRowSelection={toggleRowSelection}
+                      getColumnWidth={getColumnWidth}
+                      getColumnFontSize={getColumnFontSize}
+                      getClassifiedRowHeight={getClassifiedRowHeight}
+                      getClassifiedTbColumnValues={getClassifiedTbColumnValues}
+                      classifiedTbColumnFilters={classifiedTbColumnFilters}
+                      classifiedTbSortColumn={classifiedTbSortColumn}
+                      classifiedTbSortDirection={classifiedTbSortDirection}
+                      handleClassifiedTbFilterChange={handleClassifiedTbFilterChange}
+                      handleClassifiedTbSort={handleClassifiedTbSort}
+                      updateRowAtIndex={updateRowAtIndex}
+                      getFilteredH2Options={getFilteredH2Options}
+                      getFilteredH3Options={getFilteredH3Options}
+                      resolveH2Key={resolveH2Key}
+                      bsplOptions={bsplOptions}
+                      getMappingStatus={getMappingStatus}
+                      getConfidenceStatus={getConfidenceStatus}
+                      getStatusLabel={getStatusLabel}
+                      focusedClassifiedRowIndex={focusedClassifiedRowIndex}
+                      setFocusedClassifiedRowIndex={setFocusedClassifiedRowIndex}
+                      formatNumber={formatNumber}
+                      cn={cn}
+                    />
+                  </div>
+                </div>
               </div>
             </TabsContent>
 
-            {/* BALANCE SHEET FACE TAB */}
+              {/* BALANCE SHEET TAB */}
             <TabsContent value="face-bs" className="mt-0 p-2">
               {renderFaceTab('BS')}
             </TabsContent>
@@ -7409,21 +6680,6 @@ export default function FinancialReview() {
             <TabsContent value="notes-pl" className="mt-0 p-2">
               {notesTabBody}
             </TabsContent>
-            
-            <TabsContent value="stock-items" className="mt-0 p-1">
-              <StockItemsTab 
-                stockData={currentStockData} 
-                onUpdateStockData={setCurrentStockData}
-                businessType={businessType}
-                searchTerm={searchTerm}
-                onSelectionChange={setStockSelectedCount}
-                bulkUpdateRequestId={stockBulkUpdateRequestId}
-                deleteSelectedRequestId={stockDeleteRequestId}
-                numberScale={numberScale}
-                tableSettings={tableSettings.stock}
-              />
-            </TabsContent>
-            
             
           </Tabs>
         </div>
@@ -7975,22 +7231,6 @@ export default function FinancialReview() {
               </div>
             </div>
 
-            {/* Stock Items Checkbox */}
-            {(businessType === 'Trading - Wholesale and Retail' || businessType === 'Manufacturing') && (
-              <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <input
-                  type="checkbox"
-                  id="includeStock"
-                  checked={includeStockItems}
-                  onChange={(e) => setIncludeStockItems(e.target.checked)}
-                  className="h-4 w-4 text-blue-600 rounded"
-                />
-                <label htmlFor="includeStock" className="text-sm font-medium cursor-pointer flex-1">
-                  Import Stock Items from Tally
-                </label>
-              </div>
-            )}
-
             {/* Action Buttons */}
             <div className="flex justify-end gap-2 pt-4 border-t">
               <Button variant="outline" onClick={() => setIsEntityDialogOpen(false)}>
@@ -8012,47 +7252,10 @@ export default function FinancialReview() {
       
 
 
-      {/* Bulk Update Dialog */}
-      <BulkUpdateDialog
-        open={isBulkUpdateDialogOpen}
-        onOpenChange={setIsBulkUpdateDialogOpen}
-        selectedRows={Array.from(selectedRowIndices)
-          .map(index => currentData[index])
-          .filter((row): row is LedgerRow => row !== undefined)}
-        onUpdate={handleBulkUpdate}
-        bsplOptions={bsplOptions}
-      />
+      
 
-      {/* BSPL Heads Manager */}
-      <BsplHeadsManager
-        open={isBsplHeadsOpen}
-        onOpenChange={setIsBsplHeadsOpen}
-        heads={bsplHeads}
-        defaultHeads={DEFAULT_BSPL_HEADS}
-        onSave={handleSaveBsplHeads}
-        onRestore={handleRestoreBsplHeads}
-      />
 
-      <ClassificationRulesBot
-        open={isRulesBotOpen}
-        onOpenChange={setIsRulesBotOpen}
-        rules={classificationRules}
-        onSave={handleSaveClassificationRules}
-        bsplOptions={bsplOptions}
-        defaultScope={currentEngagement?.id ? 'client' : 'global'}
-        groupOptions={tallyGroups}
-        onAddGroup={handleAddTallyGroup}
-      />
-
-      <LedgerAnnexureDialog
-        open={isNoteLedgerDialogOpen}
-        onOpenChange={setIsNoteLedgerDialogOpen}
-        noteKey={selectedNoteH2 || null}
-        ledgers={noteLedgerItems}
-        reportingScale={noteReportingScale}
-      />
-
-      {/* ODBC Settings Dialog */}
+      {/* Consolidated Setup Dialog - Entity Type + Business Type + Period + Stock Items */}
       <Dialog open={isOdbcDialogOpen} onOpenChange={setIsOdbcDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -8081,16 +7284,81 @@ export default function FinancialReview() {
         </DialogContent>
       </Dialog>
 
-      {/* Filter Modal */}
-      <FilterModal
-        open={isFilterModalOpen}
-        onOpenChange={setIsFilterModalOpen}
-        groupFilter={groupFilter}
-        balanceFilter={balanceFilter}
-        onGroupFilterChange={setGroupFilter}
-        onBalanceFilterChange={setBalanceFilter}
-        onResetFilters={handleResetFilters}
+      {/* Bulk Update Dialog with Auto-Population */}
+      <BulkUpdateDialogComponent
+        open={isBulkUpdateDialogOpen}
+        onOpenChange={setIsBulkUpdateDialogOpen}
+        selectedRowIndices={selectedRowIndices}
+        currentData={currentData}
+        onApply={handleBulkUpdate}
+        bsplOptions={bsplOptions}
       />
+
+      {/* Classification Rules Bot Dialog - Full-Featured Component */}
+      <ClassificationRulesBot
+        open={isRulesBotOpen}
+        onOpenChange={setIsRulesBotOpen}
+        rules={classificationRules}
+        onSave={handleSaveClassificationRules}
+        bsplOptions={bsplOptions}
+        defaultScope={currentEngagement?.id ? 'client' : 'global'}
+        groupOptions={TALLY_DEFAULT_GROUPS.map(g => g['Primary Group Name']).filter((v, i, a) => a.indexOf(v) === i)}
+        onAddGroup={(value: string, scope: 'client' | 'global') => console.log('Group added:', value, scope)}
+      />
+
+      {/* Filter Modal */}
+      <Dialog open={isFilterModalOpen} onOpenChange={setIsFilterModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Filter Trial Balance</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="group-filter">Group Filter</Label>
+              <Select value={groupFilter} onValueChange={(value) => setGroupFilter(value)}>
+                <SelectTrigger id="group-filter">
+                  <SelectValue placeholder="Select group" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Groups</SelectItem>
+                  <SelectItem value="Asset">Assets</SelectItem>
+                  <SelectItem value="Liability">Liabilities</SelectItem>
+                  <SelectItem value="Income">Income</SelectItem>
+                  <SelectItem value="Expense">Expense</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="balance-filter">Balance Filter</Label>
+              <Select value={balanceFilter} onValueChange={(value) => setBalanceFilter(value)}>
+                <SelectTrigger id="balance-filter">
+                  <SelectValue placeholder="Select balance type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Balances</SelectItem>
+                  <SelectItem value="positive">Positive Balances</SelectItem>
+                  <SelectItem value="negative">Negative Balances</SelectItem>
+                  <SelectItem value="zero">Zero Balances</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {(groupFilter !== 'all' || balanceFilter !== 'all') && (
+              <div className="p-2 bg-blue-50 rounded text-xs">
+                Showing {selectedFilteredCount} of {currentData.length} ledgers
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setGroupFilter('all');
+                setBalanceFilter('all');
+              }}>
+                Reset
+              </Button>
+              <Button onClick={() => setIsFilterModalOpen(false)}>Apply Filters</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Reset Confirmation Dialog */}
       <Dialog open={isResetConfirmDialogOpen} onOpenChange={setIsResetConfirmDialogOpen}>
@@ -8218,10 +7486,30 @@ export default function FinancialReview() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* BSPL Heads Manager */}
+      <BsplHeadsManager
+        open={isBsplHeadsOpen}
+        onOpenChange={setIsBsplHeadsOpen}
+        heads={bsplHeads}
+        defaultHeads={DEFAULT_BSPL_HEADS}
+        onSave={handleSaveBsplHeads}
+        onRestore={handleRestoreBsplHeads}
+      />
+
+      <LedgerAnnexureDialog
+        open={isNoteLedgerDialogOpen}
+        onOpenChange={setIsNoteLedgerDialogOpen}
+        noteKey={selectedNoteH2 || null}
+        ledgers={useHierarchicalNoteView ? hierarchicalNoteLedgerItems : noteLedgerItems}
+        reportingScale={noteReportingScale}
+      />
       
     </div>
   );
 }
+
+
 
 
 

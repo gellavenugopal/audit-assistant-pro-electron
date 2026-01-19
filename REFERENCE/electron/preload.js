@@ -1,0 +1,39 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+// Expose protected methods that allow the renderer process to use
+// the ipcRenderer without exposing the entire object
+contextBridge.exposeInMainWorld('electronAPI', {
+  // Add any IPC methods you need here
+  platform: process.platform,
+
+  // GSTZen API Methods (via IPC to main process - no CORS!)
+  gstzen: {
+    login: (credentials) => ipcRenderer.invoke('gstzen:login', credentials),
+    getCustomerByEmail: (email, token) => ipcRenderer.invoke('gstzen:getCustomerByEmail', { email, token }),
+    createCustomer: (customerData, token) => ipcRenderer.invoke('gstzen:createCustomer', { customerData, token }),
+    getGstins: (customerUuid, token) => ipcRenderer.invoke('gstzen:getGstins', { customerUuid, token }),
+    addGstin: (customerUuid, gstinData, token) => ipcRenderer.invoke('gstzen:addGstin', { customerUuid, gstinData, token }),
+    updateGstinCredentials: (gstinUuid, credentials, token) => ipcRenderer.invoke('gstzen:updateGstinCredentials', { gstinUuid, credentials, token }),
+    testGstinConnection: (gstinUuid, token) => ipcRenderer.invoke('gstzen:testGstinConnection', { gstinUuid, token }),
+    downloadGstr1: (downloadRequest, token) => ipcRenderer.invoke('gstzen:downloadGstr1', { downloadRequest, token }),
+    generateOtp: (requestData, token) => ipcRenderer.invoke('gstzen:generateOtp', { requestData, token }),
+    establishSession: (requestData, token) => ipcRenderer.invoke('gstzen:establishSession', { requestData, token }),
+  },
+
+  // ODBC methods
+  odbcCheckConnection: () => ipcRenderer.invoke('odbc-check-connection'),
+  odbcTestConnection: (port) => ipcRenderer.invoke('odbc-test-connection', port),
+  odbcFetchTrialBalance: (fromDate, toDate) => ipcRenderer.invoke('odbc-fetch-trial-balance', fromDate, toDate),
+  odbcFetchMonthWise: (fyStartYear, targetMonth) => ipcRenderer.invoke('odbc-fetch-month-wise', fyStartYear, targetMonth),
+  odbcDisconnect: () => ipcRenderer.invoke('odbc-disconnect'),
+  odbcFetchOldTallyLedgers: () => ipcRenderer.invoke('odbc-fetch-old-tally-ledgers'),
+  odbcFetchNewTallyLedgers: () => ipcRenderer.invoke('odbc-fetch-new-tally-ledgers'),
+  odbcCompareOpeningBalances: (data) => ipcRenderer.invoke('odbc-compare-opening-balances', data),
+  odbcFetchMonthWiseData: (data) => ipcRenderer.invoke('odbc-fetch-month-wise-data', data),
+  odbcFetchGSTNotFeeded: () => ipcRenderer.invoke('odbc-fetch-gst-not-feeded'),
+  odbcFetchStockItems: () => ipcRenderer.invoke('odbc-fetch-stock-items'),
+});
+
+// Log when preload script is loaded
+console.log('Preload script loaded with GSTZen IPC handlers');
+
