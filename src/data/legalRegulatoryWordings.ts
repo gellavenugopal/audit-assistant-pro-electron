@@ -78,7 +78,7 @@ export function buildLegalRegulatorySection(
   paragraphs.push({ text: "j.\twith respect to the other matters to be included in the Auditors' Report in accordance with Rule 11 of the Companies (Audit and Auditors) Rules, 2014, as amended, in our opinion and to the best of our information and according to the explanations given to us:" });
 
   // Rule 11 sub-clauses
-  paragraphs.push(...buildRule11Paragraphs(content));
+  paragraphs.push(...buildRule11Paragraphs(content, periodEndLabel));
 
   return paragraphs;
 }
@@ -232,7 +232,7 @@ function buildDirectorsDisqualificationParagraph(content: AuditReportMainContent
   }
 }
 
-function buildRule11Paragraphs(content: AuditReportMainContent): LegalRegulatoryParagraph[] {
+function buildRule11Paragraphs(content: AuditReportMainContent, periodEndLabel: string): LegalRegulatoryParagraph[] {
   const paragraphs: LegalRegulatoryParagraph[] = [];
 
   // (i) Rule 11(a) - Pending litigations
@@ -249,7 +249,7 @@ function buildRule11Paragraphs(content: AuditReportMainContent): LegalRegulatory
   paragraphs.push(buildFundRoutingParagraph(content));
 
   // (v) Rule 11(f) - Dividend
-  paragraphs.push(buildDividendParagraph(content));
+  paragraphs.push(buildDividendParagraph(content, periodEndLabel));
 
   // (vi) Rule 11(g) - Audit trail
   paragraphs.push(buildAuditTrailParagraph(content));
@@ -347,7 +347,7 @@ function buildFundRoutingParagraph(content: AuditReportMainContent): LegalRegula
 
 // Rule 11(f): Dividend (Section 123 compliance)
 // Note: Rule 11(d) SBN has been deleted from Companies Act, so paragraph numbering continues with (v)
-function buildDividendParagraph(content: AuditReportMainContent): LegalRegulatoryParagraph {
+function buildDividendParagraph(content: AuditReportMainContent, periodEndLabel: string): LegalRegulatoryParagraph {
   const status = content.rule_11_e_dividend_status;
   const noteRef = content.rule_11_e_dividend_note_ref;
   const details = content.rule_11_e_dividend_details;
@@ -404,7 +404,7 @@ function buildDividendParagraph(content: AuditReportMainContent): LegalRegulator
 
     // (c) Final dividend proposed for current year
     if (finalProposed) {
-      parts.push(`\t(c)\tThe Board of Directors of the Company has proposed a final dividend for the current financial year ended March 31, XXXX, which is subject to the approval of the members at the ensuing Annual General Meeting. The dividend declared is in accordance with section 123 of the Act to the extent it applies to declaration of dividend.`);
+      parts.push(`\t(c)\tThe Board of Directors of the Company has proposed a final dividend for the current financial year ended ${periodEndLabel}, which is subject to the approval of the members at the ensuing Annual General Meeting. The dividend declared is in accordance with section 123 of the Act to the extent it applies to declaration of dividend.`);
     }
 
     const fullText = parts.join('\n');

@@ -26,7 +26,7 @@ export function buildOpinionHeading(opinionType: OpinionType) {
 export function buildOpinionParagraph(params: {
   opinionType: OpinionType;
   entityName: string;
-  periodEndLabel: string; // e.g., "31 March 2025" or FY label
+  periodEndLabel: string; // e.g., "31st March 2025" or FY label
   includeCashFlow: boolean;
   hasBranchAuditors?: boolean;
   branchLocations?: string | null;

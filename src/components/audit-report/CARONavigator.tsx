@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,6 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { 
   CheckCircle2, 
@@ -17,14 +16,15 @@ import {
   FileText, 
   Save,
   ChevronRight,
-  Clock,
-  User,
   Paperclip,
-  Eye
+  Eye,
+  UploadCloud,
+  Trash2
 } from 'lucide-react';
 import { useCAROClauseLibrary, CAROClause } from '@/hooks/useCAROClauseLibrary';
 import { useCAROClauseResponses, CAROClauseResponse } from '@/hooks/useCAROClauseResponses';
-import { useCAROStandardAnswers } from '@/hooks/useCAROStandardAnswers';
+import { useEvidenceFiles, EvidenceFile } from '@/hooks/useEvidenceFiles';
+import { MultiSelect } from '@/components/ui/multi-select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useAuditReportDocument } from '@/hooks/useAuditReportDocument';
@@ -44,22 +44,25 @@ interface CARONavigatorProps {
 export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone }: CARONavigatorProps) {
   const { clauses, loading: clausesLoading } = useCAROClauseLibrary();
   const { responses, saveResponse, getResponseForClause, loading: responsesLoading } = useCAROClauseResponses(engagementId);
-  const { getWording } = useCAROStandardAnswers();
+  const { files: evidenceFiles, uploadFile, deleteFile, getFileUrl } = useEvidenceFiles(engagementId);
   const {
     document: previewDocument,
     saving: previewSaving,
     saveDocument: savePreviewDocument,
   } = useAuditReportDocument(engagementId, CARO_REPORT_PREVIEW_SECTION, CARO_REPORT_PREVIEW_TITLE);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedClauseId, setSelectedClauseId] = useState<string | null>(null);
   const [currentAnswers, setCurrentAnswers] = useState<Record<string, any>>({});
   const [conclusionText, setConclusionText] = useState('');
   const [isApplicable, setIsApplicable] = useState(true);
   const [naReason, setNaReason] = useState('');
-  const [wpRefs, setWpRefs] = useState('');
+  const [wpRefs, setWpRefs] = useState<string[]>([]);
+  const [legacyWpRefs, setLegacyWpRefs] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
   const [previewSeeded, setPreviewSeeded] = useState(false);
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
 
   // Filter clauses based on CARO applicability
   const applicableClauses = clauses.filter(clause => {
@@ -79,7 +82,10 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
   );
 
   const selectedClause = clauses.find(c => c.clause_id === selectedClauseId);
-  const selectedResponse = selectedClauseId ? getResponseForClause(selectedClauseId) : null;
+  const evidenceOptions = useMemo(
+    () => evidenceFiles.map((file) => ({ label: file.name, value: file.id })),
+    [evidenceFiles]
+  );
 
   const handleSelectClause = (clauseId: string) => {
     setSelectedClauseId(clauseId);
@@ -89,9 +95,17 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
     if (response) {
       setCurrentAnswers(response.answers || {});
       setConclusionText(response.conclusion_text || '');
-      setIsApplicable(response.is_applicable);
+      setIsApplicable(response.is_applicable ?? true);
       setNaReason(response.na_reason || '');
-      setWpRefs(Array.isArray(response.working_paper_refs) ? response.working_paper_refs.join(', ') : '');
+      let nextRefs: string[] = [];
+      if (Array.isArray(response.working_paper_refs)) {
+        nextRefs = response.working_paper_refs.map(String);
+      } else if (typeof response.working_paper_refs === 'string') {
+        nextRefs = response.working_paper_refs.split(',').map((ref) => ref.trim()).filter(Boolean);
+      }
+      const availableIds = new Set(evidenceFiles.map((file) => file.id));
+      setWpRefs(nextRefs.filter((ref) => availableIds.has(ref)));
+      setLegacyWpRefs(nextRefs.filter((ref) => !availableIds.has(ref)));
     } else {
       // Default all questions to 'yes' (happy path)
       const questions = Array.isArray(clause?.questions) ? clause.questions : [];
@@ -102,14 +116,12 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
         }
       });
       setCurrentAnswers(defaultAnswers);
-      
-      // Auto-generate positive conclusion from template
-      const defaultConclusion = clause?.positive_wording || '';
-      setConclusionText(defaultConclusion);
-      
+
+      setConclusionText('');
       setIsApplicable(true);
       setNaReason('');
-      setWpRefs('');
+      setWpRefs([]);
+      setLegacyWpRefs([]);
     }
   };
 
@@ -128,24 +140,66 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
     setCurrentAnswers(prev => ({ ...prev, [questionId]: value }));
   };
 
-  const generateConclusion = () => {
-    if (!selectedClause) return;
-    
-    // Check if all questions answered positively/negatively
-    const questions = Array.isArray(selectedClause.questions) ? selectedClause.questions : [];
-    const allPositive = questions.every((q: any) => currentAnswers[q.id] === 'yes');
-    
-    // Get wording from custom standard answers or fall back to library defaults
-    if (!isApplicable) {
-      const naText = getWording(selectedClause.clause_id, 'na', clauses);
-      setConclusionText(naText || `Clause ${selectedClause.clause_id} is not applicable to the company.`);
-    } else if (allPositive) {
-      const positiveText = getWording(selectedClause.clause_id, 'positive', clauses);
-      setConclusionText(positiveText || '');
-    } else {
-      const negativeText = getWording(selectedClause.clause_id, 'negative', clauses);
-      setConclusionText(negativeText || '');
+  const selectedEvidenceFiles = useMemo(
+    () => wpRefs.map((id) => evidenceFiles.find((file) => file.id === id)).filter(Boolean) as EvidenceFile[],
+    [wpRefs, evidenceFiles]
+  );
+
+  const missingEvidenceRefs = useMemo(
+    () => wpRefs.filter((id) => !evidenceFiles.some((file) => file.id === id)),
+    [wpRefs, evidenceFiles]
+  );
+
+  useEffect(() => {
+    if (legacyWpRefs.length === 0 || evidenceFiles.length === 0) return;
+    const availableIds = new Set(evidenceFiles.map((file) => file.id));
+    const resolved = legacyWpRefs.filter((ref) => availableIds.has(ref));
+    if (resolved.length === 0) return;
+    setLegacyWpRefs((prev) => prev.filter((ref) => !availableIds.has(ref)));
+    setWpRefs((prev) => {
+      const next = [...prev];
+      resolved.forEach((id) => {
+        if (!next.includes(id)) next.push(id);
+      });
+      return next;
+    });
+  }, [legacyWpRefs, evidenceFiles]);
+
+  const handleAttachEvidence = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files || []);
+    if (selected.length === 0) return;
+
+    setUploadingEvidence(true);
+    try {
+      for (const file of selected) {
+        const uploaded = await uploadFile(file, {
+          name: file.name,
+          file_type: 'document',
+          workpaper_ref: selectedClauseId ? `CARO ${selectedClauseId}` : undefined,
+        });
+        if (uploaded?.id) {
+          setWpRefs((prev) => (prev.includes(uploaded.id) ? prev : [...prev, uploaded.id]));
+        }
+      }
+    } finally {
+      setUploadingEvidence(false);
+      event.target.value = '';
     }
+  };
+
+  const handleViewEvidence = async (file: EvidenceFile) => {
+    const url = await getFileUrl(file);
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+      toast.error('Unable to preview this file.');
+    }
+  };
+
+  const handleDeleteEvidence = async (file: EvidenceFile) => {
+    if (!confirm('Are you sure you want to delete this file?')) return;
+    await deleteFile(file);
+    setWpRefs((prev) => prev.filter((id) => id !== file.id));
   };
 
   const handleSave = async () => {
@@ -158,7 +212,7 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
         na_reason: !isApplicable ? naReason : null,
         answers: currentAnswers,
         conclusion_text: conclusionText,
-        working_paper_refs: wpRefs.split(',').map(r => r.trim()).filter(Boolean),
+        working_paper_refs: [...legacyWpRefs, ...wpRefs],
         status: 'in_progress',
       });
       toast.success('Response saved');
@@ -444,28 +498,83 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
                     <Separator />
 
                     {/* Working Paper References */}
-                    <div className="space-y-2">
-                      <Label className="flex items-center gap-2">
-                        <Paperclip className="h-4 w-4" />
-                        Working Paper References
-                      </Label>
-                      <Input
-                        value={wpRefs}
-                        onChange={(e) => setWpRefs(e.target.value)}
-                        placeholder="E.g., WP-FA-001, WP-FA-002 (comma separated)"
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Label className="flex items-center gap-2">
+                          <Paperclip className="h-4 w-4" />
+                          Working Paper References
+                        </Label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            onChange={handleAttachEvidence}
+                            className="hidden"
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={uploadingEvidence}
+                          >
+                            <UploadCloud className="h-4 w-4 mr-2" />
+                            {uploadingEvidence ? 'Attaching...' : 'Attach document'}
+                          </Button>
+                        </div>
+                      </div>
+                      <MultiSelect
+                        options={evidenceOptions}
+                        selected={wpRefs}
+                        onChange={setWpRefs}
+                        placeholder="Select documents from Evidence Vault"
                       />
+                      {legacyWpRefs.length > 0 && (
+                        <div className="text-xs text-muted-foreground">
+                          Legacy references: {legacyWpRefs.join(', ')}
+                        </div>
+                      )}
+                      {missingEvidenceRefs.length > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Some linked documents are missing in the Evidence Vault.
+                        </p>
+                      )}
+                      {selectedEvidenceFiles.length > 0 ? (
+                        <div className="space-y-2">
+                          {selectedEvidenceFiles.map((file) => (
+                            <div
+                              key={file.id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-slate-900 truncate">{file.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {new Date(file.created_at).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button size="sm" variant="outline" onClick={() => handleViewEvidence(file)}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View
+                                </Button>
+                                <Button size="sm" variant="destructive" onClick={() => handleDeleteEvidence(file)}>
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">No documents linked yet.</p>
+                      )}
                     </div>
 
                     <Separator />
 
                     {/* Conclusion */}
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-base font-semibold">Conclusion</Label>
-                        <Button variant="outline" size="sm" onClick={generateConclusion}>
-                          Generate from Template
-                        </Button>
-                      </div>
+                      <Label className="text-base font-semibold">Conclusion</Label>
                       <Textarea
                         value={conclusionText}
                         onChange={(e) => setConclusionText(e.target.value)}
@@ -473,27 +582,6 @@ export function CARONavigator({ engagementId, caroApplicableStatus, isStandalone
                         placeholder="Enter the conclusion for this clause..."
                       />
                     </div>
-
-                    {/* Evidence Checklist */}
-                    {Array.isArray(selectedClause.evidence_checklist) && selectedClause.evidence_checklist.length > 0 && (
-                      <>
-                        <Separator />
-                        <div className="space-y-2">
-                          <Label className="text-base font-semibold">Evidence Checklist</Label>
-                          <Alert>
-                            <FileText className="h-4 w-4" />
-                            <AlertDescription>
-                              Ensure the following evidence is documented:
-                              <ul className="list-disc list-inside mt-2">
-                                {selectedClause.evidence_checklist.map((item: string, idx: number) => (
-                                  <li key={idx} className="text-sm">{item}</li>
-                                ))}
-                              </ul>
-                            </AlertDescription>
-                          </Alert>
-                        </div>
-                      </>
-                    )}
                   </>
                 )}
               </CardContent>

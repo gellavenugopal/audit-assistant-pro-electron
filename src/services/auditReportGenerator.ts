@@ -178,14 +178,14 @@ export class AuditReportGenerator {
       
       // Mandatory branch auditors paragraph (highlighted yellow) + closing sentence (not highlighted)
       if (hasBranchAuditorsMatter) {
-        const branchAuditorsParagraph = `We did not audit the financial statements/ information of ………………. (number) branches included in the standalone financial statements of the company whose financial statements/financial information reflect total assets of Rs. ……...as at March 31, XXXX and total revenue of Rs. ……for the year ended on that date, as considered in the standalone financial statements. The financial statements/information of these branches have been audited by the branch auditors whose reports have been furnished to us, and our opinion in so far as it relates to the amounts and disclosures included in respect of these branches, is based solely on the report of such branch auditors.`;
+        const branchAuditorsParagraph = `We did not audit the financial statements/ information of ………………. (number) branches included in the standalone financial statements of the company whose financial statements/financial information reflect total assets of Rs. ……...as at ${financialYearLabel} and total revenue of Rs. ……for the year ended on that date, as considered in the standalone financial statements. The financial statements/information of these branches have been audited by the branch auditors whose reports have been furnished to us, and our opinion in so far as it relates to the amounts and disclosures included in respect of these branches, is based solely on the report of such branch auditors.`;
         blocks.push({ kind: 'paragraph', text: branchAuditorsParagraph, highlight: 'yellow' });
         blocks.push({ kind: 'paragraph', text: 'Our opinion is not modified in respect of this matter.' });
       }
       
       // Mandatory predecessor auditor paragraph (highlighted yellow) + closing sentence (not highlighted)
       if (hasPredecessorAuditorMatter) {
-        const predecessorAuditorParagraph = `The comparative financial information of the Company included in these standalone financial statements, are based on the previously issued standalone financial statements for the year ended March 31,XXXX, which were audited by the predecessor auditors who, vide their report dated ______________, expressed an unmodified opinion.`;
+        const predecessorAuditorParagraph = `The comparative financial information of the Company included in these standalone financial statements, are based on the previously issued standalone financial statements for the year ended ${financialYearLabel}, which were audited by the predecessor auditors who, vide their report dated ______________, expressed an unmodified opinion.`;
         blocks.push({ kind: 'paragraph', text: predecessorAuditorParagraph, highlight: 'yellow' });
         blocks.push({ kind: 'paragraph', text: 'Our opinion is not modified in respect of this matter.' });
       }
