@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEngagement } from '@/contexts/EngagementContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -97,6 +98,7 @@ interface TeamMember {
 
 export default function AdminSettings() {
   const { user } = useAuth();
+  const { refreshEngagements } = useEngagement();
   const [activeTab, setActiveTab] = useState('firm');
   
   // Clients state
@@ -314,6 +316,7 @@ export default function AdminSettings() {
 
       if (error) throw error;
       setClients(data || []);
+      await refreshEngagements();
     } catch (error) {
       console.error('Error fetching clients:', error);
     } finally {

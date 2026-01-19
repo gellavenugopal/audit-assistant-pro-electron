@@ -150,6 +150,15 @@ export function ClientFormDialog({
           .eq('id', form.id);
 
         if (error) throw error;
+        if (client?.name && client.name !== clientData.name) {
+          const { error: engagementError } = await supabase
+            .from('engagements')
+            .update({ client_name: clientData.name })
+            .eq('client_id', form.id);
+          if (engagementError) {
+            console.warn('Failed to sync engagement client name', engagementError);
+          }
+        }
         toast.success('Client updated');
       } else {
         const { error } = await supabase.from('clients').insert({

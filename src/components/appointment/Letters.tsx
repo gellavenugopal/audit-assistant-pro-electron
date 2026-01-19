@@ -93,7 +93,12 @@ export function LettersPage({ engagementId }: LettersPageProps) {
       company: 'Company',
       llp: 'LLP',
       partnership: 'Partnership',
+      proprietorship: 'Proprietorship',
       trust: 'Trust',
+      society: 'Society',
+      aop: 'Association of Persons (AOP)',
+      huf: 'HUF',
+      cooperative: 'Cooperative Society',
     };
     if (letterType.startsWith('statutory-audit-company')) {
       setEntityType('Company');
@@ -107,7 +112,7 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     setEmail(client.contact_email || '');
     setPhone(client.contact_phone || '');
     // GSTIN not stored in clients table currently; leave as entered by user
-  }, [client?.id, letterType]);
+  }, [client, letterType]);
 
   // Commercial Terms Section
   const [professionalFees, setProfessionalFees] = useState('');
@@ -632,8 +637,13 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                       <SelectContent>
                         <SelectItem value="Company">Company</SelectItem>
                         <SelectItem value="Partnership">Partnership</SelectItem>
+                        <SelectItem value="Proprietorship">Proprietorship</SelectItem>
                         <SelectItem value="LLP">LLP</SelectItem>
                         <SelectItem value="Trust">Trust</SelectItem>
+                        <SelectItem value="Society">Society</SelectItem>
+                        <SelectItem value="Association of Persons (AOP)">Association of Persons (AOP)</SelectItem>
+                        <SelectItem value="HUF">HUF</SelectItem>
+                        <SelectItem value="Cooperative Society">Cooperative Society</SelectItem>
                       </SelectContent>
                     </Select>
                   )}

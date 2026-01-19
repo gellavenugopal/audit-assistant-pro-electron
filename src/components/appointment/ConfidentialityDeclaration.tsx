@@ -153,13 +153,20 @@ export function ConfidentialityDeclaration() {
     const selected = Array.from(event.target.files || []);
     if (selected.length === 0) return;
 
-    const validExtensions = ['pdf', 'jpg', 'jpeg', 'doc', 'docx'];
+    const validExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
     const invalidFiles = selected.filter((item) => {
       const fileExtension = item.name.split('.').pop()?.toLowerCase();
       return !fileExtension || !validExtensions.includes(fileExtension);
     });
     if (invalidFiles.length) {
-      toast.error('Invalid file format. Only PDF, JPEG, or DOC/DOCX files are allowed.');
+      toast.error('Invalid file format. Only PDF, JPG, JPEG, or PNG files are allowed.');
+      event.target.value = '';
+    }
+
+    if (!currentEngagement) {
+      toast.error('Please select an engagement before uploading.');
+      event.target.value = '';
+      return;
     }
 
     for (const file of selected) {
@@ -168,14 +175,10 @@ export function ConfidentialityDeclaration() {
         continue;
       }
 
-      const uploaded = await uploadFile(file, {
+      await uploadFile(file, {
         name: file.name,
         file_type: 'confidentiality_undertaking',
       });
-
-      if (uploaded) {
-        toast.success('Signed confidentiality declaration uploaded successfully.');
-      }
     }
 
     event.target.value = '';
@@ -376,7 +379,7 @@ export function ConfidentialityDeclaration() {
               <input
                 ref={signedInputRef}
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.doc,.docx"
+                accept=".pdf,.jpg,.jpeg,.png"
                 multiple
                 onChange={handleSignedUpload}
                 className="hidden"
@@ -415,6 +418,9 @@ export function ConfidentialityDeclaration() {
       <CardContent className="space-y-6">
         <div>
           <Label className="text-sm font-semibold">Signed confidentiality declaration uploads</Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Supported formats: PDF (.pdf), JPG/JPEG (.jpg, .jpeg), PNG (.png)
+          </p>
           <div className="mt-2">
             {renderFileList(signedFiles)}
           </div>

@@ -818,8 +818,8 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
       {!showEditor ? (
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Create the communication to the previous auditor in the same flow as the engagement letter generator. The
-            template leverages client and firm masters while keeping the "To" field editable.
+            Generate the communication to the previous auditor using the engagement letter flow. The template
+            pre-fills client and firm master data while keeping the To field editable.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => setEditorOpen(true)}>Generate Communication</Button>
