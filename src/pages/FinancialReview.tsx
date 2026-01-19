@@ -717,7 +717,19 @@ export default function FinancialReview() {
 
   const resetManualInventoryDraft = useCallback(() => {
     setManualInventoryDraft(EMPTY_MANUAL_INVENTORY);
-  }, []);
+    // Also clear from localStorage to prevent old data from reloading
+    if (manualInventoryKey) {
+      localStorage.removeItem(manualInventoryKey);
+    }
+    // Reset to imported inventory source
+    setManualInventoryValues(null);
+    setInventorySource('imported');
+    refreshTablesWithStockDetails(null, 'imported');
+    toast({
+      title: 'Stock reset',
+      description: 'All manual inventory entries have been cleared.'
+    });
+  }, [manualInventoryKey, refreshTablesWithStockDetails, toast]);
 
   const handleSaveManualInventory = useCallback(() => {
     persistManualInventoryValues(manualInventoryDraft);
