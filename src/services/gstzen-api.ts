@@ -437,6 +437,56 @@ class GstzenApiClient {
       return [];
     }
   }
+
+  /**
+   * Validate multiple GSTINs
+   * @param gstinList Comma-separated string of GSTINs
+   */
+  async validateGstins(gstinList: string): Promise<ApiResponse<{
+    status: number;
+    gstin_list?: Record<string, {
+      valid: boolean;
+      company_details?: any | string;
+    }>;
+    message?: string;
+  }>> {
+    // Check if running in Electron
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.validateGstins) {
+      const result = await window.electronAPI.gstzen.validateGstins(gstinList, this.authToken || '');
+      if (result.ok) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, error: result.data?.message || result.data?.error || 'Failed to validate GSTINs' };
+      }
+    }
+
+    return this.post('/api/multiple-gstin-validator/', { gstin_list: gstinList });
+  }
+
+  /**
+   * Create a new GSTIN
+   * @param gstinData GSTIN data with gstin, name, and taxpayer_type
+   */
+  async createGstin(gstinData: {
+    gstin: string;
+    name: string;
+    taxpayer_type: 'REGULAR' | 'COMPOSITION' | 'ISD';
+  }): Promise<ApiResponse<{
+    status: number;
+    message: string;
+  }>> {
+    // Check if running in Electron
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.gstzen && window.electronAPI.gstzen.createGstin) {
+      const result = await window.electronAPI.gstzen.createGstin(gstinData, this.authToken || '');
+      if (result.ok) {
+        return { success: true, data: result.data };
+      } else {
+        return { success: false, error: result.data?.message || result.data?.error || 'Failed to create GSTIN' };
+      }
+    }
+
+    return this.post('/api/create-gstin/', gstinData);
+  }
 }
 
 // Export singleton instance

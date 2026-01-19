@@ -2518,6 +2518,187 @@ export type Database = {
         }
         Relationships: []
       }
+      engagement_trial_balance_header: {
+        Row: {
+          created_at: string
+          engagement_id: string
+          financial_year: string
+          id: string
+          imported_at: string | null
+          imported_by: string | null
+          period_type: string
+          source_type: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          engagement_id: string
+          financial_year: string
+          id?: string
+          imported_at?: string | null
+          imported_by?: string | null
+          period_type: string
+          source_type?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          engagement_id?: string
+          financial_year?: string
+          id?: string
+          imported_at?: string | null
+          imported_by?: string | null
+          period_type?: string
+          source_type?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engagement_trial_balance_header_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      engagement_trial_balance_lines: {
+        Row: {
+          closing: number
+          composite_key: string
+          created_at: string
+          credit: number
+          debit: number
+          dr_cr: string | null
+          engagement_id: string
+          id: string
+          is_revenue: boolean | null
+          ledger_guid: string | null
+          ledger_name: string
+          opening: number
+          parent_group: string | null
+          primary_group: string | null
+          tb_header_id: string
+          updated_at: string
+        }
+        Insert: {
+          closing?: number
+          composite_key: string
+          created_at?: string
+          credit?: number
+          debit?: number
+          dr_cr?: string | null
+          engagement_id: string
+          id?: string
+          is_revenue?: boolean | null
+          ledger_guid?: string | null
+          ledger_name: string
+          opening?: number
+          parent_group?: string | null
+          primary_group?: string | null
+          tb_header_id: string
+          updated_at?: string
+        }
+        Update: {
+          closing?: number
+          composite_key?: string
+          created_at?: string
+          credit?: number
+          debit?: number
+          dr_cr?: string | null
+          engagement_id?: string
+          id?: string
+          is_revenue?: boolean | null
+          ledger_guid?: string | null
+          ledger_name?: string
+          opening?: number
+          parent_group?: string | null
+          primary_group?: string | null
+          tb_header_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engagement_trial_balance_lines_engagement_id_fkey"
+            columns: ["engagement_id"]
+            isOneToOne: false
+            referencedRelation: "engagements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engagement_trial_balance_lines_tb_header_id_fkey"
+            columns: ["tb_header_id"]
+            isOneToOne: false
+            referencedRelation: "engagement_trial_balance_header"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      engagement_tb_classification: {
+        Row: {
+          category_code: string | null
+          category_name: string | null
+          classification_method: string | null
+          confidence: number | null
+          created_at: string
+          h1: string | null
+          h2: string | null
+          h3: string | null
+          h4: string | null
+          h5: string | null
+          id: string
+          note_ref: string | null
+          statement_type: string
+          status: string | null
+          tb_line_id: string
+          updated_at: string
+        }
+        Insert: {
+          category_code?: string | null
+          category_name?: string | null
+          classification_method?: string | null
+          confidence?: number | null
+          created_at?: string
+          h1?: string | null
+          h2?: string | null
+          h3?: string | null
+          h4?: string | null
+          h5?: string | null
+          id?: string
+          note_ref?: string | null
+          statement_type: string
+          status?: string | null
+          tb_line_id: string
+          updated_at?: string
+        }
+        Update: {
+          category_code?: string | null
+          category_name?: string | null
+          classification_method?: string | null
+          confidence?: number | null
+          created_at?: string
+          h1?: string | null
+          h2?: string | null
+          h3?: string | null
+          h4?: string | null
+          h5?: string | null
+          id?: string
+          note_ref?: string | null
+          statement_type?: string
+          status?: string | null
+          tb_line_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engagement_tb_classification_tb_line_id_fkey"
+            columns: ["tb_line_id"]
+            isOneToOne: false
+            referencedRelation: "engagement_trial_balance_lines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trial_balance_lines: {
         Row: {
           account_code: string

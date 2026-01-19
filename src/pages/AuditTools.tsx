@@ -17,6 +17,7 @@ import { useTallyODBC } from "@/hooks/useTallyODBC";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { gstzenApi } from "@/services/gstzen-api";
 
 // Type definitions (moved from TallyContext)
 export interface TallyTrialBalanceLine {
@@ -53,6 +54,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "lucide-react";
 import DeferredTax from "@/components/audit/DeferredTax";
 import DeferredTaxCalculator from "@/components/audit/DeferredTaxCalculator";
+import RatioAnalysisCalculator from "@/components/audit/RatioAnalysisCalculator";
 import {
   Database,
   FileSpreadsheet,
@@ -109,9 +111,6 @@ const ToolCard = ({ title, description, icon, status = "available", onClick }: T
           </div>
           {status === "coming-soon" && (
             <Badge variant="secondary" className="text-xs">Coming Soon</Badge>
-          )}
-          {status === "beta" && (
-            <Badge variant="outline" className="text-xs border-amber-500 text-amber-600">Beta</Badge>
           )}
         </div>
         <CardTitle className="text-base mt-3">{title}</CardTitle>
@@ -501,10 +500,17 @@ const TallyTools = () => {
   const handleExportGSTNotFeedToExcel = () => {
     if (!fetchedGSTNotFeedData || fetchedGSTNotFeedData.length === 0) return;
 
+    const isBlankGstin = (v: unknown) => {
+      const s = (v ?? "").toString().trim();
+      if (!s) return true;
+      const low = s.toLowerCase();
+      return low === "null" || low === "na" || low === "n/a" || s === "0" || s === "-";
+    };
+
     const data = fetchedGSTNotFeedData.map(line => ({
       "Ledger Name": line.ledgerName,
       "GST Registration Type": line.registrationType || line.gstRegistrationType || "Unknown",
-      "Party GSTIN": line.partyGSTIN || "(Not Feeded)",
+      "Party GSTIN": isBlankGstin(line.partyGSTIN) ? "(Not Feeded)" : line.partyGSTIN,
     }));
 
     const wb = XLSX.utils.book_new();
@@ -734,15 +740,7 @@ const TallyTools = () => {
   const totalCredit = bsCredit + plCredit;
   
   // Total Closing Balance: Sum of individual closing balances
-  const totalClosingBalanceSum = bsClosingBalance + plClosingBalance;
-  
-  // For calculation verification:
-  // - BS accounts should follow: Closing = Opening + Debit - Credit
-  // - P&L accounts closing is the net result, so we only verify BS accounts
-  const totalClosingBalanceCalculated = bsClosingCalculated + plClosingBalance;
-  
-  // Use the sum of individual closing balances (more accurate)
-  const totalClosingBalance = totalClosingBalanceSum;
+  const totalClosingBalance = bsClosingBalance + plClosingBalance;
 
 
   return (
@@ -864,25 +862,6 @@ const TallyTools = () => {
           }}
         />
         <ToolCard
-          title="Query on Transactions"
-          description="Run custom queries on Tally ledger transactions. Filter by date, voucher type, party name, and amount range."
-          icon={<Search className="h-5 w-5 text-primary" />}
-          status="beta"
-          onClick={() => toast({ title: "Feature in beta", description: "Transaction query is being tested" })}
-        />
-        <ToolCard
-          title="Ledger Extraction"
-          description="Extract specific ledger accounts with all transaction details for verification and vouching."
-          icon={<Database className="h-5 w-5 text-primary" />}
-          status="coming-soon"
-        />
-        <ToolCard
-          title="Daybook Export"
-          description="Export daybook/journal register for any period with party details and narrations."
-          icon={<Table className="h-5 w-5 text-primary" />}
-          status="coming-soon"
-        />
-        <ToolCard
           title="Get Month wise Data"
           description="Extract month wise data for analysis. Get P&L movement and Balance Sheet snapshots."
           icon={<Calendar className="h-5 w-5 text-primary" />}
@@ -947,6 +926,24 @@ const TallyTools = () => {
               setShowNoTransactionsDialog(true);
             }
           }}
+        />
+        <ToolCard
+          title="Query on Transactions"
+          description="Run custom queries on Tally ledger transactions. Filter by date, voucher type, party name, and amount range."
+          icon={<Search className="h-5 w-5 text-primary" />}
+          status="coming-soon"
+        />
+        <ToolCard
+          title="Ledger Extraction"
+          description="Extract specific ledger accounts with all transaction details for verification and vouching."
+          icon={<Database className="h-5 w-5 text-primary" />}
+          status="coming-soon"
+        />
+        <ToolCard
+          title="Daybook Export"
+          description="Export daybook/journal register for any period with party details and narrations."
+          icon={<Table className="h-5 w-5 text-primary" />}
+          status="coming-soon"
         />
       </div>
 
@@ -1107,65 +1104,39 @@ const TallyTools = () => {
                     <div className="text-sm">
                       <span className="text-muted-foreground">Total Closing Balance:</span>
                       <span className="ml-2 font-mono font-medium">{formatCurrency(totalClosingBalance)}</span>
-                      {(() => {
-                        // Verify calculation for Balance Sheet accounts only
-                        // P&L accounts closing balance is the net result and may not follow the formula
-                        const bsDifference = Math.abs(bsClosingBalance - bsClosingCalculated);
-                        const isBSCalculationCorrect = bsDifference < 100; // Allow small rounding differences
-                        
-                        // Check if opening stock might be missing (common cause of mismatch)
-                        const hasStockGroup = filteredTBData?.some(line => 
-                          line.primaryGroup?.toLowerCase().includes('stock') || 
-                          line.accountHead?.toLowerCase().includes('stock')
-                        ) || false;
-
-                        if (!isBSCalculationCorrect) {
-                          return (
-                            <div className="mt-1">
-                              <Badge variant="destructive" className="text-xs">
-                                Profit/ Loss Mismatch For the Year: {formatCurrency(bsDifference)}
-                              </Badge>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                BS Sum: {formatCurrency(bsClosingBalance)} |
-                                BS Calc: {formatCurrency(bsClosingCalculated)}
-                              </p>
-                              {!hasStockGroup && (
-                                <p className="text-xs text-amber-600 mt-1">
-                                  ⚠️ Opening stock may not be included. Stock items are separate from ledgers in Tally.
-                                </p>
-                              )}
-                            </div>
-                          );
-                        }
-
-                        return null;
-                      })()}
+                      {/* Profit/Loss mismatch badge removed */}
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setFetchedTBData(null)}>
-                      Clear
-                    </Button>
-                    <Button variant="outline" onClick={handleExportToExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export to Excel
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        if (!currentEngagement) {
-                          toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
-                          return;
-                        }
-                        toast({
-                          title: "Save to Trial Balance",
-                          description: "Navigate to Trial Balance page and use Import to save this data"
-                        });
-                        setShowTBDialog(false);
-                      }}
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      Use in Trial Balance
-                    </Button>
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" className="h-10" onClick={() => setFetchedTBData(null)}>
+                        Clear
+                      </Button>
+                      <Button variant="outline" className="h-10" onClick={handleExportToExcel}>
+                        <FileSpreadsheet className="h-4 w-4 mr-2" />
+                        Export to Excel
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center sm:justify-end">
+                      <Button
+                        className="h-10 w-full sm:w-auto"
+                        onClick={() => {
+                          if (!currentEngagement) {
+                            toast({ title: "No Engagement", description: "Select an engagement first to save Trial Balance", variant: "destructive" });
+                            return;
+                          }
+                          toast({
+                            title: "Save to Trial Balance",
+                            description: "Navigate to Trial Balance page and use Import to save this data"
+                          });
+                          setShowTBDialog(false);
+                        }}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Use in Trial Balance
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2411,6 +2382,8 @@ const GSTTools = () => {
   const { user } = useAuth();
   const [gstinDialogOpen, setGstinDialogOpen] = useState(false);
   const [gstinInput, setGstinInput] = useState("");
+  const [gstinName, setGstinName] = useState("");
+  const [taxpayerType, setTaxpayerType] = useState<"REGULAR" | "COMPOSITION" | "ISD">("REGULAR");
   const [gstins, setGstins] = useState<{ id: string; gstin: string; created_at: string }[]>([]);
   const [isLoadingGstins, setIsLoadingGstins] = useState(false);
   const [isSavingGstin, setIsSavingGstin] = useState(false);
@@ -2467,6 +2440,8 @@ const GSTTools = () => {
 
   const handleAddGstin = async () => {
     const normalized = gstinInput.trim().toUpperCase();
+    const name = gstinName.trim();
+    
     if (!clientId) {
       toast({
         title: 'Client not linked',
@@ -2487,6 +2462,10 @@ const GSTTools = () => {
       });
       return;
     }
+    if (!name) {
+      toast({ title: 'Company name required', description: 'Enter the company/taxpayer name.' });
+      return;
+    }
     if (gstins.some((gstin) => gstin.gstin === normalized)) {
       toast({ title: 'GSTIN already added', description: 'This GSTIN already exists for this client.' });
       return;
@@ -2498,6 +2477,34 @@ const GSTTools = () => {
 
     setIsSavingGstin(true);
     try {
+      // Step 1: Create in GSTZen backend using /api/create-gstin/
+      // This API validates the GSTIN internally
+      const createResponse = await gstzenApi.createGstin({
+        gstin: normalized,
+        name: name,
+        taxpayer_type: taxpayerType,
+      });
+
+      if (!createResponse.success || !createResponse.data) {
+        throw new Error(createResponse.error || 'Failed to create GSTIN in GSTZen');
+      }
+
+      const responseData = createResponse.data;
+      
+      // Check if creation was successful
+      if (responseData.status !== 1) {
+        // Handle different error cases
+        const errorMsg = responseData.message || 'Failed to create GSTIN';
+        if (errorMsg.includes('exceeded') || errorMsg.includes('limit')) {
+          throw new Error(errorMsg);
+        } else if (errorMsg.includes('not a valid GSTIN')) {
+          throw new Error('Invalid GSTIN. Please check the GSTIN number.');
+        } else {
+          throw new Error(errorMsg);
+        }
+      }
+
+      // Step 2: Create in Supabase (engagement-specific) only if GSTZen creation succeeded
       const { data, error } = await supabase
         .from('client_gstins')
         .insert({
@@ -2512,9 +2519,12 @@ const GSTTools = () => {
 
       setGstins((prev) => [data, ...prev]);
       setGstinInput('');
+      setGstinName('');
+      setTaxpayerType('REGULAR');
+      setGstinDialogOpen(false);
       toast({
         title: 'GST number added',
-        description: `${normalized} linked to ${currentEngagement?.client_name || 'client'}.`,
+        description: `${normalized} linked to ${currentEngagement?.client_name || 'client'} and added to GSTZen account.`,
       });
     } catch (error) {
       console.error('Error adding GSTIN:', error);
@@ -2667,7 +2677,7 @@ const GSTTools = () => {
           title="JSON to Excel Converter"
           description="Convert GST JSON files to Excel format for easy analysis and documentation."
           icon={<FileJson className="h-5 w-5 text-primary" />}
-          onClick={() => toast({ title: "JSON Converter", description: "Upload a GST JSON file to convert" })}
+          status="coming-soon"
         />
         <ToolCard
           title="ITC Reconciliation"
@@ -2692,21 +2702,59 @@ const GSTTools = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Input
-                value={gstinInput}
-                onChange={(e) => setGstinInput(e.target.value.toUpperCase())}
-                placeholder="Enter GSTIN (15 characters)"
-                maxLength={15}
-                className="font-mono"
-              />
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="gstin-input">GSTIN *</Label>
+                <Input
+                  id="gstin-input"
+                  value={gstinInput}
+                  onChange={(e) => setGstinInput(e.target.value.toUpperCase())}
+                  placeholder="Enter GSTIN (15 characters)"
+                  maxLength={15}
+                  className="font-mono"
+                  disabled={isSavingGstin}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="gstin-name">Company/Taxpayer Name *</Label>
+                <Input
+                  id="gstin-name"
+                  value={gstinName}
+                  onChange={(e) => setGstinName(e.target.value)}
+                  placeholder="Enter company or taxpayer name"
+                  disabled={isSavingGstin}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="taxpayer-type">Taxpayer Type *</Label>
+                <Select
+                  value={taxpayerType}
+                  onValueChange={(value) => setTaxpayerType(value as "REGULAR" | "COMPOSITION" | "ISD")}
+                  disabled={isSavingGstin}
+                >
+                  <SelectTrigger id="taxpayer-type">
+                    <SelectValue placeholder="Select taxpayer type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="REGULAR">Regular Tax Payer</SelectItem>
+                    <SelectItem value="COMPOSITION">Composition Tax Payer</SelectItem>
+                    <SelectItem value="ISD">Input Service Distributor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
               <Button onClick={handleAddGstin} disabled={isSavingGstin}>
                 {isSavingGstin ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FilePlus className="h-4 w-4 mr-2" />}
                 Add GSTIN
               </Button>
             </div>
+
             <div className="text-xs text-muted-foreground">
-              GST numbers saved here will only appear for this client.
+              GST numbers saved here will only appear for this client. The GSTIN will be validated and created in your GSTZen account.
             </div>
 
             {isLoadingGstins ? (
@@ -3635,22 +3683,16 @@ const PDFTools = () => {
 
 const AnalyticsTools = () => {
   const { toast } = useToast();
-  const [showDTLDialog, setShowDTLDialog] = useState(false);
+  const [showRatioAnalysisDialog, setShowRatioAnalysisDialog] = useState(false);
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <ToolCard
-          title="Deferred Tax Calculator (AS-22)"
-          description="Calculate Deferred Tax Assets (DTA) and Deferred Tax Liabilities (DTL) as per Accounting Standard 22 for taxes on income."
-          icon={<Scale className="h-5 w-5 text-primary" />}
-          onClick={() => setShowDTLDialog(true)}
-        />
-        <ToolCard
           title="Ratio Analysis Calculator"
           description="Calculate key financial ratios including liquidity, profitability, and solvency ratios from trial balance."
           icon={<Calculator className="h-5 w-5 text-primary" />}
-          onClick={() => toast({ title: "Ratio Analysis", description: "Import trial balance first" })}
+          onClick={() => setShowRatioAnalysisDialog(true)}
         />
         <ToolCard
           title="Benford's Law Analysis"
@@ -3674,7 +3716,7 @@ const AnalyticsTools = () => {
           title="Sampling Calculator"
           description="Calculate sample sizes using statistical sampling methods (MUS, random, stratified)."
           icon={<Calculator className="h-5 w-5 text-primary" />}
-          onClick={() => toast({ title: "Sampling Calculator", description: "Feature available" })}
+          status="coming-soon"
         />
         <ToolCard
           title="Trend Analysis"
@@ -3684,17 +3726,17 @@ const AnalyticsTools = () => {
         />
       </div>
 
-      {/* Deferred Tax Calculator Dialog */}
-      <Dialog open={showDTLDialog} onOpenChange={setShowDTLDialog}>
+      {/* Ratio Analysis Calculator Dialog */}
+      <Dialog open={showRatioAnalysisDialog} onOpenChange={setShowRatioAnalysisDialog}>
         <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Deferred Tax Calculator (AS-22)</DialogTitle>
+            <DialogTitle>Ratio Analysis Calculator</DialogTitle>
             <DialogDescription>
-              Calculate Deferred Tax Assets (DTA) and Deferred Tax Liabilities (DTL) as per Accounting Standard 22
+              Calculate key financial ratios from trial balance data including liquidity, profitability, solvency, and activity ratios
             </DialogDescription>
           </DialogHeader>
           <div className="mt-4">
-            <DeferredTax />
+            <RatioAnalysisCalculator />
           </div>
         </DialogContent>
       </Dialog>
