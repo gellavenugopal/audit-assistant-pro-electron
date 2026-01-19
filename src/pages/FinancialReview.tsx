@@ -34,7 +34,12 @@ import { useTallyODBC } from '@/hooks/useTallyODBC';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useClient } from '@/hooks/useClient';
-import { useTrialBalance, TrialBalanceLineInput } from '@/hooks/useTrialBalance';
+import {
+  useEngagementTrialBalance,
+  EngagementTrialBalanceLineInput,
+  EngagementTrialBalanceClassificationInput,
+  EngagementPeriodType,
+} from '@/hooks/useEngagementTrialBalance';
 import { LedgerRow, generateLedgerKey } from '@/services/trialBalanceNewClassification';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
@@ -229,6 +234,18 @@ const isStockDetailRow = (row: LedgerRow) => (row['Notes'] || '') === STOCK_DETA
 const stripStockDetailRows = (rows: LedgerRow[]) =>
   rows.filter(row => !isStockDetailRow(row));
 
+const resolveCompositeKey = (row: LedgerRow) =>
+  row['Composite Key'] || generateLedgerKey(row['Ledger Name'] || '', row['Primary Group'] || '');
+
+const resolveStatementType = (row: LedgerRow): 'BS' | 'PL' | 'NOTES' => {
+  const h1 = (row['H1'] || '').toLowerCase();
+  if (h1.includes('balance')) return 'BS';
+  if (h1.includes('profit')) return 'PL';
+  if (h1.includes('asset') || h1.includes('liabilit') || h1.includes('equity')) return 'BS';
+  if (h1.includes('income') || h1.includes('expense')) return 'PL';
+  return 'NOTES';
+};
+
 const parseFinancialYearRange = (yearCode?: string | null) => {
   if (!yearCode) return null;
   const match = yearCode.trim().match(/^(\d{4})-(\d{2}|\d{4})$/);
@@ -308,6 +325,19 @@ const formatFyLabel = (yearCode?: string | null) => {
   if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return '';
   const endShort = String(endYear).slice(-2);
   return `FY ${startYear}-${endShort}`;
+};
+
+const getPreviousFinancialYearCode = (yearCode?: string | null) => {
+  if (!yearCode) return '';
+  const match = yearCode.trim().match(/^(\d{4})-(\d{2}|\d{4})$/);
+  if (!match) return '';
+  const startYear = parseInt(match[1], 10);
+  const endRaw = match[2];
+  const endYear = endRaw.length === 2 ? parseInt(`${String(startYear).slice(0, 2)}${endRaw}`, 10) : parseInt(endRaw, 10);
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear)) return '';
+  const prevStart = startYear - 1;
+  const prevEndShort = String(endYear - 1).slice(-2);
+  return `${prevStart}-${prevEndShort}`;
 };
 
 type TableTabKey = 'actual' | 'classified';
@@ -463,7 +493,6 @@ export default function FinancialReview() {
   const { role } = useAuth();
   const isProUser = role === 'partner' || role === 'manager';
   const odbcConnection = useTallyODBC();
-  const trialBalanceDB = useTrialBalance(currentEngagement?.id);
   const { client } = useClient(currentEngagement?.client_id || null);
   
   // Entity and Business Info
@@ -481,6 +510,21 @@ export default function FinancialReview() {
   const [currentStockData, setCurrentStockData] = useState<any[]>([]);
   const [stockSelectedCount, setStockSelectedCount] = useState(0);
   const [importPeriodType, setImportPeriodType] = useState<'current' | 'previous'>('current');
+  const periodType = useMemo<EngagementPeriodType>(
+    () => (importPeriodType === 'previous' ? 'PY' : 'CY'),
+    [importPeriodType]
+  );
+  const periodFinancialYear = useMemo(() => {
+    if (!currentEngagement?.financial_year) return '';
+    return periodType === 'PY'
+      ? getPreviousFinancialYearCode(currentEngagement.financial_year)
+      : currentEngagement.financial_year;
+  }, [currentEngagement?.financial_year, periodType]);
+  const engagementTrialBalance = useEngagementTrialBalance(
+    currentEngagement?.id,
+    periodType,
+    periodFinancialYear || undefined
+  );
   const [isPeriodDialogOpen, setIsPeriodDialogOpen] = useState(false);
   const [isAddLineDialogOpen, setIsAddLineDialogOpen] = useState(false);
   const [pendingImportData, setPendingImportData] = useState<LedgerRow[] | null>(null);
@@ -601,8 +645,9 @@ export default function FinancialReview() {
     zoom: 1,
   });
   const manualInventoryKey = useMemo(() => {
-    return currentEngagement?.id ? `tb_inventory_manual_${currentEngagement.id}` : null;
-  }, [currentEngagement?.id]);
+    if (!currentEngagement?.id) return null;
+    return `tb_inventory_manual_${currentEngagement.id}_${periodType}_${periodFinancialYear || 'na'}`;
+  }, [currentEngagement?.id, periodType, periodFinancialYear]);
   const [noteLayouts, setNoteLayouts] = useState<Record<string, NoteLayout>>({});
   const [noteLayoutPayload, setNoteLayoutPayload] = useState<Record<string, unknown>>({});
   const [noteLayoutLoaded, setNoteLayoutLoaded] = useState(false);
@@ -686,7 +731,7 @@ export default function FinancialReview() {
   
   useEffect(() => {
     dataLoadedToastRef.current = null;
-  }, [currentEngagement?.id]);
+  }, [currentEngagement?.id, periodType, periodFinancialYear]);
   const persistManualInventoryValues = useCallback((values: ManualInventoryValues) => {
     if (!manualInventoryKey) {
       return false;
@@ -1477,6 +1522,36 @@ export default function FinancialReview() {
     return isDebit ? 'Asset' : 'Liability';
   }, [getBalanceSignValue]);
 
+  const buildLineInputs = useCallback((rows: LedgerRow[]): EngagementTrialBalanceLineInput[] => {
+    return rows.map(row => ({
+      ledger_name: row['Ledger Name'] || '',
+      primary_group: row['Primary Group'] || null,
+      parent_group: row['Parent Group'] || null,
+      composite_key: resolveCompositeKey(row),
+      opening: row['Opening Balance'] || 0,
+      debit: row['Debit'] || 0,
+      credit: row['Credit'] || 0,
+      closing: row['Closing Balance'] || 0,
+      dr_cr: getActualBalanceSign(row),
+      is_revenue: row['Is Revenue'] === 'Yes',
+    }));
+  }, []);
+
+  const buildClassificationInputs = useCallback((rows: LedgerRow[]): EngagementTrialBalanceClassificationInput[] => {
+    return rows.map(row => ({
+      composite_key: resolveCompositeKey(row),
+      statement_type: resolveStatementType(row),
+      h1: row['H1'] || null,
+      h2: row['H2'] || null,
+      h3: row['H3'] || null,
+      h4: row['H4'] || null,
+      h5: row['H5'] || null,
+      note_ref: row['Notes'] || null,
+      status: row['Status'] || null,
+      classification_method: row['Auto'] === 'Manual' ? 'manual' : row['Auto'] ? 'rule' : null,
+    }));
+  }, []);
+
   const isUserDefinedValue = useCallback((value?: string) => {
     return (value || '').toLowerCase().replace(/\s+/g, '_') === 'user_defined';
   }, []);
@@ -1822,25 +1897,13 @@ export default function FinancialReview() {
       
       // Save to database if engagement exists
       if (currentEngagement?.id) {
-        const dbLines: TrialBalanceLineInput[] = processedData.map(row => ({
-          account_code: row['Composite Key'] || '',
-          account_name: row['Ledger Name'] || '',
-          ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
-          ledger_primary_group: row['Primary Group'] || null,
-          opening_balance: row['Opening Balance'] || 0,
-          debit: row['Debit'] || 0,
-          credit: row['Credit'] || 0,
-          closing_balance: row['Closing Balance'] || 0,
-          is_revenue: row['Is Revenue'] === 'Yes',
-          note: row['Notes'] || null,
-          engagement_id: currentEngagement.id,
-          user_id: currentEngagement.created_by || '',
-          period: importPeriodType,
-          period_end_date: effectiveToDate,
-          sheet_name: 'TB CY'
-        }));
-
-        await trialBalanceDB.importLines(dbLines, false);
+        const lineInputs = buildLineInputs(processedData);
+        const classificationInputs = buildClassificationInputs(processedData);
+        await engagementTrialBalance.replaceLines(lineInputs, classificationInputs, {
+          sourceType: 'tally',
+          importedAt: new Date().toISOString(),
+          updateMetadata: true,
+        });
       }
       
       setIsFetching(false);
@@ -1870,7 +1933,7 @@ export default function FinancialReview() {
       setIsFetching(false);
       setIsEntityDialogOpen(false);
     }
-  }, [entityType, businessType, fromDate, toDate, previousFromDate, previousToDate, odbcConnection, importPeriodType, currentEngagement, trialBalanceDB, toast, classificationRules, deriveH1FromRevenueAndBalance, filterClassifiedRows, sortClassifiedByDefaultH2, userDefinedExpenseThreshold]);
+  }, [entityType, businessType, fromDate, toDate, previousFromDate, previousToDate, odbcConnection, importPeriodType, currentEngagement, toast, classificationRules, deriveH1FromRevenueAndBalance, filterClassifiedRows, sortClassifiedByDefaultH2, userDefinedExpenseThreshold, buildLineInputs, buildClassificationInputs, engagementTrialBalance]);
 
   // Save only entity type override
   const handleSaveEntityType = useCallback(async () => {
@@ -1913,23 +1976,13 @@ export default function FinancialReview() {
     
     // Save to database
     if (currentEngagement?.id) {
-      const effectiveToDate = importPeriodType === 'previous' ? previousToDate : toDate;
-      const dbLines: TrialBalanceLineInput[] = pendingImportData.map(row => ({
-        account_code: row['Composite Key'] || '',
-        account_name: row['Ledger Name'] || '',
-        ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
-        ledger_primary_group: row['Primary Group'] || null,
-        opening_balance: row['Opening Balance'] || 0,
-        debit: row['Debit'] || 0,
-        credit: row['Credit'] || 0,
-        closing_balance: row['Closing Balance'] || 0,
-        balance_type: getActualBalanceSign(row),
-        note: row['Notes'] || null,
-        period_type: importPeriodType,
-        period_ending: effectiveToDate || null,
-      }));
-      
-      await trialBalanceDB.importLines(dbLines, false);
+      const lineInputs = buildLineInputs(pendingImportData);
+      const classificationInputs = buildClassificationInputs(pendingImportData);
+      await engagementTrialBalance.replaceLines(lineInputs, classificationInputs, {
+        sourceType: 'excel',
+        importedAt: new Date().toISOString(),
+        updateMetadata: true,
+      });
     }
     
     toast({
@@ -1939,10 +1992,11 @@ export default function FinancialReview() {
     
     setPendingImportData(null);
     setIsPeriodDialogOpen(false);
-  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, previousToDate, odbcConnection, trialBalanceDB, toast, filterClassifiedRows, sortClassifiedByDefaultH2]);
+  }, [pendingImportData, importPeriodType, currentEngagement?.id, toDate, previousToDate, odbcConnection, toast, filterClassifiedRows, sortClassifiedByDefaultH2, buildLineInputs, buildClassificationInputs, engagementTrialBalance]);
   
   // Handle adding a new line item
   const handleAddLineItem = useCallback(() => {
+    const activePeriodType = importPeriodType;
     const newLine: LedgerRow = {
       'Ledger Name': newLineForm.ledgerName,
       'Primary Group': newLineForm.primaryGroup,
@@ -1958,22 +2012,18 @@ export default function FinancialReview() {
       'H1': '',
       'H2': '',
       'H3': '',
-      'Sheet Name': newLineForm.periodType === 'current' ? 'TB CY' : 'TB PY'
+      'Sheet Name': activePeriodType === 'current' ? 'TB CY' : 'TB PY'
     };
     const classified = [applyClassificationRules({
       ...newLine,
       'H1': deriveH1FromRevenueAndBalance(newLine),
     }, classificationRules, { businessType, entityType, userDefinedExpenseThreshold })];
     
-    if (newLineForm.periodType === 'current') {
-      setCurrentData(prev => enrichRowsWithStockDetails([...prev, classified[0]]));
-    } else {
-      setPreviousData(prev => [...prev, classified[0]]);
-    }
+    setCurrentData(prev => enrichRowsWithStockDetails([...prev, classified[0]]));
     
     toast({
       title: 'Line Added',
-      description: `Added "${newLineForm.ledgerName}" to ${newLineForm.periodType === 'current' ? 'Current' : 'Previous'} Period`
+      description: `Added "${newLineForm.ledgerName}" to ${activePeriodType === 'current' ? 'Current' : 'Previous'} Period`
     });
     
     // Reset form
@@ -1987,7 +2037,7 @@ export default function FinancialReview() {
       periodType: 'current'
     });
     setIsAddLineDialogOpen(false);
-  }, [newLineForm, toast, classificationRules, deriveH1FromRevenueAndBalance, businessType, entityType, userDefinedExpenseThreshold]);
+  }, [newLineForm, toast, classificationRules, deriveH1FromRevenueAndBalance, businessType, entityType, userDefinedExpenseThreshold, importPeriodType]);
 
   // Handle bulk update
   const handleBulkUpdate = useCallback((updates: Partial<LedgerRow>) => {
@@ -2153,11 +2203,13 @@ export default function FinancialReview() {
     setActualData([]);
     setCurrentData([]);
     setCurrentStockData([]);
-  }, [currentEngagement?.id]);
+  }, [currentEngagement?.id, periodType, periodFinancialYear]);
   
-  // Load data from cache/database when engagement changes
+  // Load data from cache/database when engagement or period changes
   useEffect(() => {
     if (!currentEngagement?.id) return;
+
+    const cacheKeySuffix = `${currentEngagement.id}_${periodType}_${periodFinancialYear || 'na'}`;
     
     // Load saved entity info from localStorage
     const savedEntityInfo = localStorage.getItem(`tb_entity_${currentEngagement.id}`);
@@ -2172,8 +2224,8 @@ export default function FinancialReview() {
       }
     }
     
-    // Load saved stock data from localStorage
-    const savedStockData = localStorage.getItem(`tb_stock_${currentEngagement.id}`);
+    // Load saved stock data from localStorage (period-scoped)
+    const savedStockData = localStorage.getItem(`tb_stock_${cacheKeySuffix}`);
     if (savedStockData) {
       try {
         const parsedStock = JSON.parse(savedStockData);
@@ -2186,7 +2238,7 @@ export default function FinancialReview() {
     }
 
     // Load Actual TB from localStorage
-    const savedActual = localStorage.getItem(`tb_actual_${currentEngagement.id}`);
+    const savedActual = localStorage.getItem(`tb_actual_${cacheKeySuffix}`);
     let hydrated = false;
     let cachedActualCount = 0;
     if (savedActual) {
@@ -2203,7 +2255,7 @@ export default function FinancialReview() {
     }
 
     // Load Classified TB from localStorage
-    const savedClassified = localStorage.getItem(`tb_classified_${currentEngagement.id}`);
+    const savedClassified = localStorage.getItem(`tb_classified_${cacheKeySuffix}`);
     let cachedClassifiedCount = 0;
     if (savedClassified) {
       try {
@@ -2219,46 +2271,71 @@ export default function FinancialReview() {
     }
 
     // Prefer database when available to avoid stale local cache
-    if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0) {
-      const dbCount = trialBalanceDB.lines.length;
+    if (engagementTrialBalance.lines && engagementTrialBalance.lines.length > 0) {
+      const dbCount = engagementTrialBalance.lines.length;
       if (!hydrated || dbCount >= cachedClassifiedCount || dbCount >= cachedActualCount) {
-      const loadedData: LedgerRow[] = trialBalanceDB.lines.map(line => {
-        const row: LedgerRow = {
-          'Ledger Name': line.account_name,
-          'Primary Group': line.ledger_primary_group || '',
-          'Parent Group': line.ledger_parent || '',
-          'Composite Key': line.account_code,
-          'Opening Balance': line.opening_balance,
-          'Debit': line.debit,
-          'Credit': line.credit,
-          'Closing Balance': line.closing_balance,
-          'ABS Opening Balance': Math.abs(line.opening_balance || 0),
-          'ABS Closing Balance': Math.abs(line.closing_balance || 0),
-          'Is Revenue': (line as any).is_revenue ? 'Yes' : 'No',
-          'H1': '',
-          'H2': '',
-          'H3': '',
-          'Notes': line.note || '',
-          'Sheet Name': 'TB CY'
-        };
-        row['H1'] = deriveH1FromRevenueAndBalance(row);
-        return applyClassificationRules(row, classificationRules, { businessType, entityType, userDefinedExpenseThreshold });
-      });
-      
-      setActualData(enrichRowsWithStockDetails(loadedData));
-      setCurrentData(enrichRowsWithStockDetails(filterClassifiedRows(loadedData)));
-      
-      const engagementId = currentEngagement?.id || '';
-      if (dataLoadedToastRef.current !== engagementId) {
-        toast({
-          title: 'Data Loaded',
-          description: `Loaded ${loadedData.length} ledgers from saved data`,
+        const classificationByLineId = new Map(
+          engagementTrialBalance.classifications.map(classification => [classification.tb_line_id, classification])
+        );
+
+        const loadedData: LedgerRow[] = engagementTrialBalance.lines.map(line => {
+          const classification = classificationByLineId.get(line.id);
+          const row: LedgerRow = {
+            'Ledger Name': line.ledger_name,
+            'Primary Group': line.primary_group || '',
+            'Parent Group': line.parent_group || '',
+            'Composite Key': line.composite_key,
+            'Opening Balance': line.opening,
+            'Debit': line.debit,
+            'Credit': line.credit,
+            'Closing Balance': line.closing,
+            'ABS Opening Balance': Math.abs(line.opening || 0),
+            'ABS Closing Balance': Math.abs(line.closing || 0),
+            'Is Revenue': line.is_revenue ? 'Yes' : 'No',
+            'H1': classification?.h1 || '',
+            'H2': classification?.h2 || '',
+            'H3': classification?.h3 || '',
+            'H4': classification?.h4 || '',
+            'H5': classification?.h5 || '',
+            'Notes': classification?.note_ref || '',
+            'Status': classification?.status || '',
+            'Auto': classification?.classification_method === 'manual' ? 'Manual' : classification?.classification_method || '',
+            'Sheet Name': periodType === 'PY' ? 'TB PY' : 'TB CY'
+          };
+
+          if (!classification) {
+            row['H1'] = deriveH1FromRevenueAndBalance(row);
+            return applyClassificationRules(row, classificationRules, { businessType, entityType, userDefinedExpenseThreshold });
+          }
+
+          return row;
         });
-        dataLoadedToastRef.current = engagementId;
-      }
+      
+        setActualData(enrichRowsWithStockDetails(loadedData));
+        setCurrentData(enrichRowsWithStockDetails(filterClassifiedRows(loadedData)));
+      
+        const toastKey = `${currentEngagement.id}_${periodType}_${periodFinancialYear || 'na'}`;
+        if (dataLoadedToastRef.current !== toastKey) {
+          toast({
+            title: 'Data Loaded',
+            description: `Loaded ${loadedData.length} ledgers from saved data`,
+          });
+          dataLoadedToastRef.current = toastKey;
+        }
       }
     }
-  }, [currentEngagement?.id, trialBalanceDB.lines, classificationRules, deriveH1FromRevenueAndBalance]);
+  }, [
+    currentEngagement?.id,
+    periodType,
+    periodFinancialYear,
+    engagementTrialBalance.lines,
+    engagementTrialBalance.classifications,
+    classificationRules,
+    deriveH1FromRevenueAndBalance,
+    businessType,
+    entityType,
+    userDefinedExpenseThreshold,
+  ]);
   
   // Save entity info to localStorage when it changes
   useEffect(() => {
@@ -2272,55 +2349,47 @@ export default function FinancialReview() {
     }
   }, [currentEngagement?.id, entityType, entityName, businessType]);
 
-  // Persist Actual TB per engagement
+  // Persist Actual TB per engagement + period
   useEffect(() => {
     if (!currentEngagement?.id) return;
-    localStorage.setItem(`tb_actual_${currentEngagement.id}`, JSON.stringify(actualData));
-  }, [actualData, currentEngagement?.id]);
+    const cacheKeySuffix = `${currentEngagement.id}_${periodType}_${periodFinancialYear || 'na'}`;
+    localStorage.setItem(`tb_actual_${cacheKeySuffix}`, JSON.stringify(actualData));
+  }, [actualData, currentEngagement?.id, periodType, periodFinancialYear]);
 
-  // Persist Classified TB per engagement
+  // Persist Classified TB per engagement + period
   useEffect(() => {
     if (!currentEngagement?.id) return;
-    localStorage.setItem(`tb_classified_${currentEngagement.id}`, JSON.stringify(currentData));
-  }, [currentData, currentEngagement?.id]);
+    const cacheKeySuffix = `${currentEngagement.id}_${periodType}_${periodFinancialYear || 'na'}`;
+    localStorage.setItem(`tb_classified_${cacheKeySuffix}`, JSON.stringify(currentData));
+  }, [currentData, currentEngagement?.id, periodType, periodFinancialYear]);
   
-  // Save stock data to localStorage when it changes
+  // Save stock data to localStorage when it changes (period-scoped)
   useEffect(() => {
     if (!currentEngagement?.id) return;
     if (currentStockData.length > 0) {
-      localStorage.setItem(`tb_stock_${currentEngagement.id}`, JSON.stringify(currentStockData));
+      const cacheKeySuffix = `${currentEngagement.id}_${periodType}_${periodFinancialYear || 'na'}`;
+      localStorage.setItem(`tb_stock_${cacheKeySuffix}`, JSON.stringify(currentStockData));
     }
-  }, [currentEngagement?.id, currentStockData]);
+  }, [currentEngagement?.id, currentStockData, periodType, periodFinancialYear]);
   
-  // Auto-save currentData to database when it changes (debounced)
+  // Auto-save current data to database when it changes (debounced)
   useEffect(() => {
-    if (!currentEngagement?.id || currentData.length === 0) return;
+    const rowsToSave = actualData.length > 0 ? actualData : currentData;
+    if (!currentEngagement?.id || rowsToSave.length === 0) return;
     
     // Skip if this is just loaded data (already in database)
-    if (trialBalanceDB.loading) return;
+    if (engagementTrialBalance.loading) return;
     
     // Debounce the save operation
     let cancelled = false;
     const saveTimeout = setTimeout(async () => {
       if (cancelled) return;
       try {
-        const dbLines: TrialBalanceLineInput[] = currentData.map(row => ({
-          account_code: row['Composite Key'] || '',
-          account_name: row['Ledger Name'] || '',
-          ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
-          ledger_primary_group: row['Primary Group'] || null,
-          opening_balance: row['Opening Balance'] || 0,
-          debit: row['Debit'] || 0,
-          credit: row['Credit'] || 0,
-          closing_balance: row['Closing Balance'] || 0,
-          balance_type: getActualBalanceSign(row),
-          note: row['Notes'] || null,
-          period_type: 'current',
-          period_ending: toDate || null,
-        }));
-        
-        // Use upsert mode to avoid duplicates
-        await trialBalanceDB.importLines(dbLines, true, false);
+        const lineInputs = buildLineInputs(rowsToSave);
+        const classificationInputs = buildClassificationInputs(rowsToSave);
+        await engagementTrialBalance.upsertLines(lineInputs, classificationInputs, {
+          updateMetadata: false,
+        });
         console.log('Auto-saved trial balance data');
       } catch (error) {
         console.error('Failed to auto-save trial balance:', error);
@@ -2331,7 +2400,15 @@ export default function FinancialReview() {
       cancelled = true;
       clearTimeout(saveTimeout);
     };
-  }, [currentData, currentEngagement?.id, toDate]);
+  }, [
+    actualData,
+    currentData,
+    currentEngagement?.id,
+    engagementTrialBalance.loading,
+    engagementTrialBalance.upsertLines,
+    buildLineInputs,
+    buildClassificationInputs,
+  ]);
   
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -4640,7 +4717,7 @@ export default function FinancialReview() {
         variant: 'destructive'
       });
     }
-  }, [toast, entityType, classificationRules, deriveH1FromRevenueAndBalance, currentEngagement?.id, toDate, trialBalanceDB, filterClassifiedRows]);
+  }, [toast, confirmExportedFile]);
   
   // Excel Import
   const handleExcelImport = useCallback(() => {
@@ -4709,22 +4786,13 @@ export default function FinancialReview() {
         
         // Save to database
         if (currentEngagement?.id) {
-          const dbLines: TrialBalanceLineInput[] = processedData.map(row => ({
-            account_code: row['Composite Key'] || '',
-            account_name: row['Ledger Name'] || '',
-            ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
-            ledger_primary_group: row['Primary Group'] || null,
-            opening_balance: row['Opening Balance'] || 0,
-            debit: row['Debit'] || 0,
-            credit: row['Credit'] || 0,
-            closing_balance: row['Closing Balance'] || 0,
-            balance_type: getActualBalanceSign(row),
-            note: row['Notes'] || null,
-            period_type: 'current',
-            period_ending: toDate || null,
-          }));
-          
-          await trialBalanceDB.importLines(dbLines, false);
+          const lineInputs = buildLineInputs(processedData);
+          const classificationInputs = buildClassificationInputs(processedData);
+          await engagementTrialBalance.replaceLines(lineInputs, classificationInputs, {
+            sourceType: 'excel',
+            importedAt: new Date().toISOString(),
+            updateMetadata: true,
+          });
         }
         
         toast({
@@ -4747,7 +4815,7 @@ export default function FinancialReview() {
       }
     };
     input.click();
-  }, [toast, entityType, classificationRules, businessType, userDefinedExpenseThreshold, deriveH1FromRevenueAndBalance, currentEngagement?.id, toDate, trialBalanceDB, filterClassifiedRows, sortClassifiedByDefaultH2]);
+  }, [toast, entityType, classificationRules, businessType, userDefinedExpenseThreshold, deriveH1FromRevenueAndBalance, currentEngagement?.id, filterClassifiedRows, sortClassifiedByDefaultH2, buildLineInputs, buildClassificationInputs, engagementTrialBalance]);
 
   // Excel Export - Actual TB
   const handleExportActualTB = useCallback(async () => {
@@ -4915,35 +4983,22 @@ export default function FinancialReview() {
     }
 
     try {
-      const dbLines: TrialBalanceLineInput[] = currentData.map(row => ({
-        account_code: row['Composite Key'] || '',
-        account_name: row['Ledger Name'] || '',
-        ledger_parent: row['Parent Group'] || row['Primary Group'] || null,
-        ledger_primary_group: row['Primary Group'] || null,
-        opening_balance: row['Opening Balance'] || 0,
-        debit: row['Debit'] || 0,
-        credit: row['Credit'] || 0,
-        closing_balance: row['Closing Balance'] || 0,
-        balance_type: getActualBalanceSign(row),
-        note: row['Notes'] || null,
-        period_type: 'current',
-        period_ending: toDate || null,
-        face_group: row['H1'] || null,
-        note_group: row['H2'] || null,
-        sub_note: row['H3'] || null,
-      }));
-
-      const ok = await trialBalanceDB.importLines(dbLines, true, true);
+      const rowsToSave = actualData.length > 0 ? actualData : currentData;
+      const lineInputs = buildLineInputs(rowsToSave);
+      const classificationInputs = buildClassificationInputs(rowsToSave);
+      const ok = await engagementTrialBalance.replaceLines(lineInputs, classificationInputs, {
+        updateMetadata: true,
+      });
       if (!ok) {
         toast({ title: 'Save failed', variant: 'destructive' });
         return;
       }
-      toast({ title: 'Saved', description: `Saved ${dbLines.length} lines.` });
+      toast({ title: 'Saved', description: `Saved ${lineInputs.length} lines.` });
     } catch (error) {
       console.error('Save failed:', error);
       toast({ title: 'Save failed', variant: 'destructive' });
     }
-  }, [currentEngagement?.id, currentData, toDate, trialBalanceDB, toast]);
+  }, [currentEngagement?.id, currentData, actualData, toast, engagementTrialBalance, buildLineInputs, buildClassificationInputs]);
 
   // Reset all filters
   const handleResetFilters = useCallback(() => {
@@ -4986,10 +5041,9 @@ export default function FinancialReview() {
   // Clear Data - clears Actual TB, Classified TB, and Stock Items
   const handleClear = useCallback(async () => {
     try {
-      // Delete from database if there are lines
-      if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0) {
-        const lineIds = trialBalanceDB.lines.map(line => line.id);
-        await trialBalanceDB.deleteLines(lineIds);
+      // Delete from database for the active engagement + period
+      if (engagementTrialBalance.lines.length > 0 || engagementTrialBalance.header) {
+        await engagementTrialBalance.clearPeriodData();
       }
       
       // Clear all state
@@ -5005,10 +5059,11 @@ export default function FinancialReview() {
       setActualTbColumnFilters({});
       setClassifiedTbColumnFilters({});
 
-      // Clear engagement-scoped caches
-      localStorage.removeItem(`tb_actual_${currentEngagement?.id}`);
-      localStorage.removeItem(`tb_classified_${currentEngagement?.id}`);
-      localStorage.removeItem(`tb_stock_${currentEngagement?.id}`);
+      // Clear engagement + period-scoped caches
+      const cacheKeySuffix = `${currentEngagement?.id}_${periodType}_${periodFinancialYear || 'na'}`;
+      localStorage.removeItem(`tb_actual_${cacheKeySuffix}`);
+      localStorage.removeItem(`tb_classified_${cacheKeySuffix}`);
+      localStorage.removeItem(`tb_stock_${cacheKeySuffix}`);
       
       toast({
         title: 'Data Cleared',
@@ -5022,7 +5077,7 @@ export default function FinancialReview() {
         variant: 'destructive'
       });
     }
-  }, [toast, trialBalanceDB, currentEngagement?.id]);
+  }, [toast, engagementTrialBalance, currentEngagement?.id, periodType, periodFinancialYear]);
   
   // Modified handleClear to confirm before clearing data
   const handleClearWithConfirmation = useCallback(() => {
