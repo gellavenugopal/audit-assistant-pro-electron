@@ -17,6 +17,7 @@ import { useTallyODBC } from "@/hooks/useTallyODBC";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { gstzenApi } from "@/services/gstzen-api";
 
 // Type definitions (moved from TallyContext)
 export interface TallyTrialBalanceLine {
@@ -2438,6 +2439,8 @@ const GSTTools = () => {
   const { user } = useAuth();
   const [gstinDialogOpen, setGstinDialogOpen] = useState(false);
   const [gstinInput, setGstinInput] = useState("");
+  const [gstinName, setGstinName] = useState("");
+  const [taxpayerType, setTaxpayerType] = useState<"REGULAR" | "COMPOSITION" | "ISD">("REGULAR");
   const [gstins, setGstins] = useState<{ id: string; gstin: string; created_at: string }[]>([]);
   const [isLoadingGstins, setIsLoadingGstins] = useState(false);
   const [isSavingGstin, setIsSavingGstin] = useState(false);
@@ -2494,6 +2497,8 @@ const GSTTools = () => {
 
   const handleAddGstin = async () => {
     const normalized = gstinInput.trim().toUpperCase();
+    const name = gstinName.trim();
+    
     if (!clientId) {
       toast({
         title: 'Client not linked',
@@ -2514,6 +2519,10 @@ const GSTTools = () => {
       });
       return;
     }
+    if (!name) {
+      toast({ title: 'Company name required', description: 'Enter the company/taxpayer name.' });
+      return;
+    }
     if (gstins.some((gstin) => gstin.gstin === normalized)) {
       toast({ title: 'GSTIN already added', description: 'This GSTIN already exists for this client.' });
       return;
@@ -2525,6 +2534,34 @@ const GSTTools = () => {
 
     setIsSavingGstin(true);
     try {
+      // Step 1: Create in GSTZen backend using /api/create-gstin/
+      // This API validates the GSTIN internally
+      const createResponse = await gstzenApi.createGstin({
+        gstin: normalized,
+        name: name,
+        taxpayer_type: taxpayerType,
+      });
+
+      if (!createResponse.success || !createResponse.data) {
+        throw new Error(createResponse.error || 'Failed to create GSTIN in GSTZen');
+      }
+
+      const responseData = createResponse.data;
+      
+      // Check if creation was successful
+      if (responseData.status !== 1) {
+        // Handle different error cases
+        const errorMsg = responseData.message || 'Failed to create GSTIN';
+        if (errorMsg.includes('exceeded') || errorMsg.includes('limit')) {
+          throw new Error(errorMsg);
+        } else if (errorMsg.includes('not a valid GSTIN')) {
+          throw new Error('Invalid GSTIN. Please check the GSTIN number.');
+        } else {
+          throw new Error(errorMsg);
+        }
+      }
+
+      // Step 2: Create in Supabase (engagement-specific) only if GSTZen creation succeeded
       const { data, error } = await supabase
         .from('client_gstins')
         .insert({
@@ -2539,9 +2576,12 @@ const GSTTools = () => {
 
       setGstins((prev) => [data, ...prev]);
       setGstinInput('');
+      setGstinName('');
+      setTaxpayerType('REGULAR');
+      setGstinDialogOpen(false);
       toast({
         title: 'GST number added',
-        description: `${normalized} linked to ${currentEngagement?.client_name || 'client'}.`,
+        description: `${normalized} linked to ${currentEngagement?.client_name || 'client'} and added to GSTZen account.`,
       });
     } catch (error) {
       console.error('Error adding GSTIN:', error);
@@ -2719,21 +2759,59 @@ const GSTTools = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Input
-                value={gstinInput}
-                onChange={(e) => setGstinInput(e.target.value.toUpperCase())}
-                placeholder="Enter GSTIN (15 characters)"
-                maxLength={15}
-                className="font-mono"
-              />
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="gstin-input">GSTIN *</Label>
+                <Input
+                  id="gstin-input"
+                  value={gstinInput}
+                  onChange={(e) => setGstinInput(e.target.value.toUpperCase())}
+                  placeholder="Enter GSTIN (15 characters)"
+                  maxLength={15}
+                  className="font-mono"
+                  disabled={isSavingGstin}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="gstin-name">Company/Taxpayer Name *</Label>
+                <Input
+                  id="gstin-name"
+                  value={gstinName}
+                  onChange={(e) => setGstinName(e.target.value)}
+                  placeholder="Enter company or taxpayer name"
+                  disabled={isSavingGstin}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="taxpayer-type">Taxpayer Type *</Label>
+                <Select
+                  value={taxpayerType}
+                  onValueChange={(value) => setTaxpayerType(value as "REGULAR" | "COMPOSITION" | "ISD")}
+                  disabled={isSavingGstin}
+                >
+                  <SelectTrigger id="taxpayer-type">
+                    <SelectValue placeholder="Select taxpayer type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="REGULAR">Regular Tax Payer</SelectItem>
+                    <SelectItem value="COMPOSITION">Composition Tax Payer</SelectItem>
+                    <SelectItem value="ISD">Input Service Distributor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
               <Button onClick={handleAddGstin} disabled={isSavingGstin}>
                 {isSavingGstin ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FilePlus className="h-4 w-4 mr-2" />}
                 Add GSTIN
               </Button>
             </div>
+
             <div className="text-xs text-muted-foreground">
-              GST numbers saved here will only appear for this client.
+              GST numbers saved here will only appear for this client. The GSTIN will be validated and created in your GSTZen account.
             </div>
 
             {isLoadingGstins ? (

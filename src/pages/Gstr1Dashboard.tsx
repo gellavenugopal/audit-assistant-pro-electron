@@ -23,7 +23,8 @@ import {
     RefreshCw,
     RotateCw,
     AlertCircle,
-    FileSpreadsheet
+    FileSpreadsheet,
+    CheckCircle2
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { gstzenApi } from "@/services/gstzen-api";
@@ -33,7 +34,6 @@ import { Gstr1ReportType } from "@/types/gstzen";
 import { Gstr1DataGrid } from "@/components/gstr1/Gstr1DataGrid";
 import { Gstr1SyncDialog } from "@/components/gstr1/Gstr1SyncDialog";
 import { GstnLoginDialog } from "@/components/gstin/GstnLoginDialog";
-import { CheckCircle2 } from "lucide-react";
 
 const YEARS = [2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017];
 
