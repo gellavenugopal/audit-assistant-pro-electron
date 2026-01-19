@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useEngagements, type Engagement } from '@/hooks/useEngagements';
 import { useClients } from '@/hooks/useClients';
 import { useFinancialYears } from '@/hooks/useFinancialYears';

@@ -502,8 +502,8 @@ export function applyClassificationRules(
     return addAutoNote({
       ...row,
       'H1': 'Liability',
-      'H2': 'Owners’ Capital Account',
-      'H3': 'Owners’ Capital Account',
+      'H2': 'OwnersΓÇÖ Capital Account',
+      'H3': 'OwnersΓÇÖ Capital Account',
     }, 'Capital Account - Owner (Entity Override)');
   }
 
@@ -695,8 +695,8 @@ export function applyClassificationRules(
         return addAutoNote({
           ...row,
           'H1': 'Liability',
-          'H2': 'Owners’ Capital Account',
-          'H3': 'Owners’ Capital Account',
+          'H2': 'OwnersΓÇÖ Capital Account',
+          'H3': 'OwnersΓÇÖ Capital Account',
         }, 'Capital Account - Owner');
       }
     }
