@@ -995,10 +995,42 @@ export function TallyProvider({ children }: { children: ReactNode }) {
       });
 
       // Filter: GST Registration Type is "Regular" but PartyGSTIN is blank/empty
+      // Exclude Unregistered, Consumer, Composition, Unknown, etc.
       const filteredLines = allLedgers.filter(line => {
-        const isRegular = line.gstRegistrationType.toLowerCase() === "regular";
-        const gstinBlank = !line.partyGSTIN || line.partyGSTIN.trim() === "";
-        return isRegular && gstinBlank;
+        const regType = (line.gstRegistrationType || '').toLowerCase().trim();
+        
+        // Only include "Regular" registration type - strict check
+        // Exclude "Unregistered", "Consumer", "Composition", "Unknown", empty, etc.
+        const isRegular = regType === 'regular' || 
+                          (regType.startsWith('regular') && !regType.includes('unregistered'));
+        
+        if (!isRegular) return false;
+        
+        // Check if GSTIN is actually missing
+        const gstin = (line.partyGSTIN || '').trim().toUpperCase();
+        if (!gstin) return true; // Empty = missing
+        
+        // Reject obvious placeholders
+        const gstinLower = gstin.toLowerCase();
+        if (gstinLower === 'null' || gstinLower === 'na' || gstinLower === 'n/a' || 
+            gstinLower === 'nil' || gstin === '0' || gstin === '-' || gstin === '--' ||
+            gstinLower === 'not available' || gstinLower === 'not applicable') {
+          return true; // Placeholder = missing
+        }
+        
+        // If it's a 15-char alphanumeric string, consider GSTIN as entered
+        const cleanGstin = gstin.replace(/\s/g, '');
+        if (cleanGstin.length === 15 && /^[A-Z0-9]{15}$/.test(cleanGstin)) {
+          return false; // Valid GSTIN = not missing
+        }
+        
+        // Also accept if it looks like meaningful content (10+ alphanumeric chars)
+        if (cleanGstin.length >= 10 && /^[A-Z0-9]+$/.test(cleanGstin)) {
+          return false; // Meaningful content = not missing
+        }
+        
+        // Otherwise consider it missing
+        return true;
       });
 
       console.log(`Found ${filteredLines.length} ledgers with Regular GST but no GSTIN out of ${allLedgers.length} total`);

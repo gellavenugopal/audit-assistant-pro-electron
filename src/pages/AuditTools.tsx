@@ -529,7 +529,7 @@ const TallyTools = () => {
   // Negative Ledgers - accounts with opposite balances
   // Tally convention: Negative = Debit, Positive = Credit
   const getNegativeLedgers = () => {
-    if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [] };
+    if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [], expenses: [], incomes: [] };
 
     // Debtors should have Dr balance (negative), so Cr balance (positive/closingBalance > 0) is opposite
     const debtors = fetchedTBData.filter(line =>
@@ -553,7 +553,19 @@ const TallyTools = () => {
       liabilityGroups.includes(line.primaryGroup) && line.closingBalance < 0
     );
 
-    return { debtors, creditors, assets, liabilities };
+    // Expenses should have Dr balance (negative), so Cr balance (positive/closingBalance > 0) is opposite
+    const expenseGroups = ["Direct Expenses", "Indirect Expenses", "Purchase Accounts", "Manufacturing Expenses", "Administrative Expenses", "Selling Expenses", "Miscellaneous Expenses"];
+    const expenses = fetchedTBData.filter(line =>
+      expenseGroups.includes(line.primaryGroup) && line.closingBalance > 0
+    );
+
+    // Incomes should have Cr balance (positive), so Dr balance (negative/closingBalance < 0) is opposite
+    const incomeGroups = ["Direct Incomes", "Indirect Incomes", "Sales Accounts", "Revenue", "Other Income"];
+    const incomes = fetchedTBData.filter(line =>
+      incomeGroups.includes(line.primaryGroup) && line.closingBalance < 0
+    );
+
+    return { debtors, creditors, assets, liabilities, expenses, incomes };
   };
 
   // Ledgers with No Transactions - only opening balance, no transactions during the year
@@ -587,21 +599,21 @@ const TallyTools = () => {
   };
 
   const handleExportNegativeLedgersToExcel = () => {
-    const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
+    const { debtors, creditors, assets, liabilities, expenses, incomes } = getNegativeLedgers();
 
     const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => {
       // For accounts with opposite balance:
-      // - If expected Dr but has Cr: closingBalance > 0, so closingCr = closingBalance
-      // - If expected Cr but has Dr: closingBalance < 0, so closingDr = abs(closingBalance)
-      const closingCr = line.closingBalance > 0 ? line.closingBalance : 0;
-      const closingDr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
+      // - If expected Dr but has Cr: closingBalance > 0, so amount = closingBalance
+      // - If expected Cr but has Dr: closingBalance < 0, so amount = abs(closingBalance)
+      const amount = expectedNature === "Dr" ? line.closingBalance : Math.abs(line.closingBalance);
+      const oppositeNature = expectedNature === "Dr" ? "Cr" : "Dr";
       return {
         "Account Name": line.accountHead,
         "Primary Group": line.primaryGroup,
-        "Parent": line.parent,
+        "Parent": line.parent || "",
         "Expected Nature": expectedNature,
-        "Actual Balance": expectedNature === "Dr" ? `Cr ${formatCurrency(closingCr)}` : `Dr ${formatCurrency(closingDr)}`,
-        "Amount": expectedNature === "Dr" ? closingCr : closingDr,
+        "Actual Nature": oppositeNature,
+        "Amount": amount,
       };
     };
 
@@ -627,6 +639,16 @@ const TallyTools = () => {
       XLSX.utils.book_append_sheet(wb, ws, "Liabilities_Dr_Bal");
     }
 
+    if (expenses.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(expenses.map(l => formatRow(l, "Dr")));
+      XLSX.utils.book_append_sheet(wb, ws, "Expenses_Cr_Bal");
+    }
+
+    if (incomes.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(incomes.map(l => formatRow(l, "Cr")));
+      XLSX.utils.book_append_sheet(wb, ws, "Incomes_Dr_Bal");
+    }
+
     const fileName = `Negative_Ledgers_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
 
@@ -649,25 +671,16 @@ const TallyTools = () => {
     }
 
     const data = noTransactionLedgers.map(line => {
-      const openingDr = line.openingBalance > 0 ? line.openingBalance : 0;
-      const openingCr = line.openingBalance < 0 ? Math.abs(line.openingBalance) : 0;
-      const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
-      const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
+      // Determine if balance is Dr or Cr
+      const balanceNature = line.openingBalance > 0 ? "Dr" : (line.openingBalance < 0 ? "Cr" : "-");
+      const balanceAmount = Math.abs(line.openingBalance);
 
       return {
         "Account Name": line.accountHead,
         "Primary Group": line.primaryGroup,
-        "Parent": line.parent,
-        "Account Code": line.accountCode,
-        "Branch": line.branch,
-        "Opening Balance": formatCurrency(line.openingBalance),
-        "Opening Dr": formatCurrency(openingDr),
-        "Opening Cr": formatCurrency(openingCr),
-        "Total Debit": formatCurrency(line.totalDebit),
-        "Total Credit": formatCurrency(line.totalCredit),
-        "Closing Balance": formatCurrency(line.closingBalance),
-        "Closing Dr": formatCurrency(closingDr),
-        "Closing Cr": formatCurrency(closingCr),
+        "Parent": line.parent || "",
+        "Balance": formatCurrency(balanceAmount),
+        "Dr/Cr": balanceNature,
         "Type": line.isRevenue ? "P&L" : "BS",
       };
     });
@@ -1397,24 +1410,46 @@ const TallyTools = () => {
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Fetch Button */}
-            <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
-              <Button onClick={handleFetchGSTNotFeed} disabled={isFetchingGSTNotFeed}>
-                {isFetchingGSTNotFeed ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Fetching...
-                  </>
-                ) : (
-                  <>
+            {/* Fetch Button & Actions */}
+            <div className="flex items-center justify-between gap-4 p-4 bg-muted/50 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Button onClick={handleFetchGSTNotFeed} disabled={isFetchingGSTNotFeed}>
+                  {isFetchingGSTNotFeed ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Fetching...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Fetch from Tally
+                    </>
+                  )}
+                </Button>
+                {fetchedGSTNotFeedData && (
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      setFetchedGSTNotFeedData(null);
+                      setGstSearchTerm("");
+                    }}
+                  >
                     <RefreshCw className="h-4 w-4 mr-2" />
-                    Fetch from Tally
-                  </>
+                    Reset
+                  </Button>
                 )}
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                Fetches all ledgers and filters where GST Type = Regular but GSTIN is blank
-              </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {fetchedGSTNotFeedData && fetchedGSTNotFeedData.length > 0 && (
+                  <Button variant="default" onClick={handleExportGSTNotFeedToExcel}>
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    Export to Excel
+                  </Button>
+                )}
+                <span className="text-sm text-muted-foreground hidden sm:inline">
+                  Filters where GST Type = Regular but GSTIN is blank
+                </span>
+              </div>
             </div>
 
             {/* Search/Filter */}
@@ -1505,26 +1540,17 @@ const TallyTools = () => {
                     </table>
                   </div>
 
-                  {/* Summary & Export */}
-                  <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
+                  {/* Summary */}
+                  <div className="p-4 border-t bg-muted/30">
                     <div className="text-sm text-muted-foreground">
                       {gstSearchTerm ? (
                         <>
-                          {filteredData.length} of {fetchedGSTNotFeedData.length} ledgers with missing GSTIN
-                          {gstSearchTerm && <span className="ml-1">(filtered)</span>}
+                          Showing {filteredData.length} of {fetchedGSTNotFeedData.length} ledgers with missing GSTIN
+                          <span className="ml-1">(filtered)</span>
                         </>
                       ) : (
                         `Found ${fetchedGSTNotFeedData.length} ledgers with missing GSTIN`
                       )}
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" onClick={() => setFetchedGSTNotFeedData(null)}>
-                        Clear
-                      </Button>
-                      <Button variant="outline" onClick={handleExportGSTNotFeedToExcel}>
-                        <FileSpreadsheet className="h-4 w-4 mr-2" />
-                        Export to Excel
-                      </Button>
                     </div>
                   </div>
                 </div>
@@ -1563,7 +1589,7 @@ const TallyTools = () => {
 
           <div className="space-y-4">
             {(() => {
-              const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
+              const { debtors, creditors, assets, liabilities, expenses, incomes } = getNegativeLedgers();
 
               // Filter function for search
               const filterData = (data: TallyTrialBalanceLine[]) => {
@@ -1580,9 +1606,11 @@ const TallyTools = () => {
               const filteredCreditors = filterData(creditors);
               const filteredAssets = filterData(assets);
               const filteredLiabilities = filterData(liabilities);
+              const filteredExpenses = filterData(expenses);
+              const filteredIncomes = filterData(incomes);
 
-              const totalCount = debtors.length + creditors.length + assets.length + liabilities.length;
-              const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length;
+              const totalCount = debtors.length + creditors.length + assets.length + liabilities.length + expenses.length + incomes.length;
+              const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length + filteredExpenses.length + filteredIncomes.length;
 
               const renderTable = (data: TallyTrialBalanceLine[], filteredData: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
                 <div className="border rounded-lg overflow-hidden">
@@ -1645,6 +1673,17 @@ const TallyTools = () => {
                     </Alert>
                   ) : (
                     <>
+                      {/* Export Button on Top */}
+                      <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                        <span className="text-sm text-muted-foreground">
+                          Total: {totalCount} accounts with opposite balances
+                        </span>
+                        <Button variant="default" onClick={handleExportNegativeLedgersToExcel}>
+                          <FileSpreadsheet className="h-4 w-4 mr-2" />
+                          Export to Excel
+                        </Button>
+                      </div>
+
                       {/* Search Input */}
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1675,25 +1714,35 @@ const TallyTools = () => {
                       )}
 
                       <Tabs value={negativeLedgersTab} onValueChange={setNegativeLedgersTab}>
-                        <TabsList className="grid w-full grid-cols-4">
-                          <TabsTrigger value="debtors" className="text-xs">
-                            Debtors (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">
+                        <TabsList className="grid w-full grid-cols-6">
+                          <TabsTrigger value="debtors" className="text-xs px-1">
+                            Debtors <Badge variant="secondary" className="ml-1 text-[10px]">
                               {negativeLedgersSearchTerm ? `${filteredDebtors.length}/${debtors.length}` : debtors.length}
                             </Badge>
                           </TabsTrigger>
-                          <TabsTrigger value="creditors" className="text-xs">
-                            Creditors (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">
+                          <TabsTrigger value="creditors" className="text-xs px-1">
+                            Creditors <Badge variant="secondary" className="ml-1 text-[10px]">
                               {negativeLedgersSearchTerm ? `${filteredCreditors.length}/${creditors.length}` : creditors.length}
                             </Badge>
                           </TabsTrigger>
-                          <TabsTrigger value="assets" className="text-xs">
-                            Assets (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">
+                          <TabsTrigger value="assets" className="text-xs px-1">
+                            Assets <Badge variant="secondary" className="ml-1 text-[10px]">
                               {negativeLedgersSearchTerm ? `${filteredAssets.length}/${assets.length}` : assets.length}
                             </Badge>
                           </TabsTrigger>
-                          <TabsTrigger value="liabilities" className="text-xs">
-                            Liabilities (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">
+                          <TabsTrigger value="liabilities" className="text-xs px-1">
+                            Liabilities <Badge variant="secondary" className="ml-1 text-[10px]">
                               {negativeLedgersSearchTerm ? `${filteredLiabilities.length}/${liabilities.length}` : liabilities.length}
+                            </Badge>
+                          </TabsTrigger>
+                          <TabsTrigger value="expenses" className="text-xs px-1">
+                            Expenses <Badge variant="secondary" className="ml-1 text-[10px]">
+                              {negativeLedgersSearchTerm ? `${filteredExpenses.length}/${expenses.length}` : expenses.length}
+                            </Badge>
+                          </TabsTrigger>
+                          <TabsTrigger value="incomes" className="text-xs px-1">
+                            Incomes <Badge variant="secondary" className="ml-1 text-[10px]">
+                              {negativeLedgersSearchTerm ? `${filteredIncomes.length}/${incomes.length}` : incomes.length}
                             </Badge>
                           </TabsTrigger>
                         </TabsList>
@@ -1729,31 +1778,38 @@ const TallyTools = () => {
                             <Alert><AlertDescription>No Liabilities with Debit balance found.</AlertDescription></Alert>
                           )}
                         </TabsContent>
+
+                        <TabsContent value="expenses" className="mt-4">
+                          {expenses.length > 0 ? (
+                            renderTable(expenses, filteredExpenses, "Dr", "Cr")
+                          ) : (
+                            <Alert><AlertDescription>No Expenses with Credit balance found.</AlertDescription></Alert>
+                          )}
+                        </TabsContent>
+
+                        <TabsContent value="incomes" className="mt-4">
+                          {incomes.length > 0 ? (
+                            renderTable(incomes, filteredIncomes, "Cr", "Dr")
+                          ) : (
+                            <Alert><AlertDescription>No Incomes with Debit balance found.</AlertDescription></Alert>
+                          )}
+                        </TabsContent>
                       </Tabs>
 
-                      {/* Summary & Export */}
-                      <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
+                      {/* Summary */}
+                      <div className="p-3 border rounded-lg bg-muted/30">
                         <div className="text-sm text-muted-foreground">
                           {negativeLedgersSearchTerm ? (
                             <>
                               Showing {filteredTotalCount} of {totalCount} accounts with opposite balances
                               <span className="ml-1">(filtered)</span>
-                              <span className="ml-2 text-xs">
-                                (Debtors: {filteredDebtors.length}/{debtors.length}, Creditors: {filteredCreditors.length}/{creditors.length},
-                                Assets: {filteredAssets.length}/{assets.length}, Liabilities: {filteredLiabilities.length}/{liabilities.length})
-                              </span>
                             </>
                           ) : (
                             <>
                               Total: {totalCount} accounts with opposite balances
-                              (Debtors: {debtors.length}, Creditors: {creditors.length}, Assets: {assets.length}, Liabilities: {liabilities.length})
                             </>
                           )}
                         </div>
-                        <Button variant="outline" onClick={handleExportNegativeLedgersToExcel}>
-                          <FileSpreadsheet className="h-4 w-4 mr-2" />
-                          Export All to Excel
-                        </Button>
                       </div>
                     </>
                   )}
@@ -1809,6 +1865,17 @@ const TallyTools = () => {
 
               return (
                 <>
+                  {/* Export Button on Top */}
+                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                    <span className="text-sm text-muted-foreground">
+                      Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions
+                    </span>
+                    <Button variant="default" onClick={handleExportNoTransactionLedgersToExcel}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export to Excel
+                    </Button>
+                  </div>
+
                   {/* Search Input */}
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1907,30 +1974,20 @@ const TallyTools = () => {
                     </div>
                   </div>
 
-                  {/* Summary & Export */}
-                  <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
+                  {/* Summary */}
+                  <div className="p-3 border rounded-lg bg-muted/30">
                     <div className="text-sm text-muted-foreground">
                       {noTransactionsSearchTerm ? (
                         <>
                           Showing {filteredData.length} of {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions
                           <span className="ml-1">(filtered)</span>
-                          <span className="ml-2 text-xs">
-                            ({filteredData.filter(l => !l.isRevenue).length} BS)
-                          </span>
                         </>
                       ) : (
                         <>
-                          Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions during the year
-                          <span className="ml-2 text-xs">
-                            ({noTransactionLedgers.filter(l => !l.isRevenue).length} BS)
-                          </span>
+                          Total: {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions
                         </>
                       )}
                     </div>
-                    <Button variant="outline" onClick={handleExportNoTransactionLedgersToExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export to Excel
-                    </Button>
                   </div>
                 </>
               );
