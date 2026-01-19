@@ -1096,6 +1096,13 @@ const TallyTools = () => {
                     <div className="text-sm">
                       <span className="text-muted-foreground">Total Opening Balance:</span>
                       <span className="ml-2 font-mono font-medium">{formatCurrency(totalOpeningBalance)}</span>
+                      {Math.abs(totalOpeningBalance) > 0.01 && (
+                        <div className="mt-1">
+                          <Badge variant="destructive" className="text-xs">
+                            Difference: {formatCurrency(Math.abs(totalOpeningBalance))}
+                          </Badge>
+                        </div>
+                      )}
                     </div>
                     <div className="text-sm">
                       <span className="text-muted-foreground">Total Debit:</span>
@@ -1108,10 +1115,16 @@ const TallyTools = () => {
                     <div className="text-sm">
                       <span className="text-muted-foreground">Total Closing Balance:</span>
                       <span className="ml-2 font-mono font-medium">{formatCurrency(totalClosingBalance)}</span>
-                      {/* Profit/Loss mismatch badge removed */}
+                      {Math.abs(totalClosingBalance) > 0.01 && (
+                        <div className="mt-1">
+                          <Badge variant="destructive" className="text-xs">
+                            Difference: {formatCurrency(Math.abs(totalClosingBalance))}
+                          </Badge>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between mt-6">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button variant="outline" className="h-10" onClick={() => setFetchedTBData(null)}>
                         Clear
