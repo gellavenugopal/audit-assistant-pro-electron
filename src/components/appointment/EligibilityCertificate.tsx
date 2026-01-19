@@ -4,11 +4,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { toast } from 'sonner';
-import { Eye, Trash2, UploadCloud } from 'lucide-react';
+import { Eye, ShieldCheck, Trash2, UploadCloud } from 'lucide-react';
 import {
   AlignmentType,
   BorderStyle,
@@ -27,36 +27,23 @@ import { useClient } from '@/hooks/useClient';
 import { useFirmSettings } from '@/hooks/useFirmSettings';
 import { usePartners } from '@/hooks/usePartners';
 import { EvidenceFile, useEvidenceFiles } from '@/hooks/useEvidenceFiles';
-import { usePreviousAuditorCommunication } from '@/hooks/usePreviousAuditorCommunication';
+import { useEligibilityCertificate } from '@/hooks/useEligibilityCertificate';
 import {
-  PREVIOUS_AUDITOR_TEMPLATE_VERSION,
-  previousAuditorCommunicationTemplate,
-} from '@/data/previousAuditorCommunicationTemplate';
+  ELIGIBILITY_CERT_TEMPLATE_VERSION,
+  eligibilityCertificateTemplate,
+} from '@/data/eligibilityCertificateTemplate';
 
 const FIELD_PLACEHOLDERS = {
-  date: '______________',
-  entity_name: '___________________',
-  previous_auditor_name: '___________________',
-  previous_auditor_firm_reg_no: '___________________',
-  cin: '___________________',
-  pan: '___________________',
-  financial_year: '___________________',
-  auditor_appointment: '___________________',
-  firm_name: '___________________',
-  firm_reg_no: '___________________',
-  partner_name: '___________________',
-  partner_mem_no: '___________________',
+  date: '___________________',
+  entity_name: '(Name of the company)',
+  entity_address: '(Reg. address of the company)',
+  firm_name: '___________________________(Name of the firm)',
+  firm_reg_no: '__________________',
+  partner_name: '__________________',
+  partner_mem_no: '___________',
 };
 
-const COMMUNICATION_FILE_TYPE = 'previous_auditor_communication';
-
-type AppointmentType = 'both' | 'statutory' | 'tax';
-
-const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
-  both: 'Statutory Auditors / Tax Auditor',
-  statutory: 'Statutory Auditors',
-  tax: 'Tax Auditor',
-};
+const CERTIFICATE_FILE_TYPE = 'eligibility_certificate';
 
 const formatFieldForTemplate = (value: string, fallback: string) => {
   const text = value.trim();
@@ -76,11 +63,11 @@ const formatDateForTemplate = (value: string) => {
 const populateTemplate = (values: Record<string, string>) => {
   return Object.entries(values).reduce((content, [key, value]) => {
     return content.replace(new RegExp(`{{${key}}}`, 'g'), value);
-  }, previousAuditorCommunicationTemplate);
+  }, eligibilityCertificateTemplate);
 };
 
 const editorStyles = `
-.prev-auditor-editor [contenteditable] {
+.eligibility-editor [contenteditable] {
   font-family: "Times New Roman", Times, serif;
   font-size: 12pt;
   line-height: 1.15;
@@ -97,105 +84,80 @@ const editorStyles = `
   margin: 0 auto;
 }
 
-.prev-auditor-editor.prefill-collapsed [contenteditable] {
+.eligibility-editor.prefill-collapsed [contenteditable] {
   height: 70vh;
   max-height: 720px;
 }
 
-.prev-auditor-editor .preview-letter {
+.eligibility-editor .preview-letter {
   width: 100%;
   font-size: 12pt;
   line-height: 1.15;
 }
 
-.prev-auditor-editor .preview-letter,
-.prev-auditor-editor .preview-letter * {
+.eligibility-editor .preview-letter,
+.eligibility-editor .preview-letter * {
   font-family: "Times New Roman", Times, serif;
   font-size: 12pt;
   line-height: 1.15;
 }
 
-.prev-auditor-editor .preview-letter p {
+.eligibility-editor .preview-letter p {
   margin: 0 0 6pt 0;
   text-align: justify;
-  text-indent: 0;
 }
 
-.prev-auditor-editor .preview-letter .header-title {
+.eligibility-editor .preview-letter .header-title {
   font-size: 12pt;
   font-weight: 600;
   text-align: center;
   margin-bottom: 10pt;
-  color: #555;
+  color: #444;
 }
 
-.prev-auditor-editor .preview-letter .letter-header {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 6pt;
-  text-align: left;
-  font-size: 12pt;
-  line-height: 1.15;
+.eligibility-editor .preview-letter .note {
+  background: #fff3a3;
+  padding: 0 4px;
 }
 
-.prev-auditor-editor .preview-letter .letter-header td {
-  padding: 0;
-  font-size: 12pt;
-  line-height: 1.15;
-}
-
-.prev-auditor-editor .preview-letter table,
-.prev-auditor-editor .preview-letter th,
-.prev-auditor-editor .preview-letter td {
-  font-size: 12pt !important;
-  line-height: 1.15 !important;
-  white-space: normal !important;
-  max-width: none !important;
-  padding: 0 !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-}
-
-.prev-auditor-editor .preview-letter .to-block {
-  width: 65%;
-  vertical-align: top;
-  padding-right: 16px;
-}
-
-.prev-auditor-editor .preview-letter .date-block {
-  width: 35%;
-  text-align: right;
-  vertical-align: top;
-  white-space: nowrap;
-}
-
-.prev-auditor-editor .preview-letter .subject {
+.eligibility-editor .preview-letter .subject {
   font-weight: 600;
   margin: 6pt 0;
   text-align: left;
 }
 
-.prev-auditor-editor .preview-letter .thank-you {
-  margin-top: 8pt;
+.eligibility-editor .preview-letter .to-block {
+  margin: 8pt 0;
   text-align: left;
 }
 
-.prev-auditor-editor .preview-letter .signature {
+.eligibility-editor .preview-letter .bullet {
+  margin-left: 0;
+  padding-left: 1.5em;
+  text-indent: -0.75em;
+  text-align: justify;
+}
+
+.eligibility-editor .preview-letter .signature {
   margin-top: 10pt;
   text-align: left;
 }
 
-.prev-auditor-editor .preview-letter .signature p {
+.eligibility-editor .preview-letter .signature p {
   margin: 0;
   text-align: left;
 }
 
-.prev-auditor-editor .preview-letter .signature-space {
+.eligibility-editor .preview-letter .signature-space {
   height: 12pt;
   margin: 6pt 0;
 }
 
-.prev-auditor-editor .preview-letter .missing {
+.eligibility-editor .preview-letter .spacer {
+  min-height: 12pt;
+}
+
+.eligibility-editor .preview-letter .missing {
   background: #fff3a3;
   border-bottom: 1px solid #333;
   padding: 0 4px;
@@ -235,7 +197,14 @@ const convertHtmlToDocxElements = (html: string) => {
 
   const buildRuns = (
     node: ChildNode,
-    styles: { bold?: boolean; italic?: boolean; underline?: boolean; missing?: boolean; color?: string } = {},
+    styles: {
+      bold?: boolean;
+      italic?: boolean;
+      underline?: boolean;
+      missing?: boolean;
+      highlight?: boolean;
+      color?: string;
+    } = {},
     state: TrimState
   ): TextRun[] => {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -253,7 +222,7 @@ const convertHtmlToDocxElements = (html: string) => {
           bold: styles.bold,
           italics: styles.italic,
           underline: styles.underline || styles.missing ? { type: UnderlineType.SINGLE } : undefined,
-          highlight: styles.missing ? 'yellow' : undefined,
+          highlight: styles.missing || styles.highlight ? 'yellow' : undefined,
           color: styles.color,
         }),
       ];
@@ -274,6 +243,7 @@ const convertHtmlToDocxElements = (html: string) => {
       if (element.tagName === 'I' || element.tagName === 'EM') nextStyles.italic = true;
       if (element.tagName === 'U') nextStyles.underline = true;
       if (element.classList.contains('missing')) nextStyles.missing = true;
+      if (element.classList.contains('note')) nextStyles.highlight = true;
       const styleColor = parseColor(element.style?.color || element.getAttribute('color'));
       if (styleColor) nextStyles.color = styleColor;
 
@@ -289,7 +259,14 @@ const convertHtmlToDocxElements = (html: string) => {
 
   const buildRunsFromNodes = (
     nodes: NodeListOf<ChildNode> | ChildNode[],
-    baseStyles: { bold?: boolean; italic?: boolean; underline?: boolean; missing?: boolean; color?: string } = {}
+    baseStyles: {
+      bold?: boolean;
+      italic?: boolean;
+      underline?: boolean;
+      missing?: boolean;
+      highlight?: boolean;
+      color?: string;
+    } = {}
   ) => {
     const state: TrimState = { trimLeading: true };
     let runs: TextRun[] = [];
@@ -305,15 +282,18 @@ const convertHtmlToDocxElements = (html: string) => {
     const isSubject = element.classList.contains('subject');
     const isRight = element.classList.contains('right');
     const isSignatureSpace = element.classList.contains('signature-space');
-    const isThankYou = element.classList.contains('thank-you');
     const isSignatureBlock = element.parentElement?.classList.contains('signature');
     const isFirstSignature =
       isSignatureBlock && element.parentElement?.firstElementChild === element;
+    const isBullet = element.classList.contains('bullet');
+    const isSpacer = element.classList.contains('spacer');
+    const isNote = element.classList.contains('note');
+    const isToBlock = element.classList.contains('to-block');
     const alignment = isHeader
       ? AlignmentType.CENTER
       : isRight
         ? AlignmentType.RIGHT
-        : isSubject || isSignatureBlock || isThankYou
+        : isSubject || isSignatureBlock || isToBlock
           ? AlignmentType.LEFT
           : AlignmentType.JUSTIFIED;
     const spacing = {
@@ -322,22 +302,30 @@ const convertHtmlToDocxElements = (html: string) => {
       ...(isSubject ? { before: 120, after: 120 } : {}),
       ...(isSignatureSpace ? { line: 240, after: 240 } : {}),
       ...(isSignatureBlock ? { after: 0 } : {}),
-      ...(isThankYou ? { before: 160 } : {}),
       ...(isFirstSignature ? { before: 200 } : {}),
+      ...(isSpacer ? { line: 240, after: 240 } : {}),
     };
     const runs = buildRunsFromNodes(element.childNodes, {
       bold: isHeader || isSubject,
+      highlight: isNote,
     });
     return new Paragraph({
       children: runs.length ? runs : [new TextRun('')],
       alignment,
       spacing,
-      indent: {
-        left: 0,
-        right: 0,
-        firstLine: 0,
-        hanging: 0,
-      },
+      indent: isBullet
+        ? {
+            left: 360,
+            right: 0,
+            firstLine: 0,
+            hanging: 180,
+          }
+        : {
+            left: 0,
+            right: 0,
+            firstLine: 0,
+            hanging: 0,
+          },
     });
   };
 
@@ -435,17 +423,13 @@ const convertHtmlToDocxElements = (html: string) => {
   return elements;
 };
 
-type PreviousAuditorCommunicationProps = {
-  onOpenChange?: (open: boolean) => void;
-};
-
-export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCommunicationProps) {
+export function EligibilityCertificate() {
   const { currentEngagement } = useEngagement();
   const { client } = useClient(currentEngagement?.client_id || null);
   const { firmSettings } = useFirmSettings();
   const { partners } = usePartners();
   const { document: savedDocument, loading, saving, saveDocument } =
-    usePreviousAuditorCommunication(currentEngagement?.id);
+    useEligibilityCertificate(currentEngagement?.id);
   const {
     files: evidenceFiles,
     uploadFile: uploadEvidenceFile,
@@ -456,35 +440,22 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
   const [editorHtml, setEditorHtml] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [entityName, setEntityName] = useState('');
-  const [cin, setCin] = useState('');
-  const [pan, setPan] = useState('');
-  const [financialYear, setFinancialYear] = useState('');
-  const [appointmentType, setAppointmentType] = useState<AppointmentType>('both');
+  const [entityAddress, setEntityAddress] = useState('');
   const [firmName, setFirmName] = useState('');
   const [firmRegNo, setFirmRegNo] = useState('');
   const [partnerName, setPartnerName] = useState('');
   const [partnerMemNo, setPartnerMemNo] = useState('');
-  const [previousAuditorName, setPreviousAuditorName] = useState('');
-  const [previousAuditorFirmRegNo, setPreviousAuditorFirmRegNo] = useState('');
   const [exporting, setExporting] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [prefillOpen, setPrefillOpen] = useState(true);
   const initializedRef = useRef<string | null>(null);
-  const communicationInputRef = useRef<HTMLInputElement>(null);
-  const setEditorOpen = useCallback(
-    (open: boolean) => {
-      setShowEditor(open);
-      onOpenChange?.(open);
-    },
-    [onOpenChange]
-  );
+  const certificateInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (client) {
       setEntityName(client.name || '');
-      setCin(client.cin || '');
-      setPan((client.pan || '').toUpperCase());
+      setEntityAddress(client.address || '');
     }
   }, [client?.id]);
 
@@ -510,57 +481,21 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
     }
   }, [currentEngagement?.partner_id, partners, partnerName]);
 
-  useEffect(() => {
-    setFinancialYear(currentEngagement?.financial_year || '');
-  }, [currentEngagement?.id, currentEngagement?.financial_year]);
-
-  useEffect(() => {
-    setPreviousAuditorName('');
-    setPreviousAuditorFirmRegNo('');
-  }, [currentEngagement?.id]);
-
   const templateValues = useMemo(() => {
     return {
       date: formatFieldForTemplate(formatDateForTemplate(date), FIELD_PLACEHOLDERS.date),
       entity_name: formatFieldForTemplate(entityName, FIELD_PLACEHOLDERS.entity_name),
-      cin: formatFieldForTemplate(cin, FIELD_PLACEHOLDERS.cin),
-      pan: formatFieldForTemplate(pan, FIELD_PLACEHOLDERS.pan),
-      financial_year: formatFieldForTemplate(financialYear, FIELD_PLACEHOLDERS.financial_year),
-      auditor_appointment: formatFieldForTemplate(
-        APPOINTMENT_TYPE_LABELS[appointmentType],
-        FIELD_PLACEHOLDERS.auditor_appointment
-      ),
+      entity_address: formatFieldForTemplate(entityAddress, FIELD_PLACEHOLDERS.entity_address),
       firm_name: formatFieldForTemplate(firmName, FIELD_PLACEHOLDERS.firm_name),
-      firm_reg_no: formatFieldForTemplate(
-        firmRegNo,
-        FIELD_PLACEHOLDERS.firm_reg_no
-      ),
+      firm_reg_no: formatFieldForTemplate(firmRegNo, FIELD_PLACEHOLDERS.firm_reg_no),
       partner_name: formatFieldForTemplate(partnerName, FIELD_PLACEHOLDERS.partner_name),
       partner_mem_no: formatFieldForTemplate(partnerMemNo, FIELD_PLACEHOLDERS.partner_mem_no),
-      previous_auditor_name: formatFieldForTemplate(previousAuditorName, FIELD_PLACEHOLDERS.previous_auditor_name),
-      previous_auditor_firm_reg_no: formatFieldForTemplate(
-        previousAuditorFirmRegNo,
-        FIELD_PLACEHOLDERS.previous_auditor_firm_reg_no
-      ),
     };
-  }, [
-    date,
-    entityName,
-    cin,
-    pan,
-    financialYear,
-    appointmentType,
-    firmName,
-    firmRegNo,
-    partnerName,
-    partnerMemNo,
-    previousAuditorName,
-    previousAuditorFirmRegNo,
-  ]);
+  }, [date, entityName, entityAddress, firmName, firmRegNo, partnerName, partnerMemNo]);
 
   const templateHtml = useMemo(() => populateTemplate(templateValues), [templateValues]);
-  const communicationFiles = useMemo(
-    () => evidenceFiles.filter((file) => file.file_type === COMMUNICATION_FILE_TYPE),
+  const certificateFiles = useMemo(
+    () => evidenceFiles.filter((file) => file.file_type === CERTIFICATE_FILE_TYPE),
     [evidenceFiles]
   );
 
@@ -583,7 +518,7 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
   }, []);
 
   const isCurrentTemplate = useCallback(
-    (content: string) => content.includes(`data-template-version="${PREVIOUS_AUDITOR_TEMPLATE_VERSION}"`),
+    (content: string) => content.includes(`data-template-version="${ELIGIBILITY_CERT_TEMPLATE_VERSION}"`),
     []
   );
 
@@ -592,12 +527,12 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
   useEffect(() => {
     if (!currentEngagement) return;
     initializedRef.current = null;
-    setEditorOpen(false);
+    setShowEditor(false);
     setIsDirty(false);
     setEditorHtml('');
     setPrefillOpen(true);
-    setAppointmentType('both');
-  }, [currentEngagement?.id, setEditorOpen]);
+    setDate(new Date().toISOString().split('T')[0]);
+  }, [currentEngagement?.id]);
 
   useEffect(() => {
     if (!showEditor || !currentEngagement) return;
@@ -633,7 +568,7 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
       toast.error('Add content before saving');
       return;
     }
-    const saved = await saveDocument(draftHtml, 'Communication with Previous Auditor');
+    const saved = await saveDocument(draftHtml, 'Auditor Eligibility Certificate');
     if (saved) {
       toast.success('Draft saved');
     }
@@ -691,8 +626,8 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
       const safeName = currentEngagement?.client_name
-        ? `Previous_Auditor_Communication_${currentEngagement.client_name}`
-        : 'Previous_Auditor_Communication';
+        ? `Eligibility_Certificate_${currentEngagement.client_name}`
+        : 'Eligibility_Certificate';
       link.download = `${safeName.replace(/\s+/g, '_')}.docx`;
       document.body.appendChild(link);
       link.click();
@@ -706,7 +641,7 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
     }
   };
 
-  const handleCommunicationUpload = () => {
+  const handleCertificateUpload = () => {
     return async (event: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files || []);
       if (files.length === 0) {
@@ -738,7 +673,7 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
 
         await uploadEvidenceFile(file, {
           name: file.name,
-          file_type: COMMUNICATION_FILE_TYPE,
+          file_type: CERTIFICATE_FILE_TYPE,
         });
       }
 
@@ -746,7 +681,7 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
     };
   };
 
-  const openCommunicationPreview = async (file: EvidenceFile) => {
+  const openCertificatePreview = async (file: EvidenceFile) => {
     const url = await getEvidenceFileUrl(file);
     if (url) {
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -755,14 +690,14 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
     }
   };
 
-  const renderCommunicationFiles = () => {
-    if (communicationFiles.length === 0) {
+  const renderCertificateFiles = () => {
+    if (certificateFiles.length === 0) {
       return <p className="text-xs text-muted-foreground">No uploads yet.</p>;
     }
 
     return (
       <div className="space-y-2">
-        {communicationFiles.map((file) => (
+        {certificateFiles.map((file) => (
           <div
             key={file.id}
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2"
@@ -774,7 +709,7 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => openCommunicationPreview(file)}>
+              <Button size="sm" variant="outline" onClick={() => openCertificatePreview(file)}>
                 <Eye className="h-4 w-4 mr-2" />
                 View
               </Button>
@@ -793,8 +728,11 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Communication with Previous Auditor</CardTitle>
-          <CardDescription>Select an engagement to edit this communication.</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5" />
+            Auditor Eligibility Certificate
+          </CardTitle>
+          <CardDescription>Select an engagement to edit this certificate.</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -806,40 +744,39 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
         className={showEditor ? 'gap-3 sm:flex-row sm:items-start sm:justify-between' : undefined}
       >
         <div className="space-y-1.5">
-          <CardTitle>Communication with Previous Auditor</CardTitle>
-          <CardDescription>Prefill the letter from engagement and client masters, then edit and export.</CardDescription>
+          <CardTitle>Auditor Eligibility Certificate</CardTitle>
+          <CardDescription>Prefill the certificate from engagement and client masters, then edit and export.</CardDescription>
         </div>
         {showEditor && (
-          <Button variant="outline" size="sm" onClick={() => setEditorOpen(false)}>
-            Back to Appointment
+          <Button variant="outline" size="sm" onClick={() => setShowEditor(false)}>
+            Back to Eligibility
           </Button>
         )}
       </CardHeader>
       {!showEditor ? (
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Create the communication to the previous auditor in the same flow as the engagement letter generator. The
-            template leverages client and firm masters while keeping the "To" field editable.
+            Generate the eligibility certificate and store a signed copy for this engagement.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setEditorOpen(true)}>Generate Communication</Button>
-            <Button variant="outline" onClick={() => communicationInputRef.current?.click()}>
+            <Button onClick={() => setShowEditor(true)}>Generate Eligibility Certificate</Button>
+            <Button variant="outline" onClick={() => certificateInputRef.current?.click()}>
               <UploadCloud className="h-4 w-4 mr-2" />
-              Upload Communication
+              Upload Eligibility Certificate
             </Button>
           </div>
           <input
-            ref={communicationInputRef}
+            ref={certificateInputRef}
             type="file"
             accept=".pdf,.jpg,.jpeg,.png"
             multiple
-            onChange={handleCommunicationUpload()}
+            onChange={handleCertificateUpload()}
             className="hidden"
           />
           <p className="text-xs text-muted-foreground">
             Supported formats: PDF (.pdf), JPG/JPEG (.jpg, .jpeg), PNG (.png)
           </p>
-          {renderCommunicationFiles()}
+          {renderCertificateFiles()}
         </CardContent>
       ) : (
         <CardContent className="space-y-6">
@@ -860,27 +797,6 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
                   <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
                 </div>
                 <div>
-                  <Label>Financial years</Label>
-                  <Input
-                    placeholder="2024-25"
-                    value={financialYear}
-                    onChange={(event) => setFinancialYear(event.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label>Appointment type</Label>
-                  <Select value={appointmentType} onValueChange={(value) => setAppointmentType(value as AppointmentType)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select appointment type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="both">Statutory Auditors / Tax Auditor</SelectItem>
-                      <SelectItem value="statutory">Statutory Auditors</SelectItem>
-                      <SelectItem value="tax">Tax Auditor</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
                   <Label>Entity name</Label>
                   <Input
                     placeholder="M/s Entity Name"
@@ -888,24 +804,13 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
                     onChange={(event) => setEntityName(event.target.value)}
                   />
                 </div>
-                <div>
-                  <Label>CIN</Label>
-                  <Input placeholder="CIN" value={cin} onChange={(event) => setCin(event.target.value)} />
-                </div>
-                <div>
-                  <Label>PAN</Label>
-                  <Input
-                    placeholder="PAN"
-                    value={pan}
-                    onChange={(event) => setPan(event.target.value.toUpperCase())}
-                  />
-                </div>
-                <div>
-                  <Label>Firm registration number</Label>
-                  <Input
-                    placeholder="Firm Regn No"
-                    value={firmRegNo}
-                    onChange={(event) => setFirmRegNo(event.target.value)}
+                <div className="md:col-span-2">
+                  <Label>Entity address</Label>
+                  <Textarea
+                    rows={2}
+                    placeholder="Registered address"
+                    value={entityAddress}
+                    onChange={(event) => setEntityAddress(event.target.value)}
                   />
                 </div>
                 <div>
@@ -914,6 +819,14 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
                     placeholder="Firm Name"
                     value={firmName}
                     onChange={(event) => setFirmName(event.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label>Firm registration number</Label>
+                  <Input
+                    placeholder="Firm Regn No"
+                    value={firmRegNo}
+                    onChange={(event) => setFirmRegNo(event.target.value)}
                   />
                 </div>
                 <div>
@@ -948,8 +861,8 @@ export function PreviousAuditorCommunication({ onOpenChange }: PreviousAuditorCo
               value={editorHtml}
               onChange={handleEditorChange}
               normalizeDom={normalizeMissingHighlights}
-              placeholder="Edit the communication here. All fields are editable."
-              className={prefillOpen ? 'prev-auditor-editor' : 'prev-auditor-editor prefill-collapsed'}
+              placeholder="Edit the certificate here. All fields are editable."
+              className={prefillOpen ? 'eligibility-editor' : 'eligibility-editor prefill-collapsed'}
             />
 
             <div className="flex flex-wrap gap-2">
