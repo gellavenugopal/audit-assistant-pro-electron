@@ -2185,38 +2185,11 @@ export default function FinancialReview() {
       }
     }
 
-    // Load Actual TB from localStorage
-    const savedActual = localStorage.getItem(`tb_actual_${currentEngagement.id}`);
+    // Note: Disabled localStorage loading for Actual TB and Classified TB
+    // Database is now the only source of truth to prevent stale cache issues after deletion
     let hydrated = false;
     let cachedActualCount = 0;
-    if (savedActual) {
-      try {
-        const parsedActual = JSON.parse(savedActual);
-        if (Array.isArray(parsedActual) && parsedActual.length > 0) {
-          cachedActualCount = parsedActual.length;
-          setActualData(enrichRowsWithStockDetails(parsedActual));
-          hydrated = true;
-        }
-      } catch (e) {
-        console.error('Failed to load actual TB:', e);
-      }
-    }
-
-    // Load Classified TB from localStorage
-    const savedClassified = localStorage.getItem(`tb_classified_${currentEngagement.id}`);
     let cachedClassifiedCount = 0;
-    if (savedClassified) {
-      try {
-        const parsedClassified = JSON.parse(savedClassified);
-        if (Array.isArray(parsedClassified) && parsedClassified.length > 0) {
-          cachedClassifiedCount = parsedClassified.length;
-          setCurrentData(enrichRowsWithStockDetails(parsedClassified));
-          hydrated = true;
-        }
-      } catch (e) {
-        console.error('Failed to load classified TB:', e);
-      }
-    }
 
     // Prefer database when available to avoid stale local cache
     if (trialBalanceDB.lines && trialBalanceDB.lines.length > 0) {
@@ -2272,17 +2245,19 @@ export default function FinancialReview() {
     }
   }, [currentEngagement?.id, entityType, entityName, businessType]);
 
-  // Persist Actual TB per engagement
-  useEffect(() => {
-    if (!currentEngagement?.id) return;
-    localStorage.setItem(`tb_actual_${currentEngagement.id}`, JSON.stringify(actualData));
-  }, [actualData, currentEngagement?.id]);
+  // Note: Disabled localStorage persistence for Actual TB
+  // Reason: Database is the source of truth. localStorage caching caused stale data to reload after deletion.
+  // useEffect(() => {
+  //   if (!currentEngagement?.id) return;
+  //   localStorage.setItem(`tb_actual_${currentEngagement.id}`, JSON.stringify(actualData));
+  // }, [actualData, currentEngagement?.id]);
 
-  // Persist Classified TB per engagement
-  useEffect(() => {
-    if (!currentEngagement?.id) return;
-    localStorage.setItem(`tb_classified_${currentEngagement.id}`, JSON.stringify(currentData));
-  }, [currentData, currentEngagement?.id]);
+  // Note: Disabled localStorage persistence for Classified TB
+  // Reason: Database is the source of truth. localStorage caching caused stale data to reload after deletion.
+  // useEffect(() => {
+  //   if (!currentEngagement?.id) return;
+  //   localStorage.setItem(`tb_classified_${currentEngagement.id}`, JSON.stringify(currentData));
+  // }, [currentData, currentEngagement?.id]);
   
   // Save stock data to localStorage when it changes
   useEffect(() => {
