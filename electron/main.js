@@ -138,6 +138,24 @@ function setupGstzenHandlers() {
             body: JSON.stringify(downloadRequest),
         });
     });
+
+    // GSTIN Validation
+    ipcMain.handle('gstzen:validateGstins', async (event, { gstinList, token }) => {
+        return await gstzenApiCall('/api/multiple-gstin-validator/', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ gstin_list: gstinList }),
+        });
+    });
+
+    // Create GSTIN
+    ipcMain.handle('gstzen:createGstin', async (event, { gstinData, token }) => {
+        return await gstzenApiCall('/api/create-gstin/', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(gstinData),
+        });
+    });
 }
 
 function createWindow() {
