@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+﻿import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 
 
 
@@ -195,6 +195,8 @@ import {
 
 
 import { applyClassificationRules, ClassificationRule, RuleScope } from '@/utils/classificationRules';
+
+import { isEquityItem, getEquityOrderIndex } from '@/data/classificationOptions';
 
 
 
@@ -5624,33 +5626,43 @@ export default function FinancialReview() {
 
   const isCompanyEntityType = useMemo(() => {
 
-
-
     const normalized = (entityType || '').toLowerCase();
 
+    const hasCompany = normalized.includes('company');
+    const hasLimited = normalized.includes('limited') || normalized.includes('ltd');
+    const hasPrivate = normalized.includes('private') || normalized.includes('pvt');
+    const hasPublic = normalized.includes('public');
+    const isOpc = normalized.includes('opc');
+    const isOnePerson = normalized.includes('one person company');
 
+    if (isOpc || isOnePerson) return true;
+    if ((hasLimited || hasCompany) && (hasPrivate || hasPublic || normalized.includes('pvt'))) {
+      return hasCompany || normalized.includes('pvt');
+    }
 
-    return normalized.includes('private limited') ||
-
-
-
-      normalized.includes('public limited') ||
-
-
-
-      normalized.includes('one person company') ||
-
-
-
-      normalized.includes('opc');
-
-
+    return false;
 
   }, [entityType]);
 
 
 
+  const isIndividualEntityType = useMemo(() => {
 
+    const normalized = (entityType || '').toLowerCase();
+
+    return normalized.includes('individual') ||
+
+      normalized.includes('sole proprietorship') ||
+
+      normalized.includes('sole proprietor') ||
+
+      normalized.includes('proprietorship') ||
+
+      normalized.includes('hindu undivided') ||
+
+      normalized.includes('huf');
+
+  }, [entityType]);
 
 
 
@@ -5762,7 +5774,7 @@ export default function FinancialReview() {
 
 
 
-      .replace(/[∩┐╜∩┐╜`]/g, "'")
+      .replace(/[Γê⌐ΓöÉΓò£Γê⌐ΓöÉΓò£`]/g, "'")
 
 
 
@@ -6482,7 +6494,7 @@ export default function FinancialReview() {
 
 
 
-    return `${mapping} ┬╖ ${confidence}`;
+    return `${mapping} · ${confidence}`;
 
 
 
@@ -9126,7 +9138,7 @@ export default function FinancialReview() {
 
 
 
-  }, [currentEngagement?.id, trialBalanceDB.lines, classificationRules, deriveH1FromRevenueAndBalance]);
+  }, [currentEngagement?.id, classificationRules, deriveH1FromRevenueAndBalance]);
 
 
 
@@ -10022,7 +10034,11 @@ export default function FinancialReview() {
 
 
 
-    return applyManualInventoryRows(currentData);
+    const data = applyManualInventoryRows(currentData);
+
+    console.log('📝 noteSourceData rendered - currentData.length:', currentData.length, '| data.length:', data.length);
+
+    return data;
 
 
 
@@ -10104,47 +10120,37 @@ export default function FinancialReview() {
 
   const bsNoteH2Order = useMemo(() => {
 
-
-
-    const order: string[] = [];
-
-
-
+    const equityH2: string[] = [];
+    const liabilityH2: string[] = [];
+    const assetH2: string[] = [];
     const seen = new Set<string>();
-
-
 
     filteredBsplHeads.forEach((row) => {
 
-
-
       if (!row?.H2) return;
-
-
-
-      if (row.H1 !== 'Asset' && row.H1 !== 'Liability') return;
-
-
 
       if (seen.has(row.H2)) return;
 
-
-
       seen.add(row.H2);
 
+      if (row.H1 === 'Liability') {
+        if (isEquityItem(row.H2)) {
+          equityH2.push(row.H2);
+        } else {
+          liabilityH2.push(row.H2);
+        }
+        return;
+      }
 
-
-      order.push(row.H2);
-
-
+      if (row.H1 === 'Asset') {
+        assetH2.push(row.H2);
+      }
 
     });
 
+    const sortedEquity = [...equityH2].sort((a, b) => getEquityOrderIndex(a) - getEquityOrderIndex(b));
 
-
-    return order;
-
-
+    return [...sortedEquity, ...liabilityH2, ...assetH2];
 
   }, [filteredBsplHeads]);
 
@@ -10974,7 +10980,7 @@ export default function FinancialReview() {
 
 
 
-      'Owners∩┐╜ Capital Account',
+      'OwnersΓê⌐ΓöÉΓò£ Capital Account',
 
 
 
@@ -10982,7 +10988,7 @@ export default function FinancialReview() {
 
 
 
-      'Partners∩┐╜ Capital Account',
+      'PartnersΓê⌐ΓöÉΓò£ Capital Account',
 
 
 
@@ -11934,7 +11940,7 @@ export default function FinancialReview() {
 
 
 
-    const liabilityH2List = noteEditMode
+    let liabilityH2List = noteEditMode
 
 
 
@@ -11955,6 +11961,20 @@ export default function FinancialReview() {
 
 
       : (assets?.rows.map((row) => row.H2) || []);
+
+
+
+    // Sort by bsNoteH2Order - equity items come first (already sorted in bsNoteH2Order)
+
+    liabilityH2List = liabilityH2List.sort((a, b) => {
+
+      const aIdx = bsNoteH2Order.indexOf(a);
+
+      const bIdx = bsNoteH2Order.indexOf(b);
+
+      return (aIdx >= 0 ? aIdx : 999) - (bIdx >= 0 ? bIdx : 999);
+
+    });
 
 
 
@@ -12350,7 +12370,7 @@ export default function FinancialReview() {
 
 
 
-  }, [faceSummaryBS, formatNumber, mergedBsplHeads, noteEditMode, faceH2OptionsBS, faceNoteMetaMapBS]);
+  }, [faceSummaryBS, formatNumber, mergedBsplHeads, noteEditMode, faceH2OptionsBS, faceNoteMetaMapBS, bsNoteH2Order]);
 
 
 
@@ -14468,191 +14488,95 @@ export default function FinancialReview() {
 
   const autoFlatRows = useMemo<FlatNoteRow[]>(() => {
 
-
-
     if (!activeNote) return [];
-
-
 
     const flattened: FlatNoteRow[] = [];
 
-
-
     activeNote.rows.forEach((row) => {
-
-
 
       if (row.type === 'parent' && row.children && row.children.length > 0) {
 
-
-
         flattened.push({
-
-
 
           id: row.id,
 
-
-
           label: row.label,
-
-
 
           amount: row.amount,
 
-
-
           formattedAmount: row.formattedAmount,
-
-
 
           type: row.type,
 
-
-
         });
-
-
 
         row.children.forEach((child) => {
 
-
-
           flattened.push({
-
-
 
             id: child.id,
 
-
-
             label: child.label,
-
-
 
             amount: child.amount,
 
-
-
             formattedAmount: child.formattedAmount,
-
-
 
             type: child.type,
 
-
-
             parentLabel: row.label,
-
-
 
           });
 
-
-
         });
-
-
 
       } else {
 
-
-
         flattened.push({
-
-
 
           id: row.id,
 
-
-
           label: row.label,
-
-
 
           amount: row.amount,
 
-
-
           formattedAmount: row.formattedAmount,
-
-
 
           type: row.type,
 
-
-
         });
-
-
 
       }
 
-
-
     });
 
-
-
     return flattened;
-
-
 
   }, [activeNote]);
 
 
-
-
-
-
-
   const noteLayout = useMemo(() => {
-
-
 
     if (!noteKey) return undefined;
 
-
-
     return noteLayouts[noteKey];
-
-
 
   }, [noteKey, noteLayouts]);
 
 
-
-
-
-
-
   const resolveRowLabel = useCallback((rowId: string) => {
-
-
 
     const layout = noteLayout;
 
-
-
     if (!layout) return '';
-
-
 
     if (layout.manualRows[rowId]) return layout.manualRows[rowId].label;
 
-
-
     if (layout.overrides[rowId]?.label) return layout.overrides[rowId].label as string;
-
-
 
     const autoRow = autoFlatRows.find((row) => row.id === rowId);
 
-
-
     return autoRow?.label || '';
-
-
 
   }, [noteLayout, autoFlatRows]);
 
@@ -15122,6 +15046,45 @@ export default function FinancialReview() {
 
 
 
+  const normalizeNoteLabel = (value?: string): string => {
+
+    return (value || '').replace(/[’‘]/g, "'").toLowerCase().trim();
+
+  };
+
+
+  const profitRowLabel = 'Add: Profit/(loss) for the year';
+
+
+  const profitRowConfig = useMemo(() => {
+
+    if (!activeNote || noteStatementType !== 'BS' || profitForYearAmount === 0) return null;
+
+    const normalizedH2 = normalizeNoteLabel(activeNote.header);
+
+    if (isCompanyEntityType && normalizedH2 === 'reserves and surplus') {
+
+      return { targetH3: 'surplus in statement of profit and loss', id: 'manual:add-profit-reserves' };
+
+    }
+
+    if (isIndividualEntityType && normalizedH2 === 'owners capital account') {
+
+      return { targetH3: 'owners capital account', id: 'manual:add-profit-owners' };
+
+    }
+
+    if (isPartnershipEntityType && normalizedH2 === 'partners capital account') {
+
+      return { targetH3: 'partners capital account', id: 'manual:add-profit-partners' };
+
+    }
+
+    return null;
+
+  }, [activeNote, noteStatementType, profitForYearAmount, isCompanyEntityType, isIndividualEntityType, isPartnershipEntityType]);
+
+
   const displayNoteRows = useMemo<DisplayNoteRow[]>(() => {
 
 
@@ -15130,7 +15093,7 @@ export default function FinancialReview() {
 
     const normalizeText = (value?: string): string => {
 
-      return (value || '').replace(/[’‘]/g, "'").toLowerCase().trim();
+      return normalizeNoteLabel(value);
 
     };
 
@@ -15145,36 +15108,6 @@ export default function FinancialReview() {
       normalizedEntityType.includes('hindu undivided') ||
 
       normalizedEntityType.includes('huf');
-
-    const profitRowConfig = (() => {
-
-      if (noteStatementType !== 'BS') return null;
-
-      if (profitForYearAmount === 0) return null;
-
-      const normalizedH2 = normalizeText(activeNote.H2);
-
-      if (isCompanyEntityType && normalizedH2 === 'reserves and surplus') {
-
-        return { targetH3: 'surplus in statement of profit and loss', id: 'manual:add-profit-reserves' };
-
-      }
-
-      if (isIndividualEntityTypeLocal && normalizedH2 === "owners' capital account") {
-
-        return { targetH3: "owners' capital account", id: 'manual:add-profit-owners' };
-
-      }
-
-      if (isPartnershipEntityType && normalizedH2 === "partners' capital account") {
-
-        return { targetH3: "partners' capital account", id: 'manual:add-profit-partners' };
-
-      }
-
-      return null;
-
-    })();
 
     const profitRowLabel = 'Add: Profit/(loss) for the year';
 
@@ -20169,6 +20102,8 @@ export default function FinancialReview() {
 
 
       toast({ title: 'Deleted', description: `${selectedKeys.size} row(s) permanently removed from this engagement.` });
+
+      console.log('🗑️ DELETE COMPLETE - currentData now has', currentData.length, 'rows. Removed', selectedKeys.size, 'ledgers.');
 
 
 

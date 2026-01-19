@@ -502,8 +502,8 @@ export function applyClassificationRules(
     return addAutoNote({
       ...row,
       'H1': 'Liability',
-      'H2': 'OwnersΓÇÖ Capital Account',
-      'H3': 'OwnersΓÇÖ Capital Account',
+      'H2': 'Owners Capital Account',
+      'H3': 'Owners Capital Account',
     }, 'Capital Account - Owner (Entity Override)');
   }
 
@@ -661,8 +661,8 @@ export function applyClassificationRules(
       return addAutoNote({
         ...row,
         'H1': 'Liability',
-        'H2': "Owners' Capital Account",
-        'H3': "Owners' Capital Account",
+        'H2': 'Owners Capital Account',
+        'H3': 'Owners Capital Account',
       }, 'Capital Account - Owner (Entity Override)');
     }
     const isCapitalAccount = normalize(row['H1']) === 'liability' && matchesGroup(group, 'capital account');
@@ -688,15 +688,15 @@ export function applyClassificationRules(
         return addAutoNote({
           ...row,
           'H1': 'Liability',
-          'H2': "Partners' Capital Account",
-          'H3': "Partners' Capital Account",
+          'H2': 'Partners Capital Account',
+          'H3': 'Partners Capital Account',
         }, 'Capital Account - Partnership');
       } else {
         return addAutoNote({
           ...row,
           'H1': 'Liability',
-          'H2': 'OwnersΓÇÖ Capital Account',
-          'H3': 'OwnersΓÇÖ Capital Account',
+          'H2': 'Owners Capital Account',
+          'H3': 'Owners Capital Account',
         }, 'Capital Account - Owner');
       }
     }
