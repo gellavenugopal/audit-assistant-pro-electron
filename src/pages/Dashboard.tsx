@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { RiskSummary } from '@/components/dashboard/RiskSummary';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
