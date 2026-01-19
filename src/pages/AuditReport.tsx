@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { useEngagement } from '@/contexts/EngagementContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { FileText, ClipboardCheck, Settings, Download, AlertTriangle } from 'lucide-react';
 import { AuditReportSetup } from '@/components/audit-report/AuditReportSetup';
 import { CARONavigator } from '@/components/audit-report/CARONavigator';
@@ -12,11 +14,19 @@ import { IFCReportEditor } from '@/components/audit-report/IFCReportEditor';
 import { ReportExport } from '@/components/audit-report/ReportExport';
 import { useAuditReportSetup } from '@/hooks/useAuditReportSetup';
 import { formatFinancialYearAsReportDate } from '@/utils/dateFormatting';
+import { UnlockDialog } from '@/components/audit/UnlockDialog';
+import { toast } from 'sonner';
 
 export default function AuditReport() {
   const { currentEngagement } = useEngagement();
   const [activeTab, setActiveTab] = useState('setup');
   const { setup, loading, saveSetup, refetch } = useAuditReportSetup(currentEngagement?.id);
+  const { user, role } = useAuth();
+  const [finalizing, setFinalizing] = useState(false);
+  const [unlockDialogOpen, setUnlockDialogOpen] = useState(false);
+  const canUnlock = role === 'partner' || role === 'manager';
+  const headerChipClass = 'bg-muted/60 border-muted-foreground/30 text-foreground';
+  const buttonChipClass = 'h-7 rounded-full px-3 text-xs font-semibold border border-muted-foreground/30 bg-muted/60 text-foreground hover:bg-muted/70';
 
   if (!currentEngagement) {
     return (
@@ -27,21 +37,76 @@ export default function AuditReport() {
   }
 
   const getStatusBadge = () => {
-    if (!setup) return <Badge variant="outline">Not Started</Badge>;
+    if (!setup) return <Badge variant="outline" className={headerChipClass}>Not Started</Badge>;
     switch (setup.report_status) {
       case 'draft':
-        return <Badge variant="secondary">Draft</Badge>;
+        return <Badge variant="outline" className={headerChipClass}>Draft</Badge>;
       case 'in_progress':
-        return <Badge variant="default">In Progress</Badge>;
+        return <Badge variant="outline" className={headerChipClass}>In Progress</Badge>;
       case 'review':
-        return <Badge className="bg-warning text-warning-foreground">Under Review</Badge>;
+        return <Badge variant="outline" className={headerChipClass}>Under Review</Badge>;
       case 'finalized':
-        return <Badge className="bg-success text-success-foreground">Finalized</Badge>;
+        return <Badge variant="outline" className={headerChipClass}>Finalized</Badge>;
       case 'locked':
-        return <Badge variant="destructive">Locked</Badge>;
+        return <Badge variant="outline" className={headerChipClass}>Locked</Badge>;
       default:
-        return <Badge variant="outline">Unknown</Badge>;
+        return <Badge variant="outline" className={headerChipClass}>Unknown</Badge>;
     }
+  };
+
+  const getCaroStatus = () => {
+    if (!setup?.company_type) return null;
+    if (setup.is_standalone === false) return 'cfs_only_xxi';
+    if (['banking', 'insurance', 'section_8', 'opc', 'small_company'].includes(setup.company_type)) {
+      return 'not_applicable';
+    }
+    if (setup.company_type === 'public_company') return 'applicable';
+    if (setup.company_type === 'private_company' && !setup.is_private_company) {
+      return 'pending';
+    }
+    if (setup.is_private_company) {
+      const paidUp = setup.paid_up_capital ?? 0;
+      const reserves = setup.reserves_surplus ?? 0;
+      const borrowings = setup.borrowings_amount ?? 0;
+      const totalCapital = paidUp + reserves;
+      if (paidUp <= 10000000 && reserves <= 10000000 && borrowings <= 10000000 && totalCapital <= 20000000) {
+        return 'not_applicable';
+      }
+    }
+    return setup.caro_applicable_status || 'applicable';
+  };
+
+  const caroStatus = getCaroStatus();
+
+  const finalizeReport = async () => {
+    if (!setup || !setup.setup_completed) return;
+    setFinalizing(true);
+    await saveSetup({
+      report_status: 'finalized',
+      locked: true,
+      locked_at: new Date().toISOString(),
+      locked_by: user?.id || null,
+    });
+    setFinalizing(false);
+  };
+
+  const unlockReport = async (reason: string) => {
+    if (!setup) return;
+    if (!canUnlock) {
+      toast.error('Only Partner/Manager can unlock');
+      return;
+    }
+    await saveSetup({
+      locked: false,
+      report_status: 'in_progress',
+      unlock_reason: reason,
+      unlocked_at: new Date().toISOString(),
+      unlocked_by: user?.id || null,
+      locked_at: null,
+      locked_by: null,
+    });
+    await refetch();
+    toast.success('Report unlocked');
   };
 
   return (
@@ -56,17 +121,38 @@ export default function AuditReport() {
         </div>
         <div className="flex items-center gap-3">
           {getStatusBadge()}
-          {setup?.caro_applicable_status === 'applicable' && (
-            <Badge variant="outline" className="gap-1">
+          {caroStatus === 'applicable' && (
+            <Badge variant="outline" className={`gap-1 ${headerChipClass}`}>
               <ClipboardCheck className="h-3 w-3" />
               CARO Applicable
             </Badge>
           )}
-          {setup?.caro_applicable_status === 'cfs_only_xxi' && (
-            <Badge variant="outline" className="gap-1">
+          {caroStatus === 'cfs_only_xxi' && (
+            <Badge variant="outline" className={`gap-1 ${headerChipClass}`}>
               <AlertTriangle className="h-3 w-3" />
               CFS - Clause 3(xxi) Only
             </Badge>
+          )}
+          {setup && setup.setup_completed && (
+            setup.locked ? (
+              <Button
+                variant="outline"
+                onClick={() => setUnlockDialogOpen(true)}
+                disabled={!canUnlock}
+                className={buttonChipClass}
+              >
+                Unlock / Undo Finalize
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={finalizeReport}
+                disabled={finalizing}
+                className={buttonChipClass}
+              >
+                {finalizing ? 'Finalizing...' : 'Finalize Report'}
+              </Button>
+            )
           )}
         </div>
       </div>
@@ -116,6 +202,7 @@ export default function AuditReport() {
               engagementId={currentEngagement.id}
               clientName={currentEngagement.client_name}
               financialYear={formatFinancialYearAsReportDate(currentEngagement.financial_year)}
+              onSetupRefresh={refetch}
             />
           ) : (
             <Card>
@@ -177,6 +264,13 @@ export default function AuditReport() {
           )}
         </TabsContent>
       </Tabs>
+
+      <UnlockDialog
+        open={unlockDialogOpen}
+        onOpenChange={setUnlockDialogOpen}
+        itemName="Audit Report"
+        onConfirm={unlockReport}
+      />
     </div>
   );
 }

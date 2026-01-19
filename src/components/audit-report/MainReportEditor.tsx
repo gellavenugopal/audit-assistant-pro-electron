@@ -10,6 +10,9 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { Save, Eye, FileText, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -26,11 +29,19 @@ import {
 } from '@/hooks/useAuditReportContent';
 import { AuditReportGenerator } from '@/services/auditReportGenerator';
 import { STATUS_OPTIONS, type StatusValue } from '@/data/auditReportStandardWordings';
+import { useAuditReportDocument } from '@/hooks/useAuditReportDocument';
+import { REPORT_PREVIEW_STYLES } from '@/utils/auditReportPreviewStyles';
+import { buildMainReportPreviewHtml } from '@/utils/auditReportPreviewHtml';
+import {
+  MAIN_REPORT_PREVIEW_SECTION,
+  MAIN_REPORT_PREVIEW_TITLE,
+} from '@/data/auditReportPreviewSections';
 
 interface MainReportEditorProps {
   engagementId: string;
   clientName: string;
   financialYear: string;
+  onSetupRefresh?: () => void;
 }
 
 const statusItems = STATUS_OPTIONS;
@@ -65,9 +76,11 @@ function StatusSelect({
   );
 }
 
-export function MainReportEditor({ engagementId, clientName, financialYear }: MainReportEditorProps) {
+export function MainReportEditor({ engagementId, clientName, financialYear, onSetupRefresh }: MainReportEditorProps) {
   const [activeTab, setActiveTab] = useState('configuration');
   const [previewMode, setPreviewMode] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [previewSeeded, setPreviewSeeded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [ifcManualOverride, setIfcManualOverride] = useState(false);
   const optionalTabLabel = KAM_ENABLED ? 'KAM/EoM/Other Matter' : 'EoM/Other Matter';
@@ -80,31 +93,27 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   const { kams } = useKeyAuditMatters(engagementId);
   const { firmSettings } = useFirmSettings();
   const { getPartnerById } = usePartners();
+  const {
+    document: previewDocument,
+    saving: previewSaving,
+    saveDocument: savePreviewDocument,
+  } = useAuditReportDocument(engagementId, MAIN_REPORT_PREVIEW_SECTION, MAIN_REPORT_PREVIEW_TITLE);
 
   // Get signing partner details from partners table
   const signingPartner = setup?.signing_partner_id ? getPartnerById(setup.signing_partner_id) : null;
   const isPublicCompanyType = setup?.company_type === 'public_company';
-
-  const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
-  const [editorBasis, setEditorBasis] = useState<string>('');
-
-  // Auto-calculate IFC applicability
-  useEffect(() => {
-    if (!setup || ifcManualOverride) return;
-
-    // IFC Applicability: If ANY of these criteria are checked, IFC is applicable
-    const computedApplicability =
-      Boolean(setup.is_public_company) ||
-      Boolean(setup.is_private_exceeding_threshold) ||
-      Boolean(setup.is_private_non_exceeding_threshold) ||
-      Boolean(setup.is_listed_company) ||
-      Boolean(setup.is_subsidiary) ||
-      Boolean(setup.is_holding_company);
-
-    // Only update if the computed value differs from current value
-    if (setup.ifc_applicable !== computedApplicability) {
-      saveSetupPatch({ ifc_applicable: computedApplicability });
-    }
+  const hasProfitOrLoss = Boolean(setup?.company_profit_or_loss);
+  const configDisabled = !hasProfitOrLoss;
+  const computedIfcApplicability = useMemo(() => {
+    if (!setup) return null;
+    return Boolean(
+      setup.is_public_company ||
+        setup.is_private_exceeding_threshold ||
+        setup.is_private_non_exceeding_threshold ||
+        setup.is_listed_company ||
+        setup.is_subsidiary ||
+        setup.is_holding_company
+    );
   }, [
     setup?.is_public_company,
     setup?.is_private_exceeding_threshold,
@@ -112,11 +121,27 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     setup?.is_listed_company,
     setup?.is_subsidiary,
     setup?.is_holding_company,
-    ifcManualOverride,
   ]);
+  const hasStoredIfcOverride =
+    setup?.ifc_applicable != null &&
+    computedIfcApplicability != null &&
+    setup.ifc_applicable !== computedIfcApplicability;
+  const ifcOverrideActive = ifcManualOverride || hasStoredIfcOverride;
+
+  const [draft, setDraft] = useState<AuditReportMainContent | null>(null);
+  const [editorBasis, setEditorBasis] = useState<string>('');
+
+  // Auto-calculate IFC applicability unless user has overridden it
+  useEffect(() => {
+    if (!setup || computedIfcApplicability == null || ifcOverrideActive) return;
+
+    if (setup.ifc_applicable !== computedIfcApplicability) {
+      saveSetupPatch({ ifc_applicable: computedIfcApplicability });
+    }
+  }, [setup?.ifc_applicable, computedIfcApplicability, ifcOverrideActive]);
 
   useEffect(() => {
-    if (!setup || !isPublicCompanyType) return;
+    if (!setup || !isPublicCompanyType || ifcOverrideActive) return;
 
     const patch: Record<string, any> = {};
 
@@ -128,7 +153,6 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
 
     if (Object.keys(patch).length === 0) return;
 
-    setIfcManualOverride(false);
     saveSetupPatch(patch);
   }, [
     setup?.company_type,
@@ -138,7 +162,14 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     setup?.is_private_exceeding_threshold,
     setup?.is_private_non_exceeding_threshold,
     isPublicCompanyType,
+    ifcOverrideActive,
   ]);
+
+  useEffect(() => {
+    if (!setup || isPublicCompanyType) return;
+    if (!setup.is_public_company) return;
+    saveSetupPatch({ is_public_company: false });
+  }, [setup?.company_type, setup?.is_public_company, isPublicCompanyType]);
 
   useEffect(() => {
     if (content?.id) setDraft(content);
@@ -184,6 +215,18 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   }, [setup, draft, kams, clientName, financialYear, firmSettings, signingPartner]);
 
   const previewBlocks = useMemo(() => generator?.generateBlocks() ?? [], [generator]);
+  const generatedPreviewHtml = useMemo(() => buildMainReportPreviewHtml(previewBlocks), [previewBlocks]);
+
+  useEffect(() => {
+    if (!previewMode) {
+      setPreviewSeeded(false);
+      return;
+    }
+    if (previewSeeded) return;
+    const saved = previewDocument?.content_html?.trim();
+    setPreviewHtml(saved || generatedPreviewHtml);
+    setPreviewSeeded(true);
+  }, [previewMode, previewSeeded, previewDocument?.content_html, generatedPreviewHtml]);
 
   const updateDraft = (patch: Partial<AuditReportMainContent>) => {
     setDraft((prev) => (prev ? ({ ...prev, ...patch } as AuditReportMainContent) : prev));
@@ -215,6 +258,11 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
   };
 
   const openPreview = () => {
+    if (!setup?.company_profit_or_loss) {
+      toast.error('Select Profit or Loss in Config before previewing the report.');
+      setActiveTab('configuration');
+      return;
+    }
     if (!ensureBasisForModifiedOpinion()) return;
     setPreviewMode(true);
   };
@@ -228,11 +276,34 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     if (saved) toast.success('Main report saved');
   };
 
+  const savePreview = async () => {
+    const html = previewHtml.trim();
+    if (!html) {
+      toast.error('Preview is empty.');
+      return;
+    }
+    const saved = await savePreviewDocument(html, MAIN_REPORT_PREVIEW_TITLE);
+    if (saved) toast.success('Preview saved');
+  };
+
+  const resetPreview = () => {
+    setPreviewHtml(generatedPreviewHtml);
+  };
+
   const saveSetupPatch = async (patch: Record<string, any>) => {
     setSaving(true);
     const saved = await saveSetup(patch);
     setSaving(false);
-    if (saved) toast.success('Configuration saved');
+    if (saved) {
+      toast.success('Configuration saved');
+      if (
+        onSetupRefresh &&
+        (Object.prototype.hasOwnProperty.call(patch, 'ifc_applicable') ||
+          Object.prototype.hasOwnProperty.call(patch, 'company_profit_or_loss'))
+      ) {
+        onSetupRefresh();
+      }
+    }
   };
 
   // Helper function to update IFC criteria checkboxes and reset manual override
@@ -269,7 +340,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
         <CardContent className="py-10 text-center">
           <div className="inline-flex items-center gap-2 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading report editor…
+            Loading report editor...
           </div>
         </CardContent>
       </Card>
@@ -280,75 +351,30 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
     return (
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle>Report Preview</CardTitle>
               <CardDescription>Generated from current configuration and saved content</CardDescription>
             </div>
-            <Button variant="outline" onClick={() => setPreviewMode(false)}>
-              Back to Edit
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setPreviewMode(false)}>
+                Back to Edit
+              </Button>
+              <Button variant="outline" onClick={resetPreview}>
+                Reset to Template
+              </Button>
+              <Button onClick={savePreview} disabled={previewSaving}>
+                {previewSaving ? 'Saving...' : 'Save Preview'}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-[65vh]">
-            <div className="mx-auto max-w-3xl space-y-4 p-4">
-              {previewBlocks.map((b, idx) => {
-                if (b.kind === 'title') {
-                  return (
-                    <div key={idx} className="text-center">
-                      <h2 className="text-lg font-semibold">{b.text}</h2>
-                    </div>
-                  );
-                }
-                if (b.kind === 'subtitle') {
-                  return (
-                    <div key={idx} className="text-center text-sm text-muted-foreground">
-                      {b.text}
-                    </div>
-                  );
-                }
-                if (b.kind === 'heading') {
-                  return (
-                    <div key={idx} className="pt-2">
-                      <h3 className="text-sm font-semibold">{b.text}</h3>
-                      <Separator className="mt-2" />
-                    </div>
-                  );
-                }
-                if (b.kind === 'subheading') {
-                  return (
-                    <h4 key={idx} className="text-sm font-semibold pt-2">
-                      {b.text}
-                    </h4>
-                  );
-                }
-                if (b.kind === 'paragraph') {
-                  const highlight = (b as any).highlight === 'yellow';
-                  return (
-                    <p
-                      key={idx}
-                      className={`text-sm leading-relaxed whitespace-pre-wrap text-justify ${
-                        highlight ? 'bg-yellow-100 p-2 rounded' : ''
-                      }`}
-                    >
-                      {b.text}
-                    </p>
-                  );
-                }
-                if (b.kind === 'signature') {
-                  return (
-                    <div key={idx} className="pt-4 text-sm">
-                      <div className="text-right whitespace-pre-wrap">
-                        {b.lines.join('\n')}
-                      </div>
-                    </div>
-                  );
-                }
-                return null;
-              })}
-            </div>
-          </ScrollArea>
+          <style>{REPORT_PREVIEW_STYLES}</style>
+          <RichTextEditor value={previewHtml} onChange={setPreviewHtml} className="report-preview" />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Edits in this preview are used for exports.
+          </p>
         </CardContent>
       </Card>
     );
@@ -365,7 +391,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
             </CardTitle>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={openPreview} className="gap-2">
+            <Button variant="outline" onClick={openPreview} className="gap-2" disabled={!hasProfitOrLoss}>
               <Eye className="h-4 w-4" />
               Preview
             </Button>
@@ -377,7 +403,17 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
         </div>
       </CardHeader>
       <CardContent>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => {
+            if (!hasProfitOrLoss && value !== 'configuration') {
+              toast.error('Select Profit or Loss in Config before continuing.');
+              return;
+            }
+            setActiveTab(value);
+          }}
+          className="space-y-4"
+        >
           <TabsList className="grid w-full grid-cols-4 lg:grid-cols-7">
             <TabsTrigger value="configuration">Config</TabsTrigger>
             <TabsTrigger value="opinion">Opinion</TabsTrigger>
@@ -399,125 +435,171 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     <span className="font-semibold">Instruction:</span> Select all cases that are applicable to the entity for the relevant financial year.
                   </p>
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_public_company)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_public_company: !!v })}
-                    />
-                    <Label className="font-normal">Public Company</Label>
-                  </div>
+                {!hasProfitOrLoss && (
+                  <Alert>
+                    <AlertDescription>
+                      Select Profit or Loss to enable the rest of the configuration.
+                    </AlertDescription>
+                  </Alert>
+                )}
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_private_exceeding_threshold)}
-                      disabled={isPublicCompanyType}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_private_exceeding_threshold: !!v })}
-                    />
-                    <Label className={`font-normal ${isPublicCompanyType ? 'text-muted-foreground' : ''}`}>
-                      Private limited company with Previous year turnover is  Rs 50 Crores or more
-                    </Label>
-                  </div>
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Company Result for the Year</Label>
+                  <ToggleGroup
+                    type="single"
+                    value={setup.company_profit_or_loss || ''}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      saveSetupPatch({ company_profit_or_loss: value });
+                    }}
+                    className="justify-start"
+                  >
+                    <ToggleGroupItem value="profit" aria-label="Profit">
+                      Profit
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="loss" aria-label="Loss">
+                      Loss
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_private_non_exceeding_threshold)}
-                      disabled={isPublicCompanyType}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_private_non_exceeding_threshold: !!v })}
-                    />
-                    <Label className={`font-normal ${isPublicCompanyType ? 'text-muted-foreground' : ''}`}>
-                      Private limited company with Current year during at any point of time exceeding Rs 25Crores
-                    </Label>
-                  </div>
+                <Separator />
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.cash_flow_required)}
-                      onCheckedChange={(v) => saveSetupPatch({ cash_flow_required: !!v })}
-                    />
-                    <Label className="font-normal">Cash Flow Statement included</Label>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="font-normal">Company Result for the Year</Label>
-                    <RadioGroup
-                      value={setup.company_profit_or_loss || ''}
-                      onValueChange={(v) => saveSetupPatch({ company_profit_or_loss: v || null })}
-                    >
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <p className="text-sm font-semibold">Company Classification</p>
+                    <div className="space-y-2">
                       <div className="flex items-center gap-2">
-                        <RadioGroupItem value="profit" id="profit" />
-                        <Label htmlFor="profit" className="font-normal cursor-pointer">Profit</Label>
+                        <Checkbox
+                          checked={Boolean(setup.is_public_company)}
+                          disabled={!isPublicCompanyType || configDisabled}
+                          onCheckedChange={(v) => updateIfcCriteria({ is_public_company: !!v })}
+                        />
+                        <Label
+                          className={`font-normal ${
+                            !isPublicCompanyType || configDisabled ? 'text-muted-foreground' : ''
+                          }`}
+                        >
+                          Public Company
+                        </Label>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={Boolean(setup.is_private_exceeding_threshold)}
+                          disabled={isPublicCompanyType || configDisabled}
+                          onCheckedChange={(v) => updateIfcCriteria({ is_private_exceeding_threshold: !!v })}
+                        />
+                        <Label className={`font-normal ${isPublicCompanyType || configDisabled ? 'text-muted-foreground' : ''}`}>
+                          Private limited company with Previous year turnover is Rs 50 Crores or more
+                        </Label>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={Boolean(setup.is_private_non_exceeding_threshold)}
+                          disabled={isPublicCompanyType || configDisabled}
+                          onCheckedChange={(v) => updateIfcCriteria({ is_private_non_exceeding_threshold: !!v })}
+                        />
+                        <Label className={`font-normal ${isPublicCompanyType || configDisabled ? 'text-muted-foreground' : ''}`}>
+                          Private limited company with Current year during at any point of time exceeding Rs 25 Crores
+                        </Label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-sm font-semibold">Reporting Applicability</p>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={Boolean(setup.cash_flow_required)}
+                          disabled={configDisabled}
+                          onCheckedChange={(v) => saveSetupPatch({ cash_flow_required: !!v })}
+                        />
+                        <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>
+                          Cash Flow Statement included
+                        </Label>
                       </div>
                       <div className="flex items-center gap-2">
-                        <RadioGroupItem value="loss" id="loss" />
-                        <Label htmlFor="loss" className="font-normal cursor-pointer">Loss</Label>
+                        <Checkbox
+                          checked={Boolean(setup.ifc_applicable)}
+                          disabled={configDisabled}
+                          onCheckedChange={(v) => {
+                            const nextValue = !!v;
+                            const override =
+                              computedIfcApplicability != null && nextValue !== computedIfcApplicability;
+                            setIfcManualOverride(override);
+                            saveSetupPatch({ ifc_applicable: nextValue });
+                          }}
+                        />
+                        <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>
+                          IFC reporting applicable
+                        </Label>
+                        {ifcOverrideActive && (
+                          <span className="text-xs text-amber-600 font-medium">manual override</span>
+                        )}
                       </div>
-                    </RadioGroup>
+                    </div>
                   </div>
+                </div>
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.ifc_applicable)}
-                      onCheckedChange={(v) => {
-                        setIfcManualOverride(true);
-                        saveSetupPatch({ ifc_applicable: !!v });
-                      }}
-                    />
-                    <Label className="font-normal">IFC reporting applicable</Label>
-                    {ifcManualOverride && (
-                      <span className="text-xs text-amber-600 font-medium">manual override</span>
-                    )}
-                  </div>
+                <div className="space-y-3">
+                  <p className="text-sm font-semibold">Other Attributes (as applicable)</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={Boolean(setup.is_subsidiary)}
+                        disabled={configDisabled}
+                        onCheckedChange={(v) => updateIfcCriteria({ is_subsidiary: !!v })}
+                      />
+                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>is a subsidiary</Label>
+                    </div>
 
-                  {/* Listed company (KAMs typically required) checkbox hidden as per requirements */}
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={Boolean(setup.is_holding_company)}
+                        disabled={configDisabled}
+                        onCheckedChange={(v) => updateIfcCriteria({ is_holding_company: !!v })}
+                      />
+                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>is a holding company</Label>
+                    </div>
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_subsidiary)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_subsidiary: !!v })}
-                    />
-                    <Label className="font-normal">is a subsidiary</Label>
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={Boolean(setup.has_associates)}
+                        disabled={configDisabled}
+                        onCheckedChange={(v) => saveSetupPatch({ has_associates: !!v })}
+                      />
+                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>has associates</Label>
+                    </div>
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.is_holding_company)}
-                      onCheckedChange={(v) => updateIfcCriteria({ is_holding_company: !!v })}
-                    />
-                    <Label className="font-normal">is a holding company</Label>
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={Boolean(setup.has_branch_auditors)}
+                        disabled={configDisabled}
+                        onCheckedChange={(v) => saveSetupPatch({ has_branch_auditors: !!v })}
+                      />
+                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>Branch auditors involved</Label>
+                    </div>
 
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.has_associates)}
-                      onCheckedChange={(v) => saveSetupPatch({ has_associates: !!v })}
-                    />
-                    <Label className="font-normal">has associates</Label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.has_branch_auditors)}
-                      onCheckedChange={(v) => saveSetupPatch({ has_branch_auditors: !!v })}
-                    />
-                    <Label className="font-normal">Branch auditors involved</Label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={Boolean(setup.has_predecessor_auditor)}
-                      onCheckedChange={(v) => saveSetupPatch({ has_predecessor_auditor: !!v })}
-                    />
-                    <Label className="font-normal">Predecessor auditor</Label>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={Boolean(setup.has_predecessor_auditor)}
+                        disabled={configDisabled}
+                        onCheckedChange={(v) => saveSetupPatch({ has_predecessor_auditor: !!v })}
+                      />
+                      <Label className={`font-normal ${configDisabled ? 'text-muted-foreground' : ''}`}>Predecessor auditor</Label>
+                    </div>
                   </div>
                 </div>
 
                 {setup.has_branch_auditors && (
-                  <div className="space-y-2">
+                  <div className="ml-6 space-y-2">
                     <Label>Branch locations</Label>
                     <Textarea
                       value={setup.branch_locations || ''}
+                      disabled={configDisabled}
                       onChange={(e) => saveSetupPatch({ branch_locations: e.target.value })}
                       rows={2}
                       placeholder="List branch locations (comma-separated)"
@@ -526,11 +608,12 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                 )}
 
                 {setup.has_predecessor_auditor && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Predecessor auditor name</Label>
                       <Input
                         value={setup.predecessor_auditor_name || ''}
+                        disabled={configDisabled}
                         onChange={(e) => saveSetupPatch({ predecessor_auditor_name: e.target.value })}
                       />
                     </div>
@@ -539,6 +622,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                       <Input
                         type="date"
                         value={setup.predecessor_report_date || ''}
+                        disabled={configDisabled}
                         onChange={(e) => saveSetupPatch({ predecessor_report_date: e.target.value })}
                       />
                     </div>
@@ -550,17 +634,25 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                     <Label>CARO Report Annexure Number</Label>
                     <Input
                       value={setup.caro_annexure_letter || ''}
+                      disabled={configDisabled || setup.caro_applicable_status === 'not_applicable'}
                       onChange={(e) => saveSetupPatch({ caro_annexure_letter: e.target.value })}
                       placeholder="A"
                     />
+                    {setup.caro_applicable_status === 'not_applicable' && (
+                      <p className="text-xs text-muted-foreground">Disabled because CARO is not applicable.</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>IFC Report Annexure Number</Label>
                     <Input
                       value={setup.ifc_annexure_letter || ''}
+                      disabled={configDisabled || !setup.ifc_applicable}
                       onChange={(e) => saveSetupPatch({ ifc_annexure_letter: e.target.value })}
                       placeholder="B"
                     />
+                    {!setup.ifc_applicable && (
+                      <p className="text-xs text-muted-foreground">Disabled because IFC reporting is not applicable.</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1138,7 +1230,7 @@ export function MainReportEditor({ engagementId, clientName, financialYear }: Ma
                         {'text' in b ? (b as any).text : ''}
                       </p>
                     ))}
-                  <p className="text-xs text-muted-foreground">(Preview truncated — open full preview.)</p>
+                  <p className="text-xs text-muted-foreground">(Preview truncated; open full preview.)</p>
                 </div>
               </ScrollArea>
             </div>
