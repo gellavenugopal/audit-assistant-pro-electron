@@ -4927,7 +4927,7 @@ export default function FinancialReview() {
   }, []);
 
   // Delete selected rows from the active grid (Actual or Classified)
-  const handleDeleteSelected = useCallback(() => {
+  const handleDeleteSelected = useCallback(async () => {
     if (selectedRowIndices.size === 0) {
       toast({ title: 'No selection', description: 'Select ledger rows to delete first.' });
       return;
@@ -4947,16 +4947,34 @@ export default function FinancialReview() {
       return;
     }
 
-    setActualData(prev =>
-      enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
-    );
-    setCurrentData(prev =>
-      enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
-    );
-    setSelectedRowIndices(new Set());
+    try {
+      // Delete from database first
+      const linesToDelete = trialBalanceDB.lines.filter(line => selectedKeys.has(line.account_code));
+      const lineIds = linesToDelete.map(line => line.id);
+      
+      if (lineIds.length > 0) {
+        await trialBalanceDB.deleteLines(lineIds);
+      }
+      
+      // Then clear from UI state
+      setActualData(prev =>
+        enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
+      );
+      setCurrentData(prev =>
+        enrichRowsWithStockDetails(prev.filter(row => !selectedKeys.has(buildKey(row))))
+      );
+      setSelectedRowIndices(new Set());
 
-    toast({ title: 'Deleted', description: `${selectedKeys.size} row(s) removed from this engagement.` });
-  }, [activeTab, actualData, currentData, selectedRowIndices, toast]);
+      toast({ title: 'Deleted', description: `${selectedKeys.size} row(s) permanently removed from this engagement.` });
+    } catch (error) {
+      console.error('Error deleting rows:', error);
+      toast({ 
+        title: 'Error', 
+        description: 'Failed to delete selected rows from database',
+        variant: 'destructive'
+      });
+    }
+  }, [activeTab, actualData, currentData, selectedRowIndices, trialBalanceDB, toast]);
 
   // Clear Data - clears Actual TB, Classified TB, and Stock Items
   const handleClear = useCallback(async () => {
