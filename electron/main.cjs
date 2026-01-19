@@ -774,40 +774,60 @@ function registerIpcHandlers() {
       }
 
       // Filter in JavaScript to handle different GSTIN formats and registration types
-      // Tally ODBC may use $GSTIN or $PartyGSTIN - try both
+      // Tally ODBC field names can vary. We normalize/validate before deciding "missing".
+      const normalizeGstin = (value) => {
+        if (value === undefined || value === null) return null;
+        const s = value.toString().trim();
+        if (!s) return null;
+        const low = s.toLowerCase();
+        if (low === 'null' || low === 'na' || low === 'n/a' || s === '0' || s === '-') return null;
+
+        const upper = s.toUpperCase();
+        // Prefer a valid-looking GSTIN (15 chars). We keep the check permissive but structured.
+        // Common pattern: 2 digits + 10 PAN chars + 1 entity + Z + 1 checksum
+        const looksLikeGstin =
+          upper.length === 15 &&
+          /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/.test(upper);
+
+        if (looksLikeGstin) return upper;
+        // If it's not a valid GSTIN format, treat it as "missing" (avoids false negatives like 'NA')
+        return null;
+      };
+
+      const pickBestGstin = (row) => {
+        const candidates = [
+          row['$GSTIN'],
+          row['GSTIN'],
+          row['$PartyGSTIN'],
+          row['PartyGSTIN'],
+        ];
+        for (const c of candidates) {
+          const normalized = normalizeGstin(c);
+          if (normalized) return normalized;
+        }
+        return null;
+      };
+
       const lines = result
         .map(row => {
           const gstRegType = row['$GSTRegistrationType'] || row['GSTRegistrationType'] || '';
-          // Try both $GSTIN and $PartyGSTIN as Tally ODBC field names may vary
-          const gstin = row['$PartyGSTIN'] || row['$GSTIN'] || row['PartyGSTIN'] || row['GSTIN'] || null;
+          const gstin = pickBestGstin(row);
 
           return {
             ledgerName: row['$Name'] || '',
             primaryGroup: row['$_PrimaryGroup'] || row['PrimaryGroup'] || '',
-            partyGSTIN: gstin,
+            partyGSTIN: gstin || '',
             registrationType: gstRegType,
             gstRegistrationType: gstRegType, // Alias for compatibility
           };
         })
         .filter(line => {
-          // Filter: GST Registration Type is "Regular" (case-insensitive) but GSTIN is blank/empty
+          // Filter: GST Registration Type is "Regular" (case-insensitive) but GSTIN is missing
           const regType = (line.registrationType || '').toString().trim().toLowerCase();
-          const isRegular = regType === 'regular';
+          const isRegular = regType === 'regular' || regType.startsWith('regular ') || regType.includes('regular');
+          if (!isRegular) return false;
 
-          // Skip if not Regular GST type
-          if (!isRegular) {
-            return false;
-          }
-
-          const gstinValue = line.partyGSTIN;
-          const gstinBlank = !gstinValue ||
-            gstinValue.toString().trim() === '' ||
-            gstinValue.toString().trim().toLowerCase() === 'null' ||
-            gstinValue.toString().trim() === '0' ||
-            gstinValue.toString().trim().toLowerCase() === 'na' ||
-            gstinValue.toString().trim().toLowerCase() === 'n/a';
-
-          return gstinBlank;
+          return !normalizeGstin(line.partyGSTIN);
         });
 
       safeLog(`GST Not Feeded: Found ${lines.length} ledgers with Regular GST but no GSTIN out of ${result.length} total ledgers checked`);
