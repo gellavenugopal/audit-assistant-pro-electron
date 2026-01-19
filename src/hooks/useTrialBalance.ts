@@ -82,11 +82,31 @@ export function useTrialBalance(engagementId: string | undefined) {
 
       if (error) throw error;
       
-      setLines(data || []);
+      // Deduplicate based on branch_name + account_code (keep latest version, then latest created_at)
+      const deduplicated: TrialBalanceLine[] = [];
+      const seenKeys = new Map<string, number>(); // key -> index in deduplicated array
+      
+      if (data && data.length > 0) {
+        // Sort by version (desc) then created_at (desc) so we process newer records first
+        const sorted = [...data].sort((a, b) => {
+          if (b.version !== a.version) return b.version - a.version;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        });
+        
+        for (const line of sorted) {
+          const key = `${line.branch_name || ''}_${line.account_code}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.set(key, deduplicated.length);
+            deduplicated.push(line);
+          }
+        }
+      }
+      
+      setLines(deduplicated);
       
       // Get max version
-      if (data && data.length > 0) {
-        const maxVersion = Math.max(...data.map(l => l.version));
+      if (deduplicated && deduplicated.length > 0) {
+        const maxVersion = Math.max(...deduplicated.map(l => l.version));
         setCurrentVersion(maxVersion);
       }
     } catch (error: any) {
