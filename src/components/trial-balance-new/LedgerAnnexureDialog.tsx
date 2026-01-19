@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Download, FileSpreadsheet } from 'lucide-react';
+import { X, Download, FileSpreadsheet, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 
@@ -92,50 +92,196 @@ export function LedgerAnnexureContent({
   formatCurrency,
   onExport
 }: LedgerAnnexureContentProps) {
+  // Check if this is hierarchical view (has [H3] markers)
+  const isHierarchical = ledgers.some(l => l.ledgerName.startsWith('[H3] '));
+  
+  // State for expanded H3 groups
+  const [expandedH3s, setExpandedH3s] = useState<Set<string>>(new Set());
+
+  // Group ledgers by H3 for tree view
+  const ledgersByH3 = useMemo(() => {
+    const groups = new Map<string, LedgerItem[]>();
+    const h3Order: string[] = [];
+
+    ledgers.forEach(ledger => {
+      if (ledger.ledgerName.startsWith('[H3] ')) {
+        const h3 = ledger.ledgerName.substring(5);
+        if (!groups.has(h3)) {
+          groups.set(h3, []);
+          h3Order.push(h3);
+        }
+      } else if (groups.size > 0) {
+        const lastH3 = Array.from(groups.keys()).pop();
+        if (lastH3) {
+          groups.get(lastH3)!.push(ledger);
+        }
+      }
+    });
+
+    return { groups, h3Order };
+  }, [ledgers]);
+
+  const toggleH3 = (h3: string) => {
+    const newExpanded = new Set(expandedH3s);
+    if (newExpanded.has(h3)) {
+      newExpanded.delete(h3);
+    } else {
+      newExpanded.add(h3);
+    }
+    setExpandedH3s(newExpanded);
+  };
+
+  const calculateH3Total = (h3Ledgers: LedgerItem[]) => {
+    return h3Ledgers.reduce((sum, l) => sum + Math.abs(l.closingBalance), 0);
+  };
+
+  if (!isHierarchical) {
+    // Flat list view
+    return (
+      <div className="border rounded-lg overflow-auto max-h-[60vh]">
+        <Table>
+          <TableHeader className="sticky top-0 bg-muted/95 backdrop-blur">
+            <TableRow>
+              <TableHead className="w-12 text-center">S.No</TableHead>
+              <TableHead>Ledger Name</TableHead>
+              <TableHead>Group</TableHead>
+              <TableHead className="text-right w-32">Opening</TableHead>
+              <TableHead className="text-right w-32">Closing</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {ledgers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  No ledger details available
+                </TableCell>
+              </TableRow>
+            ) : (
+              <>
+                {ledgers.map((ledger, index) => (
+                  <TableRow key={index} className="hover:bg-muted/50">
+                    <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
+                    <TableCell className="font-medium">{ledger.ledgerName}</TableCell>
+                    <TableCell className="text-muted-foreground">{ledger.groupName}</TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(ledger.openingBalance)}</TableCell>
+                    <TableCell className="text-right font-mono">{formatCurrency(ledger.closingBalance)}</TableCell>
+                  </TableRow>
+                ))}
+                {/* Total Row */}
+                <TableRow className="bg-muted/50 font-semibold border-t-2">
+                  <TableCell></TableCell>
+                  <TableCell>TOTAL</TableCell>
+                  <TableCell></TableCell>
+                  <TableCell className="text-right font-mono">
+                    {formatCurrency(ledgers.reduce((sum, l) => sum + l.openingBalance, 0))}
+                  </TableCell>
+                  <TableCell className="text-right font-mono">{formatCurrency(total)}</TableCell>
+                </TableRow>
+              </>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  }
+
+  // Tree view for hierarchical display
   return (
     <div className="border rounded-lg overflow-auto max-h-[60vh]">
-      <Table>
-        <TableHeader className="sticky top-0 bg-muted/95 backdrop-blur">
-          <TableRow>
-            <TableHead className="w-12 text-center">S.No</TableHead>
-            <TableHead>Ledger Name</TableHead>
-            <TableHead>Group</TableHead>
-            <TableHead className="text-right w-32">Opening</TableHead>
-            <TableHead className="text-right w-32">Closing</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {ledgers.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                No ledger details available
-              </TableCell>
-            </TableRow>
-          ) : (
-            <>
-              {ledgers.map((ledger, index) => (
-                <TableRow key={index} className="hover:bg-muted/50">
-                  <TableCell className="text-center text-muted-foreground">{index + 1}</TableCell>
-                  <TableCell className="font-medium">{ledger.ledgerName}</TableCell>
-                  <TableCell className="text-muted-foreground">{ledger.groupName}</TableCell>
-                  <TableCell className="text-right font-mono">{formatCurrency(ledger.openingBalance)}</TableCell>
-                  <TableCell className="text-right font-mono">{formatCurrency(ledger.closingBalance)}</TableCell>
-                </TableRow>
-              ))}
-              {/* Total Row */}
-              <TableRow className="bg-muted/50 font-semibold border-t-2">
-                <TableCell></TableCell>
-                <TableCell>TOTAL</TableCell>
-                <TableCell></TableCell>
-                <TableCell className="text-right font-mono">
-                  {formatCurrency(ledgers.reduce((sum, l) => sum + l.openingBalance, 0))}
-                </TableCell>
-                <TableCell className="text-right font-mono">{formatCurrency(total)}</TableCell>
-              </TableRow>
-            </>
-          )}
-        </TableBody>
-      </Table>
+      <div className="p-3 space-y-1">
+        {ledgersByH3.h3Order.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            No ledger details available
+          </div>
+        ) : (
+          <>
+            {ledgersByH3.h3Order.map((h3) => {
+              const h3Ledgers = ledgersByH3.groups.get(h3) || [];
+              const isExpanded = expandedH3s.has(h3);
+              const h3Total = calculateH3Total(h3Ledgers);
+              const ledgerCount = h3Ledgers.length;
+
+              return (
+                <div key={h3} className="space-y-1">
+                  {/* H3 Header - Collapsible */}
+                  <button
+                    onClick={() => toggleH3(h3)}
+                    className="w-full flex items-center gap-2 p-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded font-semibold text-sm text-blue-900 transition-colors"
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 flex-shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 flex-shrink-0" />
+                    )}
+                    <span className="flex-1 text-left">{h3}</span>
+                    <Badge variant="secondary" className="ml-auto">
+                      {ledgerCount} ledger{ledgerCount !== 1 ? 's' : ''}
+                    </Badge>
+                    <span className="font-mono text-xs text-blue-800 ml-2">
+                      {formatCurrency(h3Total)}
+                    </span>
+                  </button>
+
+                  {/* Ledgers under H3 - Visible when expanded */}
+                  {isExpanded && (
+                    <div className="ml-4 space-y-0.5 border-l-2 border-blue-200 pl-3">
+                      {h3Ledgers.map((ledger, idx) => (
+                        <div
+                          key={idx}
+                          className="py-2 px-2 hover:bg-muted/50 rounded flex items-center justify-between text-sm"
+                        >
+                          <div className="flex-1">
+                            <div className="font-medium text-foreground">{ledger.ledgerName}</div>
+                            <div className="text-xs text-muted-foreground">{ledger.groupName}</div>
+                          </div>
+                          <div className="flex gap-4 ml-4">
+                            <div className="text-right">
+                              <div className="text-xs text-muted-foreground">Opening</div>
+                              <div className="font-mono text-sm">{formatCurrency(ledger.openingBalance)}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xs text-muted-foreground">Closing</div>
+                              <div className="font-mono text-sm font-semibold">{formatCurrency(ledger.closingBalance)}</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      
+                      {/* Subtotal for this H3 */}
+                      <div className="py-2 px-2 bg-blue-50/50 rounded border-t border-blue-100 mt-1 flex items-center justify-between font-semibold text-xs">
+                        <span>Subtotal ({h3})</span>
+                        <div className="flex gap-4">
+                          <span className="text-right w-24 font-mono">
+                            {formatCurrency(h3Ledgers.reduce((sum, l) => sum + l.openingBalance, 0))}
+                          </span>
+                          <span className="text-right w-24 font-mono">
+                            {formatCurrency(h3Total)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Grand Total */}
+            <div className="mt-4 pt-3 border-t-2 border-foreground">
+              <div className="flex items-center justify-between font-bold text-base">
+                <span>TOTAL</span>
+                <div className="flex gap-4">
+                  <span className="text-right w-24 font-mono">
+                    {formatCurrency(ledgers.filter(l => !l.ledgerName.startsWith('[H3] ')).reduce((sum, l) => sum + l.openingBalance, 0))}
+                  </span>
+                  <span className="text-right w-24 font-mono text-blue-900">
+                    {formatCurrency(total)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   odbcFetchMonthWiseData: (data) => ipcRenderer.invoke('odbc-fetch-month-wise-data', data),
   odbcFetchGSTNotFeeded: () => ipcRenderer.invoke('odbc-fetch-gst-not-feeded'),
   odbcFetchStockItems: () => ipcRenderer.invoke('odbc-fetch-stock-items'),
+  app: {
+    getDownloadsPath: () => ipcRenderer.invoke('app:getDownloadsPath'),
+    openPath: (targetPath) => ipcRenderer.invoke('app:openPath', targetPath),
+  },
 });
 
 // Log when preload script is loaded

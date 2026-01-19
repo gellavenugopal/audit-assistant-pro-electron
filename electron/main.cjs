@@ -112,6 +112,23 @@ function registerIpcHandlers() {
     }
   });
 
+  ipcMain.handle('odbc-disconnect', async () => {
+    try {
+      if (odbcConnection) {
+        try {
+          await odbcConnection.close();
+        } catch (err) {
+          safeLog('ODBC disconnect error:', err.message);
+        }
+      }
+      odbcConnection = null;
+      return { success: true };
+    } catch (error) {
+      odbcConnection = null;
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('odbc-fetch-trial-balance', async (event, fromDate, toDate) => {
     try {
       if (!odbcConnection) {
@@ -893,7 +910,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      webSecurity: true,
     },
     icon: path.join(__dirname, '../public/favicon.ico'),
     title: 'Audit Assistant Pro',
@@ -951,7 +968,8 @@ async function handleApiRequest(endpoint, method, data, token) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    safeLog(`[API Request] Method: ${method}, Endpoint: ${endpoint}`, data ? { data } : 'No Data');
+    const tokenInfo = token ? ' token=[REDACTED]' : '';
+    safeLog(`[API Request] ${method} ${endpoint}${tokenInfo}`);
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method,
@@ -977,7 +995,7 @@ async function handleApiRequest(endpoint, method, data, token) {
       }
     }
 
-    safeLog(`[API Response] ${endpoint}:`, json);
+    safeLog(`[API Response] ${method} ${endpoint} -> ${response.status}`);
     return { ok: response.ok, status: response.status, data: json };
   } catch (error) {
     console.error(`API Error [${endpoint}]:`, error);

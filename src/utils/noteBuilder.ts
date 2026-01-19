@@ -1,3 +1,5 @@
+import { LedgerRow } from '@/services/trialBalanceNewClassification';
+
 export type StatementType = 'BS' | 'PL';
 export type NumberScale = 'actual' | 'tens' | 'hundreds' | 'thousands' | 'lakhs' | 'millions' | 'crores';
 
@@ -56,7 +58,7 @@ export function getScaleFactor(numberScale: NumberScale): number {
               : 1;
 }
 
-export function getRowAmount(row: ClassifiedRow): number {
+export function getRowAmount(row: ClassifiedRow | LedgerRow): number {
   if (typeof row.amount === 'number' && Number.isFinite(row.amount)) {
     return row.amount;
   }

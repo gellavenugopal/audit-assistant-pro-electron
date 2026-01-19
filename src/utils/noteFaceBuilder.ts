@@ -1,3 +1,4 @@
+import { LedgerRow } from '@/services/trialBalanceNewClassification';
 import { getRowAmount } from './noteBuilder';
 
 export type StatementType = 'BS' | 'PL';
@@ -16,7 +17,7 @@ export type PreparedNote = {
 };
 
 type BuildPreparedNotesOptions = {
-  classifiedRows: Array<Record<string, unknown>>;
+  classifiedRows: LedgerRow[];
   statementType: StatementType;
   tolerance: number;
   h2Order?: string[];
@@ -65,7 +66,7 @@ export function buildPreparedNotes({
     const h3 = row.H3 as string | undefined;
     if (!h1 || !allowedH1.has(h1)) return;
     if (!h2 || !h3) return;
-    const amount = normalizeAmount(getRowAmount(row as any), h1, statementType);
+    const amount = normalizeAmount(getRowAmount(row), h1, statementType);
     const key = `${h1}||${h2}`;
     if (!noteMap.has(key)) {
       noteMap.set(key, { H1: h1, H2: h2, rows: new Map() });

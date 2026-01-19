@@ -84,7 +84,7 @@ export function applyBalanceReclassification(line: TrialBalanceLine): Reclassifi
     if (closingBalance < 0) {
       return {
         ...originalResult,
-        newFsArea: 'Other Current Liabilities',
+        newFsArea: 'Unclassified Liabilities',
         newAile: 'Liability',
         reclassified: true,
         reason: 'Trade receivable with credit balance reclassified to Advance from Customers',
@@ -99,7 +99,7 @@ export function applyBalanceReclassification(line: TrialBalanceLine): Reclassifi
     if (closingBalance > 0) {
       return {
         ...originalResult,
-        newFsArea: 'Other Current',
+        newFsArea: 'Unclassified Assets',
         newAile: 'Asset',
         reclassified: true,
         reason: 'Trade payable with debit balance reclassified to Advance to Suppliers',
