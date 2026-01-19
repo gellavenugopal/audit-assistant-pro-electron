@@ -716,8 +716,8 @@ export default function FinancialReview() {
   }, [manualInventoryDraft, persistManualInventoryValues]);
 
   const resetManualInventoryDraft = useCallback(() => {
-    setManualInventoryDraft(manualInventoryValues || EMPTY_MANUAL_INVENTORY);
-  }, [manualInventoryValues]);
+    setManualInventoryDraft(EMPTY_MANUAL_INVENTORY);
+  }, []);
 
   const handleSaveManualInventory = useCallback(() => {
     persistManualInventoryValues(manualInventoryDraft);
