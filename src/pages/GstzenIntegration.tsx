@@ -11,6 +11,8 @@ import { GstnLoginDialog } from "@/components/gstin/GstnLoginDialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { gstzenKeys } from "@/hooks/useGstzenCustomer";
 import { gstzenApi } from "@/services/gstzen-api";
+import { useEngagement } from "@/contexts/EngagementContext";
+import { supabase } from "@/integrations/supabase/client";
 import type { Gstin } from "@/types/gstzen";
 
 type DialogType = "none" | "download" | "login" | "consolidated";
@@ -61,9 +63,43 @@ export default function GstzenIntegration() {
 
 
     // Get GSTINs for this customer
-    const { data: gstins = [], isLoading: gstinsLoading } = useGstins({ enabled: isGstzenAuthenticated });
+    const { data: allGstins = [], isLoading: gstinsLoading } = useGstins({ enabled: isGstzenAuthenticated });
+    const { currentEngagement } = useEngagement();
+    const [engagementGstins, setEngagementGstins] = useState<string[]>([]);
+    const [isLoadingEngagementGstins, setIsLoadingEngagementGstins] = useState(false);
 
-    const isLoading = gstinsLoading;
+    // Fetch engagement-specific GSTINs from Supabase
+    useEffect(() => {
+        const fetchEngagementGstins = async () => {
+            if (!currentEngagement?.client_id) {
+                setEngagementGstins([]);
+                return;
+            }
+
+            setIsLoadingEngagementGstins(true);
+            try {
+                const { data, error } = await supabase
+                    .from('client_gstins')
+                    .select('gstin')
+                    .eq('client_id', currentEngagement.client_id);
+
+                if (error) throw error;
+                setEngagementGstins((data || []).map((item) => item.gstin));
+            } catch (error) {
+                console.error('Error fetching engagement GSTINs:', error);
+                setEngagementGstins([]);
+            } finally {
+                setIsLoadingEngagementGstins(false);
+            }
+        };
+
+        fetchEngagementGstins();
+    }, [currentEngagement?.client_id]);
+
+    // Filter GSTINs: Only show those that exist in BOTH GSTZen and this engagement
+    const gstins = allGstins.filter((gstin) => engagementGstins.includes(gstin.gstin));
+
+    const isLoading = gstinsLoading || isLoadingEngagementGstins;
 
     const [activeSessions, setActiveSessions] = useState<Record<string, boolean>>({});
 
@@ -247,12 +283,12 @@ export default function GstzenIntegration() {
                                     <div className="rounded-full bg-primary/10 p-4 mb-4">
                                         <Plus className="h-8 w-8 text-primary" />
                                     </div>
-                                    <h3 className="text-lg font-semibold mb-1">No GSTINs Registered</h3>
+                                    <h3 className="text-lg font-semibold mb-1">No GSTINs for This Engagement</h3>
                                     <p className="text-muted-foreground max-w-sm mb-6">
-                                        Add your first GSTIN to start managing returns and downloading reports.
+                                        Add GSTINs for this engagement using the GST Number Master in Audit Tools.
                                     </p>
-                                    <Button onClick={() => { }} disabled>
-                                        Contact Support to Add GSTIN
+                                    <Button onClick={() => navigate('/audit-tools')}>
+                                        Go to GST Number Master
                                     </Button>
                                 </CardContent>
                             </Card>
