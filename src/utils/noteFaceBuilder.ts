@@ -25,6 +25,14 @@ type BuildPreparedNotesOptions = {
 const BS_H1 = new Set(['Asset', 'Liability']);
 const PL_H1 = new Set(['Income', 'Expense']);
 
+function normalizeH2Key(value: string): string {
+  return (value || '')
+    .toString()
+    .replace(/[’‘]/g, "'")
+    .trim()
+    .toLowerCase();
+}
+
 function normalizeAmount(amount: number, h1: string | undefined, statementType: StatementType): number {
   if (!Number.isFinite(amount)) return 0;
   if (statementType === 'PL' && h1 === 'Expense' && amount < 0) {
@@ -45,7 +53,8 @@ export function buildPreparedNotes({
   const allowedH1 = statementType === 'BS' ? BS_H1 : PL_H1;
   const h2Index = new Map<string, number>();
   (h2Order || []).forEach((h2, idx) => {
-    if (!h2Index.has(h2)) h2Index.set(h2, idx);
+    const key = normalizeH2Key(h2);
+    if (!h2Index.has(key)) h2Index.set(key, idx);
   });
 
   const noteMap = new Map<string, { H1: string; H2: string; rows: Map<string, number> }>();
@@ -85,8 +94,10 @@ export function buildPreparedNotes({
   });
 
   notes.sort((a, b) => {
-    const aIndex = h2Index.has(a.H2) ? (h2Index.get(a.H2) as number) : Number.MAX_SAFE_INTEGER;
-    const bIndex = h2Index.has(b.H2) ? (h2Index.get(b.H2) as number) : Number.MAX_SAFE_INTEGER;
+    const aKey = normalizeH2Key(a.H2);
+    const bKey = normalizeH2Key(b.H2);
+    const aIndex = h2Index.has(aKey) ? (h2Index.get(aKey) as number) : Number.MAX_SAFE_INTEGER;
+    const bIndex = h2Index.has(bKey) ? (h2Index.get(bKey) as number) : Number.MAX_SAFE_INTEGER;
     if (aIndex !== bIndex) return aIndex - bIndex;
     return a.H2.localeCompare(b.H2);
   });

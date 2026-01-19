@@ -7,6 +7,9 @@ export type ClassificationRule = {
   primaryGroupContains?: string;
   parentGroupContains?: string;
   ledgerNameContains?: string;
+  matchLedger?: boolean;
+  matchParent?: boolean;
+  matchPrimary?: boolean;
   h1: string;
   h2: string;
   h3: string;
@@ -43,6 +46,15 @@ function isCompanyEntity(entityType?: string): boolean {
 function isPartnershipEntity(entityType?: string): boolean {
   const value = normalizeEntity(entityType);
   return value.includes('partnership') || value.includes('limited liability partnership') || value.includes('llp');
+}
+
+function isOwnerEntity(entityType?: string): boolean {
+  const value = normalizeEntity(entityType);
+  return value.includes('individual') ||
+    value.includes('sole') ||
+    value.includes('proprietorship') ||
+    value.includes('huf') ||
+    value.includes('hindu undivided family');
 }
 
 function normalizeForMatch(value?: string): string {
@@ -85,6 +97,13 @@ function matchesPhrase(value: string, phrase: string): boolean {
 
 function hasAny(value: string, needles: string[]): boolean {
   return needles.some(needle => matchesPhrase(value, needle));
+}
+
+function splitKeywords(value?: string): string[] {
+  return (value || '')
+    .split(/[\n,;]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function addAutoNote(row: LedgerRow, reason: string): LedgerRow {
@@ -177,14 +196,19 @@ function getPpeH3(ledger: string, parent: string): string {
     { label: 'Gross Block - Plant and Machinery', keywords: ['production machinery', 'manufacturing equipment', 'tools and machinery', 'equipment industrial', 'machinery', 'machine', 'plant'] },
     { label: 'Gross Block - Furniture and Fixtures', keywords: ['office furniture', 'furniture', 'fixtures', 'desk', 'table', 'chair', 'workstation', 'cabinet', 'cupboard', 'rack', 'shelf'] },
     { label: 'Gross Block - Electrical Installations', keywords: ['electrical installation', 'electrical fitting', 'wiring', 'cabling', 'switchboard', 'panel board', 'transformer', 'generator', 'dg set', 'power installation'] },
-    { label: 'Gross Block - Office Equipment', keywords: ['office equipment', 'printer', 'scanner', 'photocopier', 'copier machine', 'xerox', 'projector', 'shredder', 'laminator', 'biometric machine', 'attendance machine'] },
-    { label: 'Gross Block - Computers', keywords: ['computer', 'desktop', 'laptop', 'notebook', 'server', 'workstation', 'cpu', 'monitor', 'ups', 'router', 'switch', 'networking equipment'] },
+    { label: 'Gross Block - Office Equipment', keywords: ['office equipment', 'printer', 'scanner', 'photocopier', 'copier machine', 'xerox', 'projector', 'shredder', 'laminator', 'biometric machine', 'attendance machine', 'mobile'] },
+    { label: 'Gross Block - Computers', keywords: ['computer', 'desktop', 'laptop', 'notebook', 'server', 'workstation', 'cpu', 'monitor', 'ups', 'router', 'switch', 'networking equipment', 'mobile'] },
     { label: 'Gross Block - Vehicles', keywords: ['commercial vehicle', 'vehicle', 'car', 'truck', 'lorry', 'van', 'bus', 'two wheeler', 'scooter', 'bike'] },
     { label: 'Gross Block - Capital Work-in-Progress (CWIP)', keywords: ['capital work in progress', 'cwip', 'capital wip', 'asset under construction', 'project under construction', 'work in progress capital', 'incomplete asset'] },
   ];
 
   const matched = rules.find(rule => hasAnyInLedgerOrParent(ledger, parent, rule.keywords));
-  return matched ? matched.label : '';
+  if (matched) return matched.label;
+  if (hasAnyInLedgerOrParent(ledger, parent, ['land']) &&
+    !hasAnyInLedgerOrParent(ledger, parent, ['leasehold', 'lease'])) {
+    return 'Gross Block - Freehold Land';
+  }
+  return '';
 }
 
 function getIntangibleH3(ledger: string, parent: string): string {
@@ -305,6 +329,7 @@ export function applyClassificationRules(
   const isTrading = businessType.includes('trading');
   const isCompany = isCompanyEntity(entityType);
   const isPartnership = isPartnershipEntity(entityType);
+  const isOwner = isOwnerEntity(entityType);
   const effectiveBalance = (row['Closing Balance'] || 0) !== 0
     ? (row['Closing Balance'] || 0)
     : (row['Opening Balance'] || 0);
@@ -380,6 +405,15 @@ export function applyClassificationRules(
       'H2': 'Other Non-current Assets',
       'H3': 'Security Deposits',
     }, 'Security Deposits');
+  }
+
+  if (matchesGroup(group, 'capital account') && isOwner && (forceAuto || row.Auto !== 'Manual')) {
+    return addAutoNote({
+      ...row,
+      'H1': 'Liability',
+      'H2': 'Owners’ Capital Account',
+      'H3': 'Owners’ Capital Account',
+    }, 'Capital Account - Owner (Entity Override)');
   }
 
   if (allowAutoOverride) {
@@ -500,12 +534,20 @@ export function applyClassificationRules(
 
   if (allowAutoOverride && rules.length > 0) {
     const matched = rules.find(rule => {
-      const primaryNeedle = normalize(rule.primaryGroupContains);
-      const parentNeedle = normalize(rule.parentGroupContains);
-      const ledgerNeedle = normalize(rule.ledgerNameContains);
-      const primaryMatch = primaryNeedle ? matchesPhrase(primary, primaryNeedle) : true;
-      const parentMatch = parentNeedle ? matchesPhrase(parent, parentNeedle) : true;
-      const ledgerMatch = ledgerNeedle ? (matchesPhrase(ledger, ledgerNeedle) || matchesPhrase(parent, ledgerNeedle)) : true;
+      const primaryNeedles = splitKeywords(rule.primaryGroupContains);
+      const parentNeedles = splitKeywords(rule.parentGroupContains);
+      const ledgerNeedles = splitKeywords(rule.ledgerNameContains);
+      const primaryMatch = primaryNeedles.length === 0 || primaryNeedles.some(needle => matchesPhrase(primary, needle));
+      const parentMatch = parentNeedles.length === 0 || parentNeedles.some(needle => matchesPhrase(parent, needle));
+      const hasMatchFlags = Boolean(rule.matchLedger || rule.matchParent || rule.matchPrimary);
+      const searchLedger = hasMatchFlags ? Boolean(rule.matchLedger) : true;
+      const searchParent = hasMatchFlags ? Boolean(rule.matchParent) : true;
+      const searchPrimary = hasMatchFlags ? Boolean(rule.matchPrimary) : false;
+      const ledgerMatch = ledgerNeedles.length === 0 || ledgerNeedles.some(needle => (
+        (searchLedger && matchesPhrase(ledger, needle)) ||
+        (searchParent && matchesPhrase(parent, needle)) ||
+        (searchPrimary && matchesPhrase(primary, needle))
+      ));
       return primaryMatch && parentMatch && ledgerMatch;
     });
 
@@ -521,6 +563,14 @@ export function applyClassificationRules(
   }
 
   if (allowAutoOverride) {
+    if (matchesGroup(group, 'capital account') && isOwner) {
+      return addAutoNote({
+        ...row,
+        'H1': 'Liability',
+        'H2': "Owners' Capital Account",
+        'H3': "Owners' Capital Account",
+      }, 'Capital Account - Owner (Entity Override)');
+    }
     const isCapitalAccount = normalize(row['H1']) === 'liability' && matchesGroup(group, 'capital account');
     if (isCapitalAccount) {
       if (isCompany) {
@@ -551,8 +601,8 @@ export function applyClassificationRules(
         return addAutoNote({
           ...row,
           'H1': 'Liability',
-          'H2': "Owners' Capital Account",
-          'H3': "Owners' Capital Account",
+          'H2': 'Owners’ Capital Account',
+          'H3': 'Owners’ Capital Account',
         }, 'Capital Account - Owner');
       }
     }

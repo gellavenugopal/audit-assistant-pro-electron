@@ -64,6 +64,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useTallyODBC } from '@/hooks/useTallyODBC';
 import { useEngagement } from '@/contexts/EngagementContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useClient } from '@/hooks/useClient';
 import { useTrialBalance, TrialBalanceLineInput } from '@/hooks/useTrialBalance';
 import { LedgerRow, generateLedgerKey } from '@/services/trialBalanceNewClassification';
@@ -73,6 +74,7 @@ import * as XLSX from 'xlsx';
 import { StockItemsTab } from '@/components/trial-balance-new/StockItemsTab';
 import { BulkUpdateDialog } from '@/components/trial-balance-new/BulkUpdateDialog';
 import { FilterModal } from '@/components/trial-balance-new/FilterModal';
+import { LedgerAnnexureDialog, LedgerItem } from '@/components/trial-balance-new/LedgerAnnexureDialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getActualBalanceSign } from '@/utils/naturalBalance';
 import { BsplHeadsManager } from '@/components/trial-balance-new/BsplHeadsManager';
@@ -113,6 +115,20 @@ const BUSINESS_TYPES = [
 
 // Disabled entity types (not supported in this phase)
 const DISABLED_ENTITY_TYPES = ["Trust", "Society", "Others"];
+
+type ManualInventoryValues = {
+  rawMaterials: { opening: number; closing: number };
+  workInProgress: { opening: number; closing: number };
+  finishedGoods: { opening: number; closing: number };
+  stockInTrade: { opening: number; closing: number };
+};
+
+const EMPTY_MANUAL_INVENTORY: ManualInventoryValues = {
+  rawMaterials: { opening: 0, closing: 0 },
+  workInProgress: { opening: 0, closing: 0 },
+  finishedGoods: { opening: 0, closing: 0 },
+  stockInTrade: { opening: 0, closing: 0 },
+};
 
 const parseFinancialYearRange = (yearCode?: string | null) => {
   if (!yearCode) return null;
@@ -436,6 +452,8 @@ function InlineCombobox({
 export default function FinancialReview() {
   const { currentEngagement } = useEngagement();
   const { toast } = useToast();
+  const { role } = useAuth();
+  const isProUser = role === 'partner' || role === 'manager';
   const odbcConnection = useTallyODBC();
   const trialBalanceDB = useTrialBalance(currentEngagement?.id);
   const { client } = useClient(currentEngagement?.client_id || null);
@@ -544,7 +562,7 @@ export default function FinancialReview() {
   const [numberScale, setNumberScale] = useState<'actual' | 'tens' | 'hundreds' | 'thousands' | 'lakhs' | 'millions' | 'crores'>('actual');
   const [noteStatementType, setNoteStatementType] = useState<'BS' | 'PL'>('PL');
   const [selectedNoteH2, setSelectedNoteH2] = useState('');
-  const [showParentNoteTotals, setShowParentNoteTotals] = useState(false);
+  const showParentNoteTotals = true;
   const [noteTableSettings, setNoteTableSettings] = useState({
     rowHeight: 28,
     particularsWidth: 420,
@@ -552,6 +570,15 @@ export default function FinancialReview() {
     fontSize: 12,
   });
   const [notePreviewZoom, setNotePreviewZoom] = useState(1);
+  const [inventorySource, setInventorySource] = useState<"imported" | "manual">("imported");
+  const [manualInventoryValues, setManualInventoryValues] = useState<ManualInventoryValues | null>(null);
+  const [manualInventoryDraft, setManualInventoryDraft] = useState<ManualInventoryValues>(EMPTY_MANUAL_INVENTORY);
+  const [isManualInventoryDialogOpen, setIsManualInventoryDialogOpen] = useState(false);
+  const [isInventoryImportPromptOpen, setIsInventoryImportPromptOpen] = useState(false);
+  const [pendingInventoryImport, setPendingInventoryImport] = useState<{ rows: LedgerRow[]; isPrevious: boolean } | null>(null);
+  const [showNoteSettings, setShowNoteSettings] = useState(false);
+  const [showFaceSettings, setShowFaceSettings] = useState(false);
+  const [isNoteLedgerDialogOpen, setIsNoteLedgerDialogOpen] = useState(false);
   const [noteNewRowLabel, setNoteNewRowLabel] = useState('');
   const [noteSelectedLabel, setNoteSelectedLabel] = useState('');
   const [noteParentAnchorId, setNoteParentAnchorId] = useState<string | null>(null);
@@ -562,6 +589,9 @@ export default function FinancialReview() {
     fontSize: 12,
     zoom: 1,
   });
+  const manualInventoryKey = useMemo(() => {
+    return currentEngagement?.id ? `tb_inventory_manual_${currentEngagement.id}` : null;
+  }, [currentEngagement?.id]);
   const [noteLayouts, setNoteLayouts] = useState<Record<string, NoteLayout>>({});
   const [noteLayoutPayload, setNoteLayoutPayload] = useState<Record<string, unknown>>({});
   const [noteLayoutLoaded, setNoteLayoutLoaded] = useState(false);
@@ -575,6 +605,84 @@ export default function FinancialReview() {
   const [isVariablesDialogOpen, setIsVariablesDialogOpen] = useState(false);
   const [newVariableName, setNewVariableName] = useState('');
   const [newVariableType, setNewVariableType] = useState<'number' | 'percent' | 'text'>('number');
+
+  useEffect(() => {
+    if (!manualInventoryKey) {
+      setManualInventoryValues(null);
+      setInventorySource('imported');
+      return;
+    }
+    const raw = localStorage.getItem(manualInventoryKey);
+    if (!raw) {
+      setManualInventoryValues(null);
+      setInventorySource('imported');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ManualInventoryValues;
+      setManualInventoryValues(parsed);
+      setInventorySource('manual');
+    } catch {
+      setManualInventoryValues(null);
+      setInventorySource('imported');
+    }
+  }, [manualInventoryKey]);
+
+  useEffect(() => {
+    if (isManualInventoryDialogOpen) {
+      setManualInventoryDraft(manualInventoryValues || EMPTY_MANUAL_INVENTORY);
+    }
+  }, [isManualInventoryDialogOpen, manualInventoryValues]);
+  const handleSaveManualInventory = useCallback(() => {
+    if (!manualInventoryKey) {
+      setIsManualInventoryDialogOpen(false);
+      return;
+    }
+    setManualInventoryValues(manualInventoryDraft);
+    setInventorySource('manual');
+    localStorage.setItem(manualInventoryKey, JSON.stringify(manualInventoryDraft));
+    setIsManualInventoryDialogOpen(false);
+    toast({
+      title: 'Manual inventory saved',
+      description: 'Inventory values will be used for notes and face statements.'
+    });
+  }, [manualInventoryKey, manualInventoryDraft, toast]);
+
+  const handleClearManualInventory = useCallback((closePrompt?: boolean) => {
+    if (manualInventoryKey) {
+      localStorage.removeItem(manualInventoryKey);
+    }
+    setManualInventoryValues(null);
+    setInventorySource('imported');
+    if (closePrompt) {
+      setIsInventoryImportPromptOpen(false);
+    }
+  }, [manualInventoryKey]);
+
+  const handleKeepManualInventory = useCallback(() => {
+    setIsInventoryImportPromptOpen(false);
+  }, []);
+  const updateManualInventoryDraftValue = useCallback((
+    key: keyof ManualInventoryValues,
+    field: 'opening' | 'closing',
+    value: string
+  ) => {
+    const parsed = value === '' ? 0 : Number(value);
+    setManualInventoryDraft(prev => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        [field]: Number.isFinite(parsed) ? parsed : 0,
+      },
+    }));
+  }, []);
+  useEffect(() => {
+    if (!isProUser) {
+      if (noteEditMode) setNoteEditMode(false);
+      if (showNoteSettings) setShowNoteSettings(false);
+      if (showFaceSettings) setShowFaceSettings(false);
+    }
+  }, [isProUser, noteEditMode, showNoteSettings, showFaceSettings]);
   const [newVariableValue, setNewVariableValue] = useState('');
   const [selectedFaceRowId, setSelectedFaceRowId] = useState<string | null>(null);
   const [faceNewRowLabel, setFaceNewRowLabel] = useState('');
@@ -588,6 +696,12 @@ export default function FinancialReview() {
       setNoteStatementType('BS');
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!isProUser && (activeTab === 'face-bs' || activeTab === 'face-pl')) {
+      setActiveTab(noteStatementType === 'PL' ? 'notes-pl' : 'notes-bs');
+    }
+  }, [activeTab, isProUser, noteStatementType]);
   const actualColumns = useMemo(() => ([
     'Ledger Name',
     'Parent Group',
@@ -1228,10 +1342,49 @@ export default function FinancialReview() {
 
   const isNonCompanyEntityType = useMemo(() => !isCompanyEntityType, [isCompanyEntityType]);
 
-  const normalizeOption = useCallback((value: string) => {
+  const buildManualInventoryRows = useCallback((values: ManualInventoryValues): LedgerRow[] => {
+    const makeRow = (label: string, h3: string, opening: number, closing: number): LedgerRow => ({
+      'Ledger Name': label,
+      'Parent Group': 'Inventories',
+      'Primary Group': 'Inventories',
+      'Opening Balance': opening,
+      'Debit': 0,
+      'Credit': 0,
+      'Closing Balance': closing,
+      'H1': 'Asset',
+      'H2': 'Inventories',
+      'H3': h3,
+      'Notes': '',
+      'Is Revenue': 'No',
+      'Auto': 'Manual',
+    });
+
+    return [
+      makeRow('Manual Inventory - Raw Materials', 'Raw Materials', values.rawMaterials.opening, values.rawMaterials.closing),
+      makeRow('Manual Inventory - Work-in-Progress', 'Work-in-Progress', values.workInProgress.opening, values.workInProgress.closing),
+      makeRow('Manual Inventory - Finished Goods', 'Finished Goods', values.finishedGoods.opening, values.finishedGoods.closing),
+      makeRow('Manual Inventory - Stock-in-Trade', 'Stock-in-Trade', values.stockInTrade.opening, values.stockInTrade.closing),
+    ];
+  }, []);
+
+  const applyManualInventoryRows = useCallback((rows: LedgerRow[]) => {
+    if (inventorySource !== 'manual' || !manualInventoryValues) return rows;
+    const filtered = rows.filter(row => row['H2'] !== 'Inventories');
+    return [...filtered, ...buildManualInventoryRows(manualInventoryValues)];
+  }, [inventorySource, manualInventoryValues, buildManualInventoryRows]);
+
+  const hasInventoryInRows = useCallback((rows: LedgerRow[]) => {
+    return rows.some(row =>
+      String(row['H2'] || '') === 'Inventories' ||
+      String(row['Primary Group'] || '').toLowerCase().includes('stock') ||
+      String(row['Parent Group'] || '').toLowerCase().includes('stock')
+    );
+  }, []);
+
+    const normalizeOption = useCallback((value: string) => {
     return (value || '')
       .toLowerCase()
-      .replace(/[’']/g, "'")
+      .replace(/[��`]/g, "'")
       .replace(/\s+/g, ' ')
       .trim();
   }, []);
@@ -1777,17 +1930,19 @@ export default function FinancialReview() {
       // Store actual data (unclassified) - FILTERED DATA (no completely inactive ledgers)
       setActualData(processedData);
       
-      // Import directly based on selected period type
-      if (importPeriodType === 'current') {
-        setActualData(processedData);
-        const classifiedRows = filterClassifiedRows(processedData);
-        const sortedClassifiedRows = sortClassifiedByDefaultH2(classifiedRows);
-        setCurrentData(sortedClassifiedRows);
-        const userDefinedCount = sortedClassifiedRows.filter(row => (row['Notes'] || '').toLowerCase().includes('user_defined')).length;
-      } else {
-        const classifiedRows = filterClassifiedRows(processedData);
-        const sortedClassifiedRows = sortClassifiedByDefaultH2(classifiedRows);
+            // Import directly based on selected period type
+      const classifiedRows = filterClassifiedRows(processedData);
+      const sortedClassifiedRows = sortClassifiedByDefaultH2(classifiedRows);
+      const isPreviousImport = importPeriodType === 'previous';
+
+      if (manualInventoryValues && inventorySource === 'manual' && hasInventoryInRows(sortedClassifiedRows)) {
+        setIsInventoryImportPromptOpen(true);
+      }
+
+      if (isPreviousImport) {
         setPreviousData(sortedClassifiedRows);
+        setCurrentData(sortedClassifiedRows);
+      } else {
         setCurrentData(sortedClassifiedRows);
       }
       
@@ -1886,13 +2041,18 @@ export default function FinancialReview() {
   const handlePeriodConfirm = useCallback(async () => {
     if (!pendingImportData) return;
     
-    if (importPeriodType === 'current') {
-      const classifiedRows = filterClassifiedRows(pendingImportData);
-      setCurrentData(sortClassifiedByDefaultH2(classifiedRows));
-    } else {
-      const classifiedRows = filterClassifiedRows(pendingImportData);
-      const sortedClassifiedRows = sortClassifiedByDefaultH2(classifiedRows);
+        const classifiedRows = filterClassifiedRows(pendingImportData);
+    const sortedClassifiedRows = sortClassifiedByDefaultH2(classifiedRows);
+    const isPreviousImport = importPeriodType === 'previous';
+
+    if (manualInventoryValues && inventorySource === 'manual' && hasInventoryInRows(sortedClassifiedRows)) {
+      setIsInventoryImportPromptOpen(true);
+    }
+
+    if (isPreviousImport) {
       setPreviousData(sortedClassifiedRows);
+      setCurrentData(sortedClassifiedRows);
+    } else {
       setCurrentData(sortedClassifiedRows);
     }
     
@@ -2470,6 +2630,10 @@ export default function FinancialReview() {
     }).format(scaled);
   };
 
+  const noteSourceData = useMemo(() => {
+    return applyManualInventoryRows(currentData);
+  }, [currentData, applyManualInventoryRows]);
+
   const availableNoteH2 = useMemo(() => {
     if (noteEditMode) {
       const allowedH1 = noteStatementType === 'BS'
@@ -2482,8 +2646,8 @@ export default function FinancialReview() {
       });
       return ordered;
     }
-    return getNoteH2Options(noteStatementType, currentData, numberScale);
-  }, [noteStatementType, currentData, numberScale, noteEditMode, mergedBsplHeads]);
+    return getNoteH2Options(noteStatementType, noteSourceData, numberScale);
+  }, [noteStatementType, noteSourceData, numberScale, noteEditMode, mergedBsplHeads]);
 
   const noteTolerance = useMemo(() => getScaleFactor(numberScale) * 0.005, [numberScale]);
 
@@ -2522,21 +2686,21 @@ export default function FinancialReview() {
 
   const preparedNotesBSRaw = useMemo(() => {
     return buildPreparedNotes({
-      classifiedRows: currentData,
+      classifiedRows: noteSourceData,
       statementType: 'BS',
       tolerance: noteTolerance,
       h2Order: bsNoteH2Order,
     });
-  }, [currentData, noteTolerance, bsNoteH2Order]);
+  }, [noteSourceData, noteTolerance, bsNoteH2Order]);
 
   const preparedNotesPLRaw = useMemo(() => {
     return buildPreparedNotes({
-      classifiedRows: currentData,
+      classifiedRows: noteSourceData,
       statementType: 'PL',
       tolerance: noteTolerance,
       h2Order: plNoteH2Order,
     });
-  }, [currentData, noteTolerance, plNoteH2Order]);
+  }, [noteSourceData, noteTolerance, plNoteH2Order]);
 
   const preparedNotesBS = useMemo(() => {
     return applyNoteNumberOffset(preparedNotesBSRaw, noteNumberStart);
@@ -2554,6 +2718,35 @@ export default function FinancialReview() {
   const noteNumberMap = useMemo(() => {
     return new Map(preparedNotes.map((note) => [note.H2, note.noteNo]));
   }, [preparedNotes]);
+
+  const noteReportingScale = useMemo(() => {
+    switch (numberScale) {
+      case 'actual':
+        return 'rupees';
+      case 'thousands':
+        return 'thousands';
+      case 'lakhs':
+        return 'lakhs';
+      case 'crores':
+        return 'crores';
+      default:
+        return 'auto';
+    }
+  }, [numberScale]);
+
+  const noteLedgerItems = useMemo<LedgerItem[]>(() => {
+    if (!selectedNoteH2) return [];
+    const allowedH1 = noteStatementType === 'PL' ? new Set(['Income', 'Expense']) : new Set(['Asset', 'Liability']);
+    return noteSourceData
+      .filter(row => allowedH1.has(String(row['H1'] || '')) && String(row['H2'] || '') === selectedNoteH2)
+      .map(row => ({
+        ledgerName: String(row['Ledger Name'] || ''),
+        groupName: String(row['Parent Group'] || row['Primary Group'] || ''),
+        openingBalance: Number(row['Opening Balance'] || 0),
+        closingBalance: Number(row['Closing Balance'] || 0),
+        classification: String(row['H3'] || ''),
+      }));
+  }, [noteSourceData, selectedNoteH2, noteStatementType]);
 
   const faceSummaryBS = useMemo(() => buildFaceFromNotes(preparedNotesBS, 'BS'), [preparedNotesBS]);
   const faceSummaryPL = useMemo(() => buildFaceFromNotes(preparedNotesPL, 'PL'), [preparedNotesPL]);
@@ -2633,9 +2826,9 @@ export default function FinancialReview() {
     order.push('manual:bs-face:shareholders-funds');
     [
       'Share Capital',
-      'Owners’ Capital Account',
+      'Owners� Capital Account',
       "Owners' Capital Account",
-      'Partners’ Capital Account',
+      'Partners� Capital Account',
       "Partners' Capital Account",
       'Reserves and Surplus',
     ].forEach((h2) => {
@@ -3487,7 +3680,7 @@ export default function FinancialReview() {
     return buildNoteStructure({
       statementType: noteStatementType,
       selectedH2: selectedNoteH2,
-      rows: currentData,
+      rows: noteSourceData,
       numberScale,
       formatNumber,
       hideEmpty: !noteEditMode,
@@ -3495,7 +3688,7 @@ export default function FinancialReview() {
       includeParentTotals: showParentNoteTotals,
       includeZeroRows: noteEditMode,
     });
-  }, [noteStatementType, selectedNoteH2, currentData, numberScale, formatNumber, noteH3Order, showParentNoteTotals, noteEditMode]);
+  }, [noteStatementType, selectedNoteH2, noteSourceData, numberScale, formatNumber, noteH3Order, showParentNoteTotals, noteEditMode]);
 
   const noteKey = useMemo(() => {
     if (!selectedNoteH2) return '';
@@ -4948,132 +5141,191 @@ export default function FinancialReview() {
     </div>
   ) : (
     <div className="flex flex-col gap-4">
-                  <div className="flex flex-wrap items-center gap-4">
-                    <div className="text-xs font-semibold">
-                      {noteStatementType === 'PL' ? 'Profit & Loss Notes' : 'Balance Sheet Notes'}
-                    </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="show-parent-totals"
-            checked={showParentNoteTotals}
-            onCheckedChange={(value) => setShowParentNoteTotals(Boolean(value))}
-          />
-          <Label htmlFor="show-parent-totals" className="text-xs">
-            Show parent totals
-          </Label>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs font-semibold">
+          {noteStatementType === 'PL' ? 'Profit & Loss Notes' : 'Balance Sheet Notes'}
         </div>
         <div className="flex items-center gap-2">
-          <Checkbox
-            id="edit-notes-layout"
-            checked={noteEditMode}
-            onCheckedChange={(value) => {
-              const nextValue = Boolean(value);
-              setNoteEditMode(nextValue);
-              if (nextValue) {
-                ensureNoteLayout();
-              } else {
-                setSelectedNoteRowId(null);
-              }
-            }}
-          />
-          <Label htmlFor="edit-notes-layout" className="text-xs">
-            Edit notes
-          </Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-xs">Row Height</Label>
-          <Input
-            type="number"
-            min={18}
-            max={80}
-            value={noteTableSettings.rowHeight}
-            onChange={(e) => setNoteTableSettings(prev => ({
-              ...prev,
-              rowHeight: Math.max(18, Math.min(80, parseInt(e.target.value, 10) || prev.rowHeight)),
-            }))}
-            className="h-8 w-20 text-xs"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-xs">Particulars Width</Label>
-          <Input
-            type="number"
-            min={200}
-            max={900}
-            value={noteTableSettings.particularsWidth}
-            onChange={(e) => setNoteTableSettings(prev => ({
-              ...prev,
-              particularsWidth: Math.max(200, Math.min(900, parseInt(e.target.value, 10) || prev.particularsWidth)),
-            }))}
-            className="h-8 w-24 text-xs"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-xs">Amount Width</Label>
-          <Input
-            type="number"
-            min={120}
-            max={400}
-            value={noteTableSettings.amountWidth}
-            onChange={(e) => setNoteTableSettings(prev => ({
-              ...prev,
-              amountWidth: Math.max(120, Math.min(400, parseInt(e.target.value, 10) || prev.amountWidth)),
-            }))}
-            className="h-8 w-24 text-xs"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-xs">Font Size</Label>
-          <Input
-            type="number"
-            min={10}
-            max={18}
-            value={noteTableSettings.fontSize}
-            onChange={(e) => setNoteTableSettings(prev => ({
-              ...prev,
-              fontSize: Math.max(10, Math.min(18, parseInt(e.target.value, 10) || prev.fontSize)),
-            }))}
-            className="h-8 w-20 text-xs"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-xs">Zoom</Label>
           <Button
             size="sm"
             variant="outline"
             className="h-7 text-xs px-2"
-            onClick={() => setNotePreviewZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
+            onClick={() => setIsNoteLedgerDialogOpen(true)}
+            disabled={!selectedNoteH2}
           >
-            -
+            Ledger Details
           </Button>
-          <div className="text-xs w-10 text-center">{Math.round(notePreviewZoom * 100)}%</div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs px-2"
-            onClick={() => setNotePreviewZoom((prev) => Math.min(1.6, Math.round((prev + 0.1) * 10) / 10))}
-          >
-            +
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs px-2"
-            onClick={() => setNotePreviewZoom(1)}
-          >
-            Reset
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs px-2"
-            onClick={handleResetNotePreview}
-          >
-            Reset Preview
-          </Button>
+          {isProUser && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setActiveTab(noteStatementType === 'PL' ? 'face-pl' : 'face-bs')}
+            >
+              Back to {noteStatementType === 'PL' ? 'P&amp;L Face' : 'Balance Sheet Face'}
+            </Button>
+          )}
+          {isProUser && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setShowNoteSettings(prev => !prev)}
+            >
+              {showNoteSettings ? 'Hide Settings' : 'Notes Settings'}
+            </Button>
+          )}
         </div>
       </div>
-                  <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
+
+      {noteStatementType === 'BS' && selectedNoteH2 === 'Inventories' && (
+        <div className="flex flex-wrap items-center gap-2 border rounded-md px-2 py-1 text-xs">
+          <span className="text-muted-foreground">Inventory Source:</span>
+          <Button
+            size="sm"
+            variant={inventorySource === 'imported' ? 'default' : 'outline'}
+            className="h-7 text-xs px-2"
+            onClick={() => setInventorySource('imported')}
+          >
+            Fetch from Tally
+          </Button>
+          <Button
+            size="sm"
+            variant={inventorySource === 'manual' ? 'default' : 'outline'}
+            className="h-7 text-xs px-2"
+            onClick={() => setIsManualInventoryDialogOpen(true)}
+          >
+            Enter manually
+          </Button>
+          <Badge variant="secondary">{inventorySource === 'manual' ? 'Manual' : 'Imported'}</Badge>
+          {inventorySource === 'manual' && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setIsManualInventoryDialogOpen(true)}
+            >
+              Edit values
+            </Button>
+          )}
+        </div>
+      )}
+      {isProUser && showNoteSettings && (
+        <div className="flex flex-wrap items-center gap-4 border rounded-md p-2">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="edit-notes-layout"
+              checked={noteEditMode}
+              onCheckedChange={(value) => {
+                const nextValue = Boolean(value);
+                setNoteEditMode(nextValue);
+                if (nextValue) {
+                  ensureNoteLayout();
+                } else {
+                  setSelectedNoteRowId(null);
+                }
+              }}
+            />
+            <Label htmlFor="edit-notes-layout" className="text-xs">
+              Edit notes
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Row Height</Label>
+            <Input
+              type="number"
+              min={18}
+              max={80}
+              value={noteTableSettings.rowHeight}
+              onChange={(e) => setNoteTableSettings(prev => ({
+                ...prev,
+                rowHeight: Math.max(18, Math.min(80, parseInt(e.target.value, 10) || prev.rowHeight)),
+              }))}
+              className="h-8 w-20 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Particulars Width</Label>
+            <Input
+              type="number"
+              min={200}
+              max={900}
+              value={noteTableSettings.particularsWidth}
+              onChange={(e) => setNoteTableSettings(prev => ({
+                ...prev,
+                particularsWidth: Math.max(200, Math.min(900, parseInt(e.target.value, 10) || prev.particularsWidth)),
+              }))}
+              className="h-8 w-24 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Amount Width</Label>
+            <Input
+              type="number"
+              min={120}
+              max={400}
+              value={noteTableSettings.amountWidth}
+              onChange={(e) => setNoteTableSettings(prev => ({
+                ...prev,
+                amountWidth: Math.max(120, Math.min(400, parseInt(e.target.value, 10) || prev.amountWidth)),
+              }))}
+              className="h-8 w-24 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Font Size</Label>
+            <Input
+              type="number"
+              min={10}
+              max={18}
+              value={noteTableSettings.fontSize}
+              onChange={(e) => setNoteTableSettings(prev => ({
+                ...prev,
+                fontSize: Math.max(10, Math.min(18, parseInt(e.target.value, 10) || prev.fontSize)),
+              }))}
+              className="h-8 w-20 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs">Zoom</Label>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setNotePreviewZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
+            >
+              -
+            </Button>
+            <div className="text-xs w-10 text-center">{Math.round(notePreviewZoom * 100)}%</div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setNotePreviewZoom((prev) => Math.min(1.6, Math.round((prev + 0.1) * 10) / 10))}
+            >
+              +
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={() => setNotePreviewZoom(1)}
+            >
+              Reset
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs px-2"
+              onClick={handleResetNotePreview}
+            >
+              Reset Preview
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
         <div className="border rounded-md p-2 max-h-[520px] overflow-auto">
           {noteEditMode && (
             <div className="flex flex-col gap-2 mb-3">
@@ -5552,129 +5804,135 @@ export default function FinancialReview() {
 
     return (
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-xs font-semibold">
             {statementType === 'PL' ? 'Profit & Loss Face' : 'Balance Sheet Face'}
           </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id={`face-show-parent-${statementType}`}
-              checked={showParentNoteTotals}
-              onCheckedChange={(value) => setShowParentNoteTotals(Boolean(value))}
-            />
-            <Label htmlFor={`face-show-parent-${statementType}`} className="text-xs">
-              Show parent totals
-            </Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id={`face-edit-notes-${statementType}`}
-              checked={noteEditMode}
-              onCheckedChange={(value) => {
-                const nextValue = Boolean(value);
-                setNoteEditMode(nextValue);
-                if (!nextValue) {
-                  setSelectedFaceRowId(null);
-                }
-              }}
-            />
-            <Label htmlFor={`face-edit-notes-${statementType}`} className="text-xs">
-              Edit notes
-            </Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs">Row Height</Label>
-            <Input
-              type="number"
-              min={18}
-              max={80}
-              value={noteTableSettings.rowHeight}
-              onChange={(e) => setNoteTableSettings(prev => ({
-                ...prev,
-                rowHeight: Math.max(18, Math.min(80, parseInt(e.target.value, 10) || prev.rowHeight)),
-              }))}
-              className="h-8 w-20 text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs">Particulars Width</Label>
-            <Input
-              type="number"
-              min={200}
-              max={900}
-              value={noteTableSettings.particularsWidth}
-              onChange={(e) => setNoteTableSettings(prev => ({
-                ...prev,
-                particularsWidth: Math.max(200, Math.min(900, parseInt(e.target.value, 10) || prev.particularsWidth)),
-              }))}
-              className="h-8 w-24 text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs">Amount Width</Label>
-            <Input
-              type="number"
-              min={120}
-              max={400}
-              value={noteTableSettings.amountWidth}
-              onChange={(e) => setNoteTableSettings(prev => ({
-                ...prev,
-                amountWidth: Math.max(120, Math.min(400, parseInt(e.target.value, 10) || prev.amountWidth)),
-              }))}
-              className="h-8 w-24 text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs">Font Size</Label>
-            <Input
-              type="number"
-              min={10}
-              max={18}
-              value={noteTableSettings.fontSize}
-              onChange={(e) => setNoteTableSettings(prev => ({
-                ...prev,
-                fontSize: Math.max(10, Math.min(18, parseInt(e.target.value, 10) || prev.fontSize)),
-              }))}
-              className="h-8 w-20 text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs">Zoom</Label>
+          {isProUser && (
             <Button
               size="sm"
               variant="outline"
               className="h-7 text-xs px-2"
-              onClick={() => setNotePreviewZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
+              onClick={() => setShowFaceSettings(prev => !prev)}
             >
-              -
+              {showFaceSettings ? 'Hide Settings' : 'Face Settings'}
             </Button>
-            <div className="text-xs w-10 text-center">{Math.round(notePreviewZoom * 100)}%</div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs px-2"
-              onClick={() => setNotePreviewZoom((prev) => Math.min(1.6, Math.round((prev + 0.1) * 10) / 10))}
-            >
-              +
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs px-2"
-              onClick={() => setNotePreviewZoom(1)}
-            >
-              Reset
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs px-2"
-              onClick={handleResetNotePreview}
-            >
-              Reset Preview
-            </Button>
-          </div>
+          )}
         </div>
+
+        {isProUser && showFaceSettings && (
+          <div className="flex flex-wrap items-center gap-4 border rounded-md p-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id={`face-edit-notes-${statementType}`}
+                checked={noteEditMode}
+                onCheckedChange={(value) => {
+                  const nextValue = Boolean(value);
+                  setNoteEditMode(nextValue);
+                  if (!nextValue) {
+                    setSelectedFaceRowId(null);
+                  }
+                }}
+              />
+              <Label htmlFor={`face-edit-notes-${statementType}`} className="text-xs">
+                Edit notes
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Row Height</Label>
+              <Input
+                type="number"
+                min={18}
+                max={80}
+                value={noteTableSettings.rowHeight}
+                onChange={(e) => setNoteTableSettings(prev => ({
+                  ...prev,
+                  rowHeight: Math.max(18, Math.min(80, parseInt(e.target.value, 10) || prev.rowHeight)),
+                }))}
+                className="h-8 w-20 text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Particulars Width</Label>
+              <Input
+                type="number"
+                min={200}
+                max={900}
+                value={noteTableSettings.particularsWidth}
+                onChange={(e) => setNoteTableSettings(prev => ({
+                  ...prev,
+                  particularsWidth: Math.max(200, Math.min(900, parseInt(e.target.value, 10) || prev.particularsWidth)),
+                }))}
+                className="h-8 w-24 text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Amount Width</Label>
+              <Input
+                type="number"
+                min={120}
+                max={400}
+                value={noteTableSettings.amountWidth}
+                onChange={(e) => setNoteTableSettings(prev => ({
+                  ...prev,
+                  amountWidth: Math.max(120, Math.min(400, parseInt(e.target.value, 10) || prev.amountWidth)),
+                }))}
+                className="h-8 w-24 text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Font Size</Label>
+              <Input
+                type="number"
+                min={10}
+                max={18}
+                value={noteTableSettings.fontSize}
+                onChange={(e) => setNoteTableSettings(prev => ({
+                  ...prev,
+                  fontSize: Math.max(10, Math.min(18, parseInt(e.target.value, 10) || prev.fontSize)),
+                }))}
+                className="h-8 w-20 text-xs"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">Zoom</Label>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs px-2"
+                onClick={() => setNotePreviewZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
+              >
+                -
+              </Button>
+              <div className="text-xs w-10 text-center">{Math.round(notePreviewZoom * 100)}%</div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs px-2"
+                onClick={() => setNotePreviewZoom((prev) => Math.min(1.6, Math.round((prev + 0.1) * 10) / 10))}
+              >
+                +
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs px-2"
+                onClick={() => setNotePreviewZoom(1)}
+              >
+                Reset
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs px-2"
+                onClick={handleResetNotePreview}
+              >
+                Reset Preview
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
           <div className="border rounded-md p-2 max-h-[520px] overflow-auto">
             {noteEditMode && (
@@ -6508,20 +6766,24 @@ export default function FinancialReview() {
                 <FileSpreadsheet className="w-3 h-3 mr-1" />
                 Classified TB
               </TabsTrigger>
-              <TabsTrigger 
-                value="face-bs"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
-              >
-                <FileSpreadsheet className="w-3 h-3 mr-1" />
-                Balance Sheet Face
-              </TabsTrigger>
-              <TabsTrigger 
-                value="face-pl"
-                className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
-              >
-                <FileSpreadsheet className="w-3 h-3 mr-1" />
-                P&amp;L Face
-              </TabsTrigger>
+              {isProUser && (
+                <TabsTrigger 
+                  value="face-bs"
+                  className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
+                >
+                  <FileSpreadsheet className="w-3 h-3 mr-1" />
+                  Balance Sheet Face
+                </TabsTrigger>
+              )}
+              {isProUser && (
+                <TabsTrigger 
+                  value="face-pl"
+                  className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
+                >
+                  <FileSpreadsheet className="w-3 h-3 mr-1" />
+                  P&amp;L Face
+                </TabsTrigger>
+              )}
               <TabsTrigger 
                 value="notes-bs"
                 className="relative text-xs data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:shadow-none data-[state=active]:after:absolute data-[state=active]:after:bottom-0 data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:h-0.5 data-[state=active]:after:bg-blue-600 rounded-none border-0 h-6 py-0 px-2"
@@ -7187,6 +7449,62 @@ export default function FinancialReview() {
       </div>
     </div>
     
+      <Dialog open={isManualInventoryDialogOpen} onOpenChange={setIsManualInventoryDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Manual Inventory Entry</DialogTitle>
+            <DialogDescription>
+              Enter opening and closing inventory values. Blank fields will be saved as 0.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 text-sm">
+            <div className="grid grid-cols-[1fr_120px_120px] items-center gap-2">
+              <div className="text-xs font-medium">Particulars</div>
+              <div className="text-xs font-medium text-right">Opening</div>
+              <div className="text-xs font-medium text-right">Closing</div>
+            </div>
+            <div className="grid grid-cols-[1fr_120px_120px] items-center gap-2">
+              <div>Raw Materials</div>
+              <Input type="number" value={manualInventoryDraft.rawMaterials.opening} onChange={(e) => updateManualInventoryDraftValue('rawMaterials', 'opening', e.target.value)} className="h-8 text-xs text-right" />
+              <Input type="number" value={manualInventoryDraft.rawMaterials.closing} onChange={(e) => updateManualInventoryDraftValue('rawMaterials', 'closing', e.target.value)} className="h-8 text-xs text-right" />
+            </div>
+            <div className="grid grid-cols-[1fr_120px_120px] items-center gap-2">
+              <div>Work-in-Progress</div>
+              <Input type="number" value={manualInventoryDraft.workInProgress.opening} onChange={(e) => updateManualInventoryDraftValue('workInProgress', 'opening', e.target.value)} className="h-8 text-xs text-right" />
+              <Input type="number" value={manualInventoryDraft.workInProgress.closing} onChange={(e) => updateManualInventoryDraftValue('workInProgress', 'closing', e.target.value)} className="h-8 text-xs text-right" />
+            </div>
+            <div className="grid grid-cols-[1fr_120px_120px] items-center gap-2">
+              <div>Finished Goods</div>
+              <Input type="number" value={manualInventoryDraft.finishedGoods.opening} onChange={(e) => updateManualInventoryDraftValue('finishedGoods', 'opening', e.target.value)} className="h-8 text-xs text-right" />
+              <Input type="number" value={manualInventoryDraft.finishedGoods.closing} onChange={(e) => updateManualInventoryDraftValue('finishedGoods', 'closing', e.target.value)} className="h-8 text-xs text-right" />
+            </div>
+            <div className="grid grid-cols-[1fr_120px_120px] items-center gap-2">
+              <div>Stock-in-Trade</div>
+              <Input type="number" value={manualInventoryDraft.stockInTrade.opening} onChange={(e) => updateManualInventoryDraftValue('stockInTrade', 'opening', e.target.value)} className="h-8 text-xs text-right" />
+              <Input type="number" value={manualInventoryDraft.stockInTrade.closing} onChange={(e) => updateManualInventoryDraftValue('stockInTrade', 'closing', e.target.value)} className="h-8 text-xs text-right" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsManualInventoryDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveManualInventory}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isInventoryImportPromptOpen} onOpenChange={setIsInventoryImportPromptOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Manual Inventory Values Found</DialogTitle>
+            <DialogDescription>
+              Manual inventory values are saved for this engagement. Do you want to clear them and use imported inventory values?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleKeepManualInventory}>No, keep manual</Button>
+            <Button onClick={() => handleClearManualInventory(true)}>Yes, clear & replace</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Table Settings Dialog */}
       <Dialog open={isTableSettingsOpen} onOpenChange={setIsTableSettingsOpen}>
         <DialogContent className="max-w-3xl">
@@ -7726,6 +8044,14 @@ export default function FinancialReview() {
         onAddGroup={handleAddTallyGroup}
       />
 
+      <LedgerAnnexureDialog
+        open={isNoteLedgerDialogOpen}
+        onOpenChange={setIsNoteLedgerDialogOpen}
+        noteKey={selectedNoteH2 || null}
+        ledgers={noteLedgerItems}
+        reportingScale={noteReportingScale}
+      />
+
       {/* ODBC Settings Dialog */}
       <Dialog open={isOdbcDialogOpen} onOpenChange={setIsOdbcDialogOpen}>
         <DialogContent className="max-w-md">
@@ -7896,3 +8222,36 @@ export default function FinancialReview() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
