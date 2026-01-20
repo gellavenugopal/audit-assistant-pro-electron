@@ -987,6 +987,12 @@ function createWindow() {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
+  try {
+    app.setPath('cache', path.join(app.getPath('userData'), 'Cache'));
+  } catch (error) {
+    safeLog('Unable to set cache path:', error && error.message ? error.message : error);
+  }
+
   safeLog('Electron app ready - IPC handlers should be registered');
   setAppMenu();
   registerIpcHandlers();
