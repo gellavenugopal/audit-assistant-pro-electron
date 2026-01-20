@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { db } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -146,16 +146,18 @@ export function DataIntegrityPanel() {
     setScanning(true);
     try {
       // Fetch ALL engagements
-      const { data: engagements, error: engError } = await supabase
+      const { data: engagements, error: engError } = await db
         .from('engagements')
-        .select('id, name, client_id, client_name, financial_year, status, created_at');
+        .select('id, name, client_id, client_name, financial_year, status, created_at')
+        .execute();
 
       if (engError) throw engError;
 
       // Fetch all clients
-      const { data: clients, error: clientError } = await supabase
+      const { data: clients, error: clientError } = await db
         .from('clients')
-        .select('id, name, status');
+        .select('id, name, status')
+        .execute();
 
       if (clientError) throw clientError;
 
@@ -205,19 +207,19 @@ export function DataIntegrityPanel() {
 
   const checkEngagementChildren = async (engagementId: string): Promise<ChildCounts> => {
     const [risks, notes, evidence, tb, assignments] = await Promise.all([
-      supabase.from('risks').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
-      supabase.from('review_notes').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
-      supabase.from('evidence_files').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
-      supabase.from('trial_balance_lines').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
-      supabase.from('engagement_assignments').select('id', { count: 'exact', head: true }).eq('engagement_id', engagementId),
+      db.from('risks').select('id').eq('engagement_id', engagementId).execute(),
+      db.from('review_notes').select('id').eq('engagement_id', engagementId).execute(),
+      db.from('evidence_files').select('id').eq('engagement_id', engagementId).execute(),
+      db.from('trial_balance_lines').select('id').eq('engagement_id', engagementId).execute(),
+      db.from('engagement_assignments').select('id').eq('engagement_id', engagementId).execute(),
     ]);
 
     return {
-      risks: risks.count || 0,
-      review_notes: notes.count || 0,
-      evidence_files: evidence.count || 0,
-      trial_balance_lines: tb.count || 0,
-      assignments: assignments.count || 0,
+      risks: risks.data?.length || 0,
+      review_notes: notes.data?.length || 0,
+      evidence_files: evidence.data?.length || 0,
+      trial_balance_lines: tb.data?.length || 0,
+      assignments: assignments.data?.length || 0,
     };
   };
 
@@ -237,13 +239,14 @@ export function DataIntegrityPanel() {
     setReassigning(true);
     try {
       const selectedClient = activeClients.find(c => c.id === selectedClientId);
-      const { error } = await supabase
+      const { error } = await db
         .from('engagements')
         .update({ 
           client_id: selectedClientId,
           client_name: selectedClient?.name || reassignTarget.client_name
         })
-        .eq('id', reassignTarget.id);
+        .eq('id', reassignTarget.id)
+        .execute();
 
       if (error) throw error;
       toast.success('Engagement reassigned successfully');
@@ -275,31 +278,34 @@ export function DataIntegrityPanel() {
     setCreatingClient(true);
     try {
       // Create client
-      const { data: newClient, error: createError } = await supabase
+      const { data: newClient, error: createError } = await db
         .from('clients')
         .insert({
           name: newClientName.trim(),
           industry: newClientIndustry.trim() || 'General',
-          created_by: user?.id,
+          created_by: user?.id || 'system',
           status: 'active'
         })
-        .select('id, name')
-        .single();
+        .execute();
 
       if (createError) throw createError;
 
+      // Get the inserted client (assumes the last insert is returned)
+      const insertedClient = Array.isArray(newClient) ? newClient[0] : newClient;
+
       // Link engagement to new client
-      const { error: updateError } = await supabase
+      const { error: updateError } = await db
         .from('engagements')
         .update({ 
-          client_id: newClient.id,
-          client_name: newClient.name
+          client_id: insertedClient.id,
+          client_name: insertedClient.name
         })
-        .eq('id', createClientTarget.id);
+        .eq('id', createClientTarget.id)
+        .execute();
 
       if (updateError) throw updateError;
 
-      toast.success(`Created client "${newClient.name}" and linked engagement`);
+      toast.success(`Created client "${insertedClient.name}" and linked engagement`);
       setCreateClientDialogOpen(false);
       setCreateClientTarget(null);
       setNewClientName('');
@@ -318,10 +324,11 @@ export function DataIntegrityPanel() {
     
     setArchiving(true);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('engagements')
         .update({ status: 'archived' })
-        .eq('id', archiveTarget.id);
+        .eq('id', archiveTarget.id)
+        .execute();
 
       if (error) throw error;
       toast.success('Engagement archived successfully');
@@ -354,10 +361,11 @@ export function DataIntegrityPanel() {
     
     setDeleting(true);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('engagements')
         .delete()
-        .eq('id', deleteTarget.id);
+        .eq('id', deleteTarget.id)
+        .execute();
 
       if (error) throw error;
       toast.success('Engagement deleted permanently');
@@ -380,12 +388,12 @@ export function DataIntegrityPanel() {
     
     setBulkArchiving(true);
     try {
-      const { error } = await supabase
-        .from('engagements')
-        .update({ status: 'archived' })
-        .in('id', Array.from(selectedIds));
-
-      if (error) throw error;
+      // Update each engagement individually since SQLite client doesn't support .in()
+      const updatePromises = Array.from(selectedIds).map(id =>
+        db.from('engagements').update({ status: 'archived' }).eq('id', id).execute()
+      );
+      
+      await Promise.all(updatePromises);
       toast.success(`${selectedIds.size} engagement(s) archived`);
       handleScan();
     } catch (error: any) {
@@ -402,15 +410,19 @@ export function DataIntegrityPanel() {
     setReassigning(true);
     try {
       const selectedClient = activeClients.find(c => c.id === selectedClientId);
-      const { error } = await supabase
-        .from('engagements')
-        .update({ 
-          client_id: selectedClientId,
-          client_name: selectedClient?.name || ''
-        })
-        .in('id', Array.from(selectedIds));
-
-      if (error) throw error;
+      
+      // Update each engagement individually since SQLite client doesn't support .in()
+      const updatePromises = Array.from(selectedIds).map(id =>
+        db.from('engagements')
+          .update({ 
+            client_id: selectedClientId,
+            client_name: selectedClient?.name || ''
+          })
+          .eq('id', id)
+          .execute()
+      );
+      
+      await Promise.all(updatePromises);
       toast.success(`${selectedIds.size} engagement(s) reassigned`);
       setBulkReassignOpen(false);
       setSelectedClientId('');

@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+const db = getSQLiteClient();
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
@@ -49,65 +50,30 @@ export function BulkTeamImportDialog({ onSuccess }: BulkTeamImportDialogProps) {
     if (parsedMembers.length === 0) return;
 
     setImporting(true);
-    let successCount = 0;
-    let errorCount = 0;
 
-    // Get current user's name for inviter
-    let inviterName = 'Admin';
     try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('user_id', user?.id)
-        .single();
-      if (profile?.full_name) {
-        inviterName = profile.full_name;
-      }
-    } catch (e) {
-      // Use default inviterName
-    }
+      // Note: Email invitation functionality requires external email service integration
+      // For now, display the list of members to invite manually
+      const memberList = parsedMembers.map(m =>
+        `${m.full_name} (${m.email}) - Role: ${m.role}`
+      ).join('\n');
 
-    const appUrl = window.location.origin;
+      toast.info(
+        `Email invitations not available. Please manually invite these ${parsedMembers.length} team members:\n${memberList.substring(0, 200)}${memberList.length > 200 ? '...' : ''}`,
+        { duration: 10000 }
+      );
 
-    for (const member of parsedMembers) {
-      try {
-        // Invite each team member via the send-invite edge function
-        const { error } = await supabase.functions.invoke('send-invite', {
-          body: {
-            email: member.email,
-            role: member.role,
-            full_name: member.full_name,
-            phone: member.phone,
-            inviterName,
-            appUrl,
-          },
-        });
-
-        if (error) {
-          errorCount++;
-        } else {
-          successCount++;
-        }
-      } catch {
-        errorCount++;
-      }
-    }
-
-    setImporting(false);
-    
-    if (successCount > 0) {
-      toast.success(`Successfully sent ${successCount} invitation(s)`);
       onSuccess();
-    }
-    if (errorCount > 0) {
-      toast.error(`Failed to send ${errorCount} invitation(s)`);
-    }
-
-    setOpen(false);
-    setParsedMembers([]);
-    setFileName('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    } catch (error) {
+      toast.error('Failed to process team members');
+    } finally {
+      setImporting(false);
+      setOpen(false);
+      setParsedMembers([]);
+      setFileName('');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -153,7 +119,7 @@ export function BulkTeamImportDialog({ onSuccess }: BulkTeamImportDialogProps) {
           <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10">
             <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5" />
             <p className="text-xs text-muted-foreground">
-              Valid roles: <span className="font-medium">partner, manager, senior, staff, viewer</span>. 
+              Valid roles: <span className="font-medium">partner, manager, senior, staff, viewer</span>.
               Invalid roles will default to "staff".
             </p>
           </div>

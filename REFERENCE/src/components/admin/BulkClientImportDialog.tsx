@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+const db = getSQLiteClient();
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
@@ -53,7 +54,7 @@ export function BulkClientImportDialog({ onSuccess }: BulkClientImportDialogProp
 
     for (const client of parsedClients) {
       try {
-        const { error } = await supabase.from('clients').insert({
+        const { error } = await db.from('clients').insert({
           name: client.name,
           industry: client.industry,
           contact_person: client.contact_person,
@@ -64,8 +65,8 @@ export function BulkClientImportDialog({ onSuccess }: BulkClientImportDialogProp
           cin: client.cin,
           state: client.state,
           pin: client.pin,
-          created_by: user?.id,
-        });
+          created_by: user?.id || 'system',
+        }).execute();
 
         if (error) {
           errorCount++;
@@ -78,7 +79,7 @@ export function BulkClientImportDialog({ onSuccess }: BulkClientImportDialogProp
     }
 
     setImporting(false);
-    
+
     if (successCount > 0) {
       toast.success(`Successfully imported ${successCount} client(s)`);
       onSuccess();
