@@ -138,39 +138,6 @@ export const FinancialReviewToolbar = React.memo((props: FinancialReviewToolbarP
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const activeSelectionCount = activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount;
-              if (activeSelectionCount === 0) {
-                toast({
-                  title: 'No Selection',
-                  description:
-                    activeTab === 'stock-items'
-                      ? 'Please select stock items to update'
-                      : 'Please select visible filtered rows to update',
-                  variant: 'destructive',
-                });
-                return;
-              }
-              onBulkUpdate();
-            }}
-            disabled={activeTab === 'stock-items' ? stockSelectedCount === 0 : currentDataLength === 0 || selectedFilteredCount === 0}
-            className="h-7 text-xs px-2"
-          >
-            <Settings className="w-3 h-3 mr-1.5" />
-            {activeTab === 'stock-items'
-              ? stockSelectedCount === 1
-                ? 'Update Stock'
-                : 'Bulk Update Stock'
-              : selectedFilteredCount === 1
-                ? 'Update Ledger'
-                : 'Bulk Update Ledgers'}{' '}
-            {(activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount) > 0 &&
-              `(${activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount})`}
-          </Button>
-
           <Button variant="outline" size="sm" onClick={onOpenRulesBot} className="h-8">
             <Sparkles className="w-3 h-3 mr-1.5" />
             Rules Bot {classificationRulesCount > 0 ? `(${classificationRulesCount})` : ''}
@@ -323,6 +290,38 @@ export const FinancialReviewToolbar = React.memo((props: FinancialReviewToolbarP
               </Badge>
             ) : null;
           })()}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const activeSelectionCount = activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount;
+            if (activeSelectionCount === 0) {
+              toast({
+                title: 'No Selection',
+                description:
+                  activeTab === 'stock-items'
+                    ? 'Please select stock items to update'
+                    : 'Please select visible filtered rows to update',
+                variant: 'destructive',
+              });
+              return;
+            }
+            onBulkUpdate();
+          }}
+          disabled={activeTab === 'stock-items' ? stockSelectedCount === 0 : currentDataLength === 0 || selectedFilteredCount === 0}
+          className="h-7 text-xs px-2"
+        >
+          <Settings className="w-3 h-3 mr-1.5" />
+          {activeTab === 'stock-items'
+            ? stockSelectedCount === 1
+              ? 'Update Stock'
+              : 'Bulk Update Stock'
+            : selectedFilteredCount === 1
+              ? 'Update Ledger'
+              : 'Bulk Update Ledgers'}{' '}
+          {(activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount) > 0 &&
+            `(${activeTab === 'stock-items' ? stockSelectedCount : selectedFilteredCount})`}
         </Button>
 
         <div className="flex items-center gap-2 flex-1" />

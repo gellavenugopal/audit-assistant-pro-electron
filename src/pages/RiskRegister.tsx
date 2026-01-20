@@ -33,7 +33,11 @@ import { Plus, Search, AlertTriangle, Filter, Loader2, Upload } from 'lucide-rea
 import { Skeleton } from '@/components/ui/skeleton';
 import { BulkImportDialog } from '@/components/BulkImportDialog';
 
-export default function RiskRegister() {
+type RiskRegisterContentProps = {
+  showPageHeader?: boolean;
+};
+
+export function RiskRegisterContent({ showPageHeader = true }: RiskRegisterContentProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedRisk, setSelectedRisk] = useState<Risk | null>(null);
@@ -146,152 +150,163 @@ export default function RiskRegister() {
     }
   };
 
+  const headerActions = (
+    <div className="flex gap-2">
+      <Button variant="outline" className="gap-2" onClick={() => setImportDialogOpen(true)}>
+        <Upload className="h-4 w-4" />
+        Import
+      </Button>
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogTrigger asChild>
+          <Button className="gap-2">
+            <Plus className="h-4 w-4" />
+            Add Risk
+          </Button>
+        </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add New Risk</DialogTitle>
+          <DialogDescription>
+            Identify a new risk and link it to an engagement.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+          <div className="space-y-2">
+            <Label>Engagement</Label>
+            <Select value={selectedEngagement} onValueChange={setSelectedEngagement}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select engagement" />
+              </SelectTrigger>
+              <SelectContent>
+                {engagements.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.client_name} - {e.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Risk Area</Label>
+            <Select value={riskArea} onValueChange={setRiskArea}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select area" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Revenue">Revenue</SelectItem>
+                <SelectItem value="Inventory">Inventory</SelectItem>
+                <SelectItem value="Receivables">Receivables</SelectItem>
+                <SelectItem value="Fixed Assets">Fixed Assets</SelectItem>
+                <SelectItem value="Payables">Payables</SelectItem>
+                <SelectItem value="Cash">Cash</SelectItem>
+                <SelectItem value="Equity">Equity</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Textarea 
+              placeholder="Describe the risk and its potential impact..." 
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Risk Type</Label>
+              <Select value={riskType} onValueChange={setRiskType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="significant">Significant Risk</SelectItem>
+                  <SelectItem value="fraud">Fraud Risk</SelectItem>
+                  <SelectItem value="normal">Normal Risk</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Inherent Risk</Label>
+              <Select value={inherentRisk} onValueChange={setInherentRisk}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select level" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Control Risk</Label>
+              <Select value={controlRisk} onValueChange={setControlRisk}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select level" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Planned Response</Label>
+            <Textarea 
+              placeholder="Describe the planned audit response..." 
+              rows={2}
+              value={auditResponse}
+              onChange={(e) => setAuditResponse(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleCreate}
+            disabled={!riskArea || !description || !selectedEngagement || creating}
+          >
+            {creating ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Adding...
+              </>
+            ) : (
+              'Add Risk'
+            )}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </div>
+  );
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Risk Register</h1>
-          <p className="text-muted-foreground mt-1">
-            Identify,assess audit risks and plan responses thereof
-          </p>
+      {showPageHeader && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Risk Register</h1>
+            <p className="text-muted-foreground mt-1">
+              Identify,assess audit risks and plan responses thereof
+            </p>
+          </div>
+          {headerActions}
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => setImportDialogOpen(true)}>
-            <Upload className="h-4 w-4" />
-            Import
-          </Button>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2">
-                <Plus className="h-4 w-4" />
-                Add Risk
-              </Button>
-            </DialogTrigger>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Add New Risk</DialogTitle>
-              <DialogDescription>
-                Identify a new risk and link it to an engagement.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
-              <div className="space-y-2">
-                <Label>Engagement</Label>
-                <Select value={selectedEngagement} onValueChange={setSelectedEngagement}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select engagement" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {engagements.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        {e.client_name} - {e.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Risk Area</Label>
-                <Select value={riskArea} onValueChange={setRiskArea}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select area" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Revenue">Revenue</SelectItem>
-                    <SelectItem value="Inventory">Inventory</SelectItem>
-                    <SelectItem value="Receivables">Receivables</SelectItem>
-                    <SelectItem value="Fixed Assets">Fixed Assets</SelectItem>
-                    <SelectItem value="Payables">Payables</SelectItem>
-                    <SelectItem value="Cash">Cash</SelectItem>
-                    <SelectItem value="Equity">Equity</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea 
-                  placeholder="Describe the risk and its potential impact..." 
-                  rows={3}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Risk Type</Label>
-                  <Select value={riskType} onValueChange={setRiskType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="significant">Significant Risk</SelectItem>
-                      <SelectItem value="fraud">Fraud Risk</SelectItem>
-                      <SelectItem value="normal">Normal Risk</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Inherent Risk</Label>
-                  <Select value={inherentRisk} onValueChange={setInherentRisk}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select level" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="low">Low</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Control Risk</Label>
-                  <Select value={controlRisk} onValueChange={setControlRisk}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select level" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="low">Low</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Planned Response</Label>
-                <Textarea 
-                  placeholder="Describe the planned audit response..." 
-                  rows={2}
-                  value={auditResponse}
-                  onChange={(e) => setAuditResponse(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleCreate}
-                disabled={!riskArea || !description || !selectedEngagement || creating}
-              >
-                {creating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Adding...
-                  </>
-                ) : (
-                  'Add Risk'
-                )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+      )}
+      {!showPageHeader && (
+        <div className="flex justify-end">
+          {headerActions}
         </div>
-      </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -505,4 +520,8 @@ export default function RiskRegister() {
       />
     </div>
   );
+}
+
+export default function RiskRegister() {
+  return <RiskRegisterContent />;
 }

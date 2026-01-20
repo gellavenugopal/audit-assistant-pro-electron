@@ -7,6 +7,8 @@ interface DashboardStats {
     active: number;
     planning: number;
     completed: number;
+    mode: 'overall' | 'engagement';
+    currentStatus: string | null;
   };
   risks: {
     total: number;
@@ -40,7 +42,7 @@ interface DashboardStats {
 
 export function useDashboardStats(engagementId?: string) {
   const [stats, setStats] = useState<DashboardStats>({
-    engagements: { total: 0, active: 0, planning: 0, completed: 0 },
+    engagements: { total: 0, active: 0, planning: 0, completed: 0, mode: 'overall', currentStatus: null },
     risks: { total: 0, high: 0, medium: 0, low: 0, open: 0 },
     evidence: { totalFiles: 0, totalSize: 0 },
     recentActivity: [],
@@ -67,7 +69,11 @@ export function useDashboardStats(engagementId?: string) {
         evidenceRes,
         activityRes,
       ] = await Promise.all([
-        supabase.from('engagements').select('id, name, client_name, status, financial_year, materiality_amount, performance_materiality'),
+        supabase
+          .from('engagements')
+          .select('id, name, client_name, status, financial_year, materiality_amount, performance_materiality, updated_at, created_at')
+          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false }),
         engagementId
           ? supabase.from('risks').select('id, combined_risk, status').eq('engagement_id', engagementId)
           : supabase.from('risks').select('id, combined_risk, status'),
@@ -86,15 +92,19 @@ export function useDashboardStats(engagementId?: string) {
       const engagementStats = engagementId
         ? {
             total: selectedEngagement ? 1 : 0,
-            active: selectedEngagement && (selectedEngagement.status === 'fieldwork' || selectedEngagement.status === 'review') ? 1 : 0,
-            planning: selectedEngagement && selectedEngagement.status === 'planning' ? 1 : 0,
-            completed: selectedEngagement && (selectedEngagement.status === 'completed' || selectedEngagement.status === 'archived') ? 1 : 0,
+            active: 0,
+            planning: 0,
+            completed: 0,
+            mode: 'engagement' as const,
+            currentStatus: selectedEngagement?.status || null,
           }
         : {
             total: engagements.length,
             active: engagements.filter(e => e.status === 'fieldwork' || e.status === 'review').length,
             planning: engagements.filter(e => e.status === 'planning').length,
             completed: engagements.filter(e => e.status === 'completed' || e.status === 'archived').length,
+            mode: 'overall' as const,
+            currentStatus: null,
           };
 
       // Calculate risk stats
@@ -143,6 +153,8 @@ export function useDashboardStats(engagementId?: string) {
       .channel('dashboard-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'engagements' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'risks' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'evidence_files' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'review_notes' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, fetchStats)
       .subscribe();
 

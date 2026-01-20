@@ -21,23 +21,23 @@ interface ClauseEditorProps {
 }
 
 const ClauseEditor: React.FC<ClauseEditorProps> = ({ clause, customAnswer, onSave, onReset }) => {
-  const [positiveWording, setPositiveWording] = useState(
-    customAnswer?.positive_wording || clause.positive_wording || ''
-  );
-  const [negativeWording, setNegativeWording] = useState(
-    customAnswer?.negative_wording || clause.negative_wording || ''
-  );
-  const [naWording, setNaWording] = useState(
-    customAnswer?.na_wording || clause.na_wording || ''
-  );
+  const [positiveWording, setPositiveWording] = useState(customAnswer?.positive_wording || '');
+  const [negativeWording, setNegativeWording] = useState(customAnswer?.negative_wording || '');
+  const [naWording, setNaWording] = useState(customAnswer?.na_wording || '');
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
 
-  const hasChanges = customAnswer !== null || (
-    positiveWording !== (clause.positive_wording || '') ||
-    negativeWording !== (clause.negative_wording || '') ||
-    naWording !== (clause.na_wording || '')
-  );
+  const hasChanges = customAnswer
+    ? (
+        positiveWording !== (customAnswer.positive_wording || '') ||
+        negativeWording !== (customAnswer.negative_wording || '') ||
+        naWording !== (customAnswer.na_wording || '')
+      )
+    : (
+        positiveWording !== '' ||
+        negativeWording !== '' ||
+        naWording !== ''
+      );
 
   const handleSave = async () => {
     setSaving(true);
@@ -52,9 +52,9 @@ const ClauseEditor: React.FC<ClauseEditorProps> = ({ clause, customAnswer, onSav
   const handleReset = async () => {
     setResetting(true);
     await onReset();
-    setPositiveWording(clause.positive_wording || '');
-    setNegativeWording(clause.negative_wording || '');
-    setNaWording(clause.na_wording || '');
+    setPositiveWording('');
+    setNegativeWording('');
+    setNaWording('');
     setResetting(false);
   };
 

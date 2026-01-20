@@ -852,11 +852,11 @@ const buildStockDetailRows = (values: ManualInventoryValues): LedgerRow[] => {
 
 
 
-  const wipOpening = values.wip?.opening || 0;
+  const wipOpening = values.workInProgress?.opening || 0;
 
 
 
-  const wipClosing = values.wip?.closing || 0;
+  const wipClosing = values.workInProgress?.closing || 0;
 
 
 
@@ -1396,7 +1396,7 @@ const formatFyLabel = (yearCode?: string | null) => {
 
 
 
-type TableTabKey = 'actual' | 'classified';
+type TableTabKey = 'actual' | 'classified' | 'stock';
 
 
 
@@ -2073,6 +2073,8 @@ export default function FinancialReview() {
 
 
   const [stockSelectedCount, setStockSelectedCount] = useState(0);
+  const [stockBulkUpdateRequestId, setStockBulkUpdateRequestId] = useState(0);
+  const [stockDeleteRequestId, setStockDeleteRequestId] = useState(0);
 
 
 
@@ -15145,7 +15147,7 @@ export default function FinancialReview() {
 
         isManual: true,
 
-        noteTarget: activeNote.H2,
+        noteTarget: activeNote.header,
 
       };
 

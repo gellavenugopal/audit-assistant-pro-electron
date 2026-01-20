@@ -8,7 +8,6 @@ import {
   AlertTriangle,
   FileCheck,
   MessageSquare,
-  AlertCircle,
   Lock,
   History,
   Settings,
@@ -28,26 +27,32 @@ import { useEngagement } from '@/contexts/EngagementContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { reservedShortcutKeys } from '@/hooks/useKeyboardShortcuts';
 
-// Items that are always accessible
-const alwaysActiveItems = [
+type SidebarItem = {
+  name: string;
+  href: string;
+  icon: any;
+  requiresEngagement?: boolean;
+  children?: SidebarItem[];
+};
+
+const navItems: SidebarItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Engagements', href: '/engagements', icon: Briefcase },
+  { name: 'Appointment & Engagement', href: '/appointment', icon: FileSignature, requiresEngagement: true },
   { name: 'Compliance Applicability', href: '/compliance-applicability', icon: Shield },
-];
-
-// Items that require an engagement to be selected
-const engagementDependentItems = [
-  { name: 'Financial Review', href: '/financial-review', icon: FileSpreadsheet },
-  { name: 'Appointment & Eng Letter', href: '/appointment', icon: FileSignature },
-  { name: 'Materiality & Risk Assessment', href: '/materiality', icon: Calculator },
-  { name: 'Risk Register', href: '/risks', icon: AlertTriangle },
-  { name: 'Audit Execution', href: '/audit-execution', icon: ClipboardList },
-  { name: 'Evidence Vault', href: '/evidence', icon: FileCheck },
-  { name: 'Review Notes', href: '/review-notes', icon: MessageSquare },
-  { name: 'Misstatements', href: '/misstatements', icon: AlertCircle },
-  { name: 'Audit Report', href: '/audit-report', icon: FileText },
-  { name: 'VERA Tools', href: '/audit-tools', icon: Wrench },
-  { name: 'Feedback', href: '/feedback', icon: MessageSquare },
+  {
+    name: 'Materiality & Risk Assessment',
+    href: '/materiality',
+    icon: Calculator,
+    requiresEngagement: true,
+  },
+  { name: 'Audit Execution', href: '/audit-execution', icon: ClipboardList, requiresEngagement: true },
+  { name: 'VERA Tools', href: '/audit-tools', icon: Wrench, requiresEngagement: true },
+  { name: 'Financial Review', href: '/financial-review', icon: FileSpreadsheet, requiresEngagement: true },
+  { name: 'Review Notes', href: '/review-notes', icon: MessageSquare, requiresEngagement: true },
+  { name: 'Evidence Vault', href: '/evidence', icon: FileCheck, requiresEngagement: true },
+  { name: 'Audit Report', href: '/audit-report', icon: FileText, requiresEngagement: true },
+  { name: 'Feedback', href: '/feedback', icon: MessageSquare, requiresEngagement: true },
 ];
 
 const secondaryNavItems = [
@@ -90,8 +95,8 @@ export function AppSidebar() {
     );
   };
 
-  const NavItem = ({ item, disabled = false }: { item: { name: string; href: string; icon: any }; disabled?: boolean }) => {
-    const isActive = location.pathname === item.href;
+  const NavItem = ({ item, disabled = false }: { item: SidebarItem; disabled?: boolean }) => {
+    const isActive = location.pathname === item.href || Boolean(item.children?.some(child => location.pathname === child.href));
     
     if (disabled) {
       const content = (
@@ -152,6 +157,49 @@ export function AppSidebar() {
     );
   };
 
+  const renderChildItems = (children: SidebarItem[] | undefined) => {
+    if (!children || children.length === 0 || collapsed) return null;
+
+    return (
+      <div className="ml-6 mt-1 space-y-1">
+        {children.map((child) => {
+          const isChildActive = location.pathname === child.href;
+          const isChildDisabled = child.requiresEngagement && !hasEngagement;
+
+          if (isChildDisabled) {
+            return (
+              <div
+                key={child.name}
+                className={cn('nav-link cursor-not-allowed opacity-50 py-1.5 text-xs')}
+              >
+                <child.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="truncate text-muted-foreground">
+                  {renderName(child.name)}
+                </span>
+              </div>
+            );
+          }
+
+          return (
+            <NavLink
+              key={child.name}
+              to={child.href}
+              className={cn('nav-link group py-1.5 text-xs', isChildActive && 'active')}
+            >
+              <child.icon className={cn(
+                'h-4 w-4 shrink-0 transition-colors',
+                isChildActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'
+              )} />
+              <span className={cn('truncate transition-colors', isChildActive && 'text-primary font-medium')}>
+                {renderName(child.name)}
+              </span>
+            </NavLink>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <aside
       className={cn(
@@ -197,13 +245,11 @@ export function AppSidebar() {
               Audit Workflow
             </p>
           )}
-          {/* Always active items */}
-          {alwaysActiveItems.map((item) => (
-            <NavItem key={item.name} item={item} />
-          ))}
-          {/* Engagement-dependent items */}
-          {engagementDependentItems.map((item) => (
-            <NavItem key={item.name} item={item} disabled={!hasEngagement} />
+          {navItems.map((item) => (
+            <div key={item.name}>
+              <NavItem item={item} disabled={item.requiresEngagement && !hasEngagement} />
+              {renderChildItems(item.children)}
+            </div>
           ))}
         </div>
 

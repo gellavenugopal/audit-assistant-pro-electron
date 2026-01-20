@@ -1,10 +1,13 @@
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Minus, XCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { useEngagement } from "@/contexts/EngagementContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 
 const UNIT_MAP = {
   "Ones (\u20B9)": 1,
@@ -45,6 +48,8 @@ const yesNoOptions = [
 ];
 
 const ComplianceApplicability: React.FC = () => {
+  const { currentEngagement } = useEngagement();
+  const { user } = useAuth();
   // State for all input fields
   const [denomination, setDenomination] = useState("Ones (\u20B9)");
   const [cyTurnover, setCyTurnover] = useState("");
@@ -69,11 +74,129 @@ const ComplianceApplicability: React.FC = () => {
   // Results
   const [results, setResults] = useState<Array<[string, string, string]>>([]);
   const [resultReasons, setResultReasons] = useState<Array<[string, string]>>([]);
+  const isHydratingRef = useRef(false);
+
+  const buildInputsPayload = () => ({
+    denomination,
+    cyTurnover,
+    cyCapital,
+    pyTurnover,
+    pyNetworth,
+    pyBorrowings,
+    pyNetprofit,
+    assesseeType,
+    cashReceipt,
+    cashPayment,
+    presumptive,
+    lowerPresumptive,
+    rpt,
+    entityClass,
+    constitution,
+    subConstitution,
+    dormant,
+  });
+
+  useEffect(() => {
+    const loadData = async () => {
+      if (!currentEngagement?.id) return;
+      isHydratingRef.current = true;
+      try {
+        const { data, error } = await supabase
+          .from('compliance_applicability')
+          .select('*')
+          .eq('engagement_id', currentEngagement.id)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (!data) return;
+
+        const inputs = (data.inputs || {}) as Record<string, string>;
+        setDenomination(inputs.denomination || "Ones (\u20B9)");
+        setCyTurnover(inputs.cyTurnover || "");
+        setCyCapital(inputs.cyCapital || "");
+        setPyTurnover(inputs.pyTurnover || "");
+        setPyNetworth(inputs.pyNetworth || "");
+        setPyBorrowings(inputs.pyBorrowings || "");
+        setPyNetprofit(inputs.pyNetprofit || "");
+        setAssesseeType(inputs.assesseeType || "Business");
+        setCashReceipt(inputs.cashReceipt || "No");
+        setCashPayment(inputs.cashPayment || "No");
+        setPresumptive(inputs.presumptive || "No");
+        setLowerPresumptive(inputs.lowerPresumptive || "No");
+        setRpt(inputs.rpt || "No");
+        setEntityClass(inputs.entityClass || "Company");
+        setConstitution(inputs.constitution || ENTITY_CLASSIFICATION_MAP["Company"][0]);
+        setSubConstitution(inputs.subConstitution || "Neither");
+        setDormant(inputs.dormant || "No");
+        setResults((data.results || []) as Array<[string, string, string]>);
+        setResultReasons((data.reasons || []) as Array<[string, string]>);
+      } catch (e) {
+        console.error('Failed to load compliance applicability:', e);
+      } finally {
+        isHydratingRef.current = false;
+      }
+    };
+
+    loadData();
+  }, [currentEngagement?.id]);
+
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    if (isHydratingRef.current) return;
+
+    const timeout = setTimeout(async () => {
+      try {
+        const payload = {
+          engagement_id: currentEngagement.id,
+          inputs: buildInputsPayload(),
+          results,
+          reasons: resultReasons,
+          updated_by: user?.id || null,
+          created_by: user?.id || null,
+        };
+
+        const { error } = await supabase
+          .from('compliance_applicability')
+          .upsert(payload, { onConflict: 'engagement_id' });
+
+        if (error) throw error;
+      } catch (e) {
+        console.error('Failed to save compliance applicability:', e);
+      }
+    }, 800);
+
+    return () => clearTimeout(timeout);
+  }, [
+    currentEngagement?.id,
+    denomination,
+    cyTurnover,
+    cyCapital,
+    pyTurnover,
+    pyNetworth,
+    pyBorrowings,
+    pyNetprofit,
+    assesseeType,
+    cashReceipt,
+    cashPayment,
+    presumptive,
+    lowerPresumptive,
+    rpt,
+    entityClass,
+    constitution,
+    subConstitution,
+    dormant,
+    results,
+    resultReasons,
+    user?.id,
+  ]);
 
   // Update constitution options when entityClass changes
   React.useEffect(() => {
-    setConstitution(ENTITY_CLASSIFICATION_MAP[entityClass][0]);
-  }, [entityClass]);
+    const options = ENTITY_CLASSIFICATION_MAP[entityClass] || [];
+    if (!options.includes(constitution)) {
+      setConstitution(options[0] || '');
+    }
+  }, [constitution, entityClass]);
 
   function sanitizeNumeric(value: string) {
     const cleaned = value.replace(/,/g, "");

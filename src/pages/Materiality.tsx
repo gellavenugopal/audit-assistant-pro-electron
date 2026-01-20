@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { sampleMateriality } from '@/data/sampleData';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,11 +11,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Calculator, AlertCircle, Trash2, Plus, FileDown, Building2 } from 'lucide-react';
+import { Calculator, AlertCircle, Trash2, Plus, FileDown, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import ExcelJS from 'exceljs';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { useTeamMembers } from '@/hooks/useTeamMembers';
+import { RiskRegisterContent } from '@/pages/RiskRegister';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 
 // ICAI-CAQD SUGGESTED MATERIALITY GUIDANCE (ADVISORY)
 const CAQD_GUIDE: Record<string, Record<string, string>> = {
@@ -77,13 +80,38 @@ interface RiskItem {
   score: number;
 }
 
+const sanitizeNumericInput = (value: string) => {
+  const cleaned = value.replace(/,/g, '');
+  const parts = cleaned.split('.');
+  const intPart = parts[0].replace(/\D/g, '');
+  const fracPart = parts.length > 1 ? parts.slice(1).join('').replace(/\D/g, '') : '';
+  return fracPart ? `${intPart}.${fracPart}` : intPart;
+};
+
+const formatIndianNumber = (value: string) => {
+  const cleaned = sanitizeNumericInput(value);
+  if (!cleaned) return '';
+  const [intPart, fracPart] = cleaned.split('.');
+  const last3 = intPart.slice(-3);
+  const rest = intPart.slice(0, -3);
+  const grouped = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',');
+  const formatted = rest ? `${grouped},${last3}` : last3;
+  return fracPart ? `${formatted}.${fracPart}` : formatted;
+};
+
+const parseNumber = (value: string) => {
+  const cleaned = sanitizeNumericInput(value);
+  return Number(cleaned || 0);
+};
+
 export default function Materiality() {
   // Engagement Context
-  const { currentEngagement, engagements, setCurrentEngagement } = useEngagement();
+  const { currentEngagement } = useEngagement();
+  const { user } = useAuth();
   const { members } = useTeamMembers();
   
   // View State
-  const [currentView, setCurrentView] = useState<'risk' | 'materiality'>('risk');
+  const [currentView, setCurrentView] = useState<'risk' | 'materiality' | 'register'>('risk');
   
   // Header Fields
   const [entityName, setEntityName] = useState('');
@@ -104,20 +132,20 @@ export default function Materiality() {
   }, [currentEngagement]);
 
   // Financial Base
-  const [profitBeforeTax, setProfitBeforeTax] = useState(0);
-  const [revenue, setRevenue] = useState(0);
-  const [totalAssets, setTotalAssets] = useState(0);
-  const [netWorth, setNetWorth] = useState(0);
+  const [profitBeforeTax, setProfitBeforeTax] = useState('');
+  const [revenue, setRevenue] = useState('');
+  const [totalAssets, setTotalAssets] = useState('');
+  const [netWorth, setNetWorth] = useState('');
   const [othersName, setOthersName] = useState('');
-  const [othersAmount, setOthersAmount] = useState(0);
+  const [othersAmount, setOthersAmount] = useState('');
 
   // Materiality
   const [benchmark, setBenchmark] = useState('Profit Before Tax');
-  const [percentage, setPercentage] = useState(5);
+  const [percentage, setPercentage] = useState('8');
   const [omAmount, setOmAmount] = useState(0);
-  const [pmPercentage, setPmPercentage] = useState(75);
+  const [pmPercentage, setPmPercentage] = useState('75');
   const [pmAmount, setPmAmount] = useState(0);
-  const [ctPercentage, setCtPercentage] = useState(5);
+  const [ctPercentage, setCtPercentage] = useState('5');
   const [ctAmount, setCtAmount] = useState(0);
   const [rationale, setRationale] = useState(sampleMateriality.rationale);
 
@@ -134,6 +162,164 @@ export default function Materiality() {
 
   // CAQD Guidance
   const [caqdSuggestion, setCaqdSuggestion] = useState('\u2014');
+  const isHydratingRef = useRef(false);
+
+  const buildRiskStatePayload = () => ({
+    riskFactors,
+    riskItems,
+    newQuestion,
+    totalRiskScore,
+    riskPercentage,
+    systemRisk,
+    finalRisk,
+    isRiskFinalized,
+    remarks,
+  });
+
+  const buildMaterialityStatePayload = () => ({
+    entityName,
+    financialYear,
+    materialityStage,
+    engagementType,
+    preparedBy,
+    reviewedBy,
+    date,
+    profitBeforeTax: parseNumber(profitBeforeTax),
+    revenue: parseNumber(revenue),
+    totalAssets: parseNumber(totalAssets),
+    netWorth: parseNumber(netWorth),
+    othersName,
+    othersAmount: parseNumber(othersAmount),
+    benchmark,
+    percentage: parseNumber(percentage),
+    omAmount,
+    pmPercentage: parseNumber(pmPercentage),
+    pmAmount,
+    ctPercentage: parseNumber(ctPercentage),
+    ctAmount,
+    rationale,
+    caqdSuggestion,
+  });
+
+  useEffect(() => {
+    const loadData = async () => {
+      if (!currentEngagement?.id) return;
+      isHydratingRef.current = true;
+      try {
+        const { data, error } = await supabase
+          .from('materiality_risk_assessment')
+          .select('*')
+          .eq('engagement_id', currentEngagement.id)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (!data) return;
+
+        const riskState = (data.risk_state || {}) as Record<string, any>;
+        const materialityState = (data.materiality_state || {}) as Record<string, any>;
+
+        if (Array.isArray(riskState.riskFactors)) setRiskFactors(riskState.riskFactors);
+        if (riskState.riskItems) setRiskItems(riskState.riskItems);
+        if (typeof riskState.newQuestion === 'string') setNewQuestion(riskState.newQuestion);
+        if (typeof riskState.totalRiskScore === 'number') setTotalRiskScore(riskState.totalRiskScore);
+        if (typeof riskState.riskPercentage === 'number') setRiskPercentage(riskState.riskPercentage);
+        if (typeof riskState.systemRisk === 'string') setSystemRisk(riskState.systemRisk);
+        if (typeof riskState.finalRisk === 'string') setFinalRisk(riskState.finalRisk);
+        if (typeof riskState.isRiskFinalized === 'boolean') setIsRiskFinalized(riskState.isRiskFinalized);
+        if (typeof riskState.remarks === 'string') setRemarks(riskState.remarks);
+
+        if (typeof materialityState.entityName === 'string') setEntityName(materialityState.entityName);
+        if (typeof materialityState.financialYear === 'string') setFinancialYear(materialityState.financialYear);
+        if (typeof materialityState.materialityStage === 'string') setMaterialityStage(materialityState.materialityStage);
+        if (typeof materialityState.engagementType === 'string') setEngagementType(materialityState.engagementType);
+        if (typeof materialityState.preparedBy === 'string') setPreparedBy(materialityState.preparedBy);
+        if (typeof materialityState.reviewedBy === 'string') setReviewedBy(materialityState.reviewedBy);
+        if (typeof materialityState.date === 'string') setDate(materialityState.date);
+        if (typeof materialityState.profitBeforeTax === 'number') setProfitBeforeTax(formatIndianNumber(String(materialityState.profitBeforeTax)));
+        if (typeof materialityState.revenue === 'number') setRevenue(formatIndianNumber(String(materialityState.revenue)));
+        if (typeof materialityState.totalAssets === 'number') setTotalAssets(formatIndianNumber(String(materialityState.totalAssets)));
+        if (typeof materialityState.netWorth === 'number') setNetWorth(formatIndianNumber(String(materialityState.netWorth)));
+        if (typeof materialityState.othersName === 'string') setOthersName(materialityState.othersName);
+        if (typeof materialityState.othersAmount === 'number') setOthersAmount(formatIndianNumber(String(materialityState.othersAmount)));
+        if (typeof materialityState.benchmark === 'string') setBenchmark(materialityState.benchmark);
+        if (typeof materialityState.percentage === 'number') setPercentage(String(materialityState.percentage));
+        if (typeof materialityState.omAmount === 'number') setOmAmount(materialityState.omAmount);
+        if (typeof materialityState.pmPercentage === 'number') setPmPercentage(String(materialityState.pmPercentage));
+        if (typeof materialityState.pmAmount === 'number') setPmAmount(materialityState.pmAmount);
+        if (typeof materialityState.ctPercentage === 'number') setCtPercentage(String(materialityState.ctPercentage));
+        if (typeof materialityState.ctAmount === 'number') setCtAmount(materialityState.ctAmount);
+        if (typeof materialityState.rationale === 'string') setRationale(materialityState.rationale);
+        if (typeof materialityState.caqdSuggestion === 'string') setCaqdSuggestion(materialityState.caqdSuggestion);
+      } catch (e) {
+        console.error('Failed to load materiality risk assessment:', e);
+      } finally {
+        isHydratingRef.current = false;
+      }
+    };
+
+    loadData();
+  }, [currentEngagement?.id]);
+
+  useEffect(() => {
+    if (!currentEngagement?.id) return;
+    if (isHydratingRef.current) return;
+
+    const timeout = setTimeout(async () => {
+      try {
+        const payload = {
+          engagement_id: currentEngagement.id,
+          risk_state: buildRiskStatePayload(),
+          materiality_state: buildMaterialityStatePayload(),
+          updated_by: user?.id || null,
+          created_by: user?.id || null,
+        };
+
+        const { error } = await supabase
+          .from('materiality_risk_assessment')
+          .upsert(payload, { onConflict: 'engagement_id' });
+
+        if (error) throw error;
+      } catch (e) {
+        console.error('Failed to save materiality risk assessment:', e);
+      }
+    }, 800);
+
+    return () => clearTimeout(timeout);
+  }, [
+    currentEngagement?.id,
+    riskFactors,
+    riskItems,
+    newQuestion,
+    totalRiskScore,
+    riskPercentage,
+    systemRisk,
+    finalRisk,
+    isRiskFinalized,
+    remarks,
+    entityName,
+    financialYear,
+    materialityStage,
+    engagementType,
+    preparedBy,
+    reviewedBy,
+    date,
+    profitBeforeTax,
+    revenue,
+    totalAssets,
+    netWorth,
+    othersName,
+    othersAmount,
+    benchmark,
+    percentage,
+    omAmount,
+    pmPercentage,
+    pmAmount,
+    ctPercentage,
+    ctAmount,
+    rationale,
+    caqdSuggestion,
+    user?.id,
+  ]);
 
   // Calculate risk totals
   useEffect(() => {
@@ -182,15 +368,15 @@ export default function Materiality() {
   const getBenchmarkAmount = () => {
     switch (benchmark) {
       case 'Profit Before Tax':
-        return profitBeforeTax;
+        return parseNumber(profitBeforeTax);
       case 'Revenue / Gross Receipts':
-        return revenue;
+        return parseNumber(revenue);
       case 'Total Assets':
-        return totalAssets;
+        return parseNumber(totalAssets);
       case 'Net Worth':
-        return netWorth;
+        return parseNumber(netWorth);
       case 'Others':
-        return othersAmount;
+        return parseNumber(othersAmount);
       default:
         return 0;
     }
@@ -203,7 +389,8 @@ export default function Materiality() {
     }
     
     const base = getBenchmarkAmount();
-    const om = base * (percentage / 100);
+    const percentageValue = parseNumber(percentage);
+    const om = base * (percentageValue / 100);
     setOmAmount(Number(om.toFixed(2)));
 
     // Check if percentage is within suggested range
@@ -211,19 +398,19 @@ export default function Materiality() {
     if (benchmark in CAQD_GUIDE && risk in CAQD_GUIDE[benchmark]) {
       const rangeStr = CAQD_GUIDE[benchmark][risk];
       const [min, max] = parseRange(rangeStr);
-      if (percentage < min || percentage > max) {
-        alert(`Warning: The selected materiality percentage (${percentage}%) is outside the suggested ICAI-CAQD range (${rangeStr}). Please review.`);
+      if (percentageValue < min || percentageValue > max) {
+        alert(`Warning: The selected materiality percentage (${percentageValue}%) is outside the suggested ICAI-CAQD range (${rangeStr}). Please review.`);
       }
     }
   };
 
   const calculatePM = () => {
-    const pm = omAmount * (pmPercentage / 100);
+    const pm = omAmount * (parseNumber(pmPercentage) / 100);
     setPmAmount(Number(pm.toFixed(2)));
   };
 
   const calculateCT = () => {
-    const ct = omAmount * (ctPercentage / 100);
+    const ct = omAmount * (parseNumber(ctPercentage) / 100);
     setCtAmount(Number(ct.toFixed(2)));
   };
 
@@ -305,6 +492,10 @@ export default function Materiality() {
     setCurrentView('risk');
   };
 
+  const switchToRegister = () => {
+    setCurrentView('register');
+  };
+
   const exportToExcel = async () => {
     if (!isRiskFinalized || !finalRisk) {
       const result = window.confirm('Risk assessment is not finalized. Do you want to skip and proceed with export?');
@@ -334,11 +525,11 @@ export default function Materiality() {
     
     // Financial Base
     worksheet.addRow(['FINANCIAL BASE']).getCell(1).font = headingStyle.font;
-    worksheet.addRow(['Profit Before Tax', profitBeforeTax]);
-    worksheet.addRow(['Revenue / Gross Receipts', revenue]);
-    worksheet.addRow(['Total Assets', totalAssets]);
-    worksheet.addRow(['Net Worth', netWorth]);
-    worksheet.addRow([othersName || 'Others', othersAmount]);
+    worksheet.addRow(['Profit Before Tax', parseNumber(profitBeforeTax)]);
+    worksheet.addRow(['Revenue / Gross Receipts', parseNumber(revenue)]);
+    worksheet.addRow(['Total Assets', parseNumber(totalAssets)]);
+    worksheet.addRow(['Net Worth', parseNumber(netWorth)]);
+    worksheet.addRow([othersName || 'Others', parseNumber(othersAmount)]);
     worksheet.addRow([]);
     
     // Materiality
@@ -425,7 +616,7 @@ export default function Materiality() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            ICAI \u2013 Materiality & Risk Assessment Tool (SA-320)
+            Materiality & Risk Assessment Tool
           </h1>
           <p className="text-muted-foreground mt-1">
             Calculate materiality and assess risk of material misstatement
@@ -446,63 +637,19 @@ export default function Materiality() {
           >
             Materiality
           </Button>
+          <Button
+            variant={currentView === 'register' ? 'default' : 'outline'}
+            className="gap-2"
+            onClick={switchToRegister}
+          >
+            <AlertTriangle className="h-4 w-4" />
+            Risk Register
+          </Button>
           <Button variant="outline" className="gap-2" onClick={exportToExcel}>
             <FileDown className="h-4 w-4" />
             Export to Excel
           </Button>
         </div>
-      </div>
-
-      {/* Engagement Selector */}
-      <div className="audit-card">
-        <div className="flex items-center gap-3">
-          <Building2 className="h-5 w-5 text-primary" />
-          <div className="flex-1">
-            <Label className="text-sm font-medium">Select Engagement</Label>
-            <p className="text-xs text-muted-foreground mt-1">
-              Choose an engagement to auto-populate entity and financial year details
-            </p>
-          </div>
-          <div className="w-96">
-            <Select
-              value={currentEngagement?.id || ''}
-              onValueChange={(value) => {
-                const selected = engagements.find(e => e.id === value);
-                setCurrentEngagement(selected || null);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select an engagement..." />
-              </SelectTrigger>
-              <SelectContent>
-                {engagements.map((engagement) => (
-                  <SelectItem key={engagement.id} value={engagement.id}>
-                    {engagement.client_name} - {engagement.financial_year}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        
-        {currentEngagement && (
-          <div className="mt-4 p-3 bg-primary/5 rounded-lg border border-primary/10">
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">Entity:</span>
-                <span className="ml-2 font-medium">{currentEngagement.client_name}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Financial Year:</span>
-                <span className="ml-2 font-medium">{currentEngagement.financial_year}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Engagement Type:</span>
-                <span className="ml-2 font-medium capitalize">{currentEngagement.engagement_type}</span>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {currentView === 'risk' ? (
@@ -672,7 +819,7 @@ export default function Materiality() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : currentView === 'materiality' ? (
         // MATERIALITY VIEW
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Inputs */}
@@ -759,38 +906,38 @@ export default function Materiality() {
                 <div className="space-y-2">
                   <Label>Profit Before Tax</Label>
                   <Input
-                    type="number"
+                    inputMode="decimal"
                     value={profitBeforeTax}
-                    onChange={(e) => setProfitBeforeTax(Number(e.target.value))}
+                    onChange={(e) => setProfitBeforeTax(formatIndianNumber(e.target.value))}
                   />
-                  <p className="text-xs text-muted-foreground">{formatCurrency(profitBeforeTax)}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(profitBeforeTax))}</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Revenue / Gross Receipts</Label>
                   <Input
-                    type="number"
                     value={revenue}
-                    onChange={(e) => setRevenue(Number(e.target.value))}
+                    inputMode="decimal"
+                    onChange={(e) => setRevenue(formatIndianNumber(e.target.value))}
                   />
-                  <p className="text-xs text-muted-foreground">{formatCurrency(revenue)}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(revenue))}</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Total Assets</Label>
                   <Input
-                    type="number"
                     value={totalAssets}
-                    onChange={(e) => setTotalAssets(Number(e.target.value))}
+                    inputMode="decimal"
+                    onChange={(e) => setTotalAssets(formatIndianNumber(e.target.value))}
                   />
-                  <p className="text-xs text-muted-foreground">{formatCurrency(totalAssets)}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(totalAssets))}</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Net Worth</Label>
                   <Input
-                    type="number"
                     value={netWorth}
-                    onChange={(e) => setNetWorth(Number(e.target.value))}
+                    inputMode="decimal"
+                    onChange={(e) => setNetWorth(formatIndianNumber(e.target.value))}
                   />
-                  <p className="text-xs text-muted-foreground">{formatCurrency(netWorth)}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(netWorth))}</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Others Name</Label>
@@ -803,11 +950,11 @@ export default function Materiality() {
                 <div className="space-y-2">
                   <Label>Others Amount</Label>
                   <Input
-                    type="number"
                     value={othersAmount}
-                    onChange={(e) => setOthersAmount(Number(e.target.value))}
+                    inputMode="decimal"
+                    onChange={(e) => setOthersAmount(formatIndianNumber(e.target.value))}
                   />
-                  <p className="text-xs text-muted-foreground">{formatCurrency(othersAmount)}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(othersAmount))}</p>
                 </div>
               </div>
             </div>
@@ -876,10 +1023,9 @@ export default function Materiality() {
                 <div className="space-y-2">
                   <Label>Percentage (%)</Label>
                   <Input
-                    type="number"
-                    step="0.1"
                     value={percentage}
-                    onChange={(e) => setPercentage(Number(e.target.value))}
+                    inputMode="decimal"
+                    onChange={(e) => setPercentage(formatIndianNumber(e.target.value))}
                   />
                 </div>
                 <Button className="w-full" onClick={calculateOM}>
@@ -900,10 +1046,9 @@ export default function Materiality() {
                 <div className="space-y-2">
                   <Label>Percentage of OM (%)</Label>
                   <Input
-                    type="number"
-                    step="1"
                     value={pmPercentage}
-                    onChange={(e) => setPmPercentage(Number(e.target.value))}
+                    inputMode="decimal"
+                    onChange={(e) => setPmPercentage(formatIndianNumber(e.target.value))}
                   />
                 </div>
                 <Button className="w-full" onClick={calculatePM}>
@@ -924,10 +1069,9 @@ export default function Materiality() {
                 <div className="space-y-2">
                   <Label>Percentage of OM (%)</Label>
                   <Input
-                    type="number"
-                    step="1"
                     value={ctPercentage}
-                    onChange={(e) => setCtPercentage(Number(e.target.value))}
+                    inputMode="decimal"
+                    onChange={(e) => setCtPercentage(formatIndianNumber(e.target.value))}
                   />
                 </div>
                 <Button className="w-full" onClick={calculateCT}>
@@ -941,6 +1085,13 @@ export default function Materiality() {
               </div>
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold text-foreground">Risk Register</div>
+          </div>
+          <RiskRegisterContent showPageHeader={false} />
         </div>
       )}
     </div>
