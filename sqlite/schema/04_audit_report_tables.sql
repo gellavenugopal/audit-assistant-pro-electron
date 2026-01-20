@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS audit_report_setup (
     FOREIGN KEY (signing_partner_id) REFERENCES partners(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_audit_report_setup_engagement_id ON audit_report_setup(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_audit_report_setup_engagement_id ON audit_report_setup(engagement_id);
 
 -- Audit Report Main Content
 CREATE TABLE IF NOT EXISTS audit_report_main_content (
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS audit_report_main_content (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_audit_report_main_content_engagement_id ON audit_report_main_content(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_audit_report_main_content_engagement_id ON audit_report_main_content(engagement_id);
 
 -- Audit Report Documents
 CREATE TABLE IF NOT EXISTS audit_report_documents (
@@ -106,8 +106,8 @@ CREATE TABLE IF NOT EXISTS audit_report_documents (
     FOREIGN KEY (changed_by) REFERENCES profiles(user_id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_audit_report_documents_engagement_id ON audit_report_documents(engagement_id);
-CREATE INDEX idx_audit_report_documents_section_name ON audit_report_documents(section_name);
+CREATE INDEX IF NOT EXISTS idx_audit_report_documents_engagement_id ON audit_report_documents(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_audit_report_documents_section_name ON audit_report_documents(section_name);
 
 -- Audit Report Document Versions
 CREATE TABLE IF NOT EXISTS audit_report_document_versions (
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS audit_report_document_versions (
     FOREIGN KEY (changed_by) REFERENCES profiles(user_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_audit_report_document_versions_document_id ON audit_report_document_versions(document_id);
+CREATE INDEX IF NOT EXISTS idx_audit_report_document_versions_document_id ON audit_report_document_versions(document_id);
 
 -- Audit Report Comments
 CREATE TABLE IF NOT EXISTS audit_report_comments (
@@ -146,8 +146,8 @@ CREATE TABLE IF NOT EXISTS audit_report_comments (
     FOREIGN KEY (resolved_by) REFERENCES profiles(user_id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_audit_report_comments_engagement_id ON audit_report_comments(engagement_id);
-CREATE INDEX idx_audit_report_comments_document_id ON audit_report_comments(document_id);
+CREATE INDEX IF NOT EXISTS idx_audit_report_comments_engagement_id ON audit_report_comments(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_audit_report_comments_document_id ON audit_report_comments(document_id);
 
 -- Audit Report Evidence
 CREATE TABLE IF NOT EXISTS audit_report_evidence (
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS audit_report_evidence (
     FOREIGN KEY (uploaded_by) REFERENCES profiles(user_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_audit_report_evidence_engagement_id ON audit_report_evidence(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_audit_report_evidence_engagement_id ON audit_report_evidence(engagement_id);
 
 -- Audit Report Exports
 CREATE TABLE IF NOT EXISTS audit_report_exports (
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS audit_report_exports (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_audit_report_exports_engagement_id ON audit_report_exports(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_audit_report_exports_engagement_id ON audit_report_exports(engagement_id);
 
 -- Key Audit Matters
 CREATE TABLE IF NOT EXISTS key_audit_matters (
@@ -197,7 +197,7 @@ CREATE TABLE IF NOT EXISTS key_audit_matters (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_key_audit_matters_engagement_id ON key_audit_matters(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_key_audit_matters_engagement_id ON key_audit_matters(engagement_id);
 
 -- CARO Clause Library
 CREATE TABLE IF NOT EXISTS caro_clause_library (
@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS caro_clause_library (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_caro_clause_library_clause_id ON caro_clause_library(clause_id);
+CREATE INDEX IF NOT EXISTS idx_caro_clause_library_clause_id ON caro_clause_library(clause_id);
 
 -- CARO Clause Responses
 CREATE TABLE IF NOT EXISTS caro_clause_responses (
@@ -240,8 +240,8 @@ CREATE TABLE IF NOT EXISTS caro_clause_responses (
     UNIQUE(engagement_id, clause_id)
 );
 
-CREATE INDEX idx_caro_clause_responses_engagement_id ON caro_clause_responses(engagement_id);
-CREATE INDEX idx_caro_clause_responses_clause_id ON caro_clause_responses(clause_id);
+CREATE INDEX IF NOT EXISTS idx_caro_clause_responses_engagement_id ON caro_clause_responses(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_caro_clause_responses_clause_id ON caro_clause_responses(clause_id);
 
 -- CARO Standard Answers
 CREATE TABLE IF NOT EXISTS caro_standard_answers (
@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS caro_standard_answers (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_caro_standard_answers_clause_id ON caro_standard_answers(clause_id);
+CREATE INDEX IF NOT EXISTS idx_caro_standard_answers_clause_id ON caro_standard_answers(clause_id);
 
 -- ============================================================================
 -- TRIGGERS

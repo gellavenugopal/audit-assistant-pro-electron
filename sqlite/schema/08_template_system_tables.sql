@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS standard_programs (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_standard_programs_audit_area ON standard_programs(audit_area);
-CREATE INDEX idx_standard_programs_engagement_type ON standard_programs(engagement_type);
+CREATE INDEX IF NOT EXISTS idx_standard_programs_audit_area ON standard_programs(audit_area);
+CREATE INDEX IF NOT EXISTS idx_standard_programs_engagement_type ON standard_programs(engagement_type);
 
 -- Standard Procedures
 CREATE TABLE IF NOT EXISTS standard_procedures (
@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS standard_procedures (
     FOREIGN KEY (program_id) REFERENCES standard_programs(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_standard_procedures_program_id ON standard_procedures(program_id);
-CREATE INDEX idx_standard_procedures_area ON standard_procedures(area);
+CREATE INDEX IF NOT EXISTS idx_standard_procedures_program_id ON standard_procedures(program_id);
+CREATE INDEX IF NOT EXISTS idx_standard_procedures_area ON standard_procedures(area);
 
 -- Procedure Template Checklist Items
 CREATE TABLE IF NOT EXISTS procedure_template_checklist_items (
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS procedure_template_checklist_items (
     FOREIGN KEY (template_id) REFERENCES standard_procedures(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_procedure_template_checklist_items_template_id ON procedure_template_checklist_items(template_id);
+CREATE INDEX IF NOT EXISTS idx_procedure_template_checklist_items_template_id ON procedure_template_checklist_items(template_id);
 
 -- Procedure Template Evidence Requirements
 CREATE TABLE IF NOT EXISTS procedure_template_evidence_requirements (
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS procedure_template_evidence_requirements (
     FOREIGN KEY (template_id) REFERENCES standard_procedures(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_procedure_template_evidence_requirements_template_id ON procedure_template_evidence_requirements(template_id);
+CREATE INDEX IF NOT EXISTS idx_procedure_template_evidence_requirements_template_id ON procedure_template_evidence_requirements(template_id);
 
 -- Financial Statement Templates
 CREATE TABLE IF NOT EXISTS fs_templates (
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS fs_templates (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_fs_templates_constitution_type ON fs_templates(constitution_type);
+CREATE INDEX IF NOT EXISTS idx_fs_templates_constitution_type ON fs_templates(constitution_type);
 
 -- ============================================================================
 -- SYSTEM TABLES
@@ -107,10 +107,10 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_activity_logs_user_id ON activity_logs(user_id);
-CREATE INDEX idx_activity_logs_engagement_id ON activity_logs(engagement_id);
-CREATE INDEX idx_activity_logs_entity ON activity_logs(entity);
-CREATE INDEX idx_activity_logs_created_at ON activity_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_engagement_id ON activity_logs(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON activity_logs(entity);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);
 
 -- Audit Trail
 CREATE TABLE IF NOT EXISTS audit_trail (
@@ -127,10 +127,10 @@ CREATE TABLE IF NOT EXISTS audit_trail (
     FOREIGN KEY (performed_by) REFERENCES profiles(user_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_audit_trail_entity_type ON audit_trail(entity_type);
-CREATE INDEX idx_audit_trail_entity_id ON audit_trail(entity_id);
-CREATE INDEX idx_audit_trail_performed_by ON audit_trail(performed_by);
-CREATE INDEX idx_audit_trail_performed_at ON audit_trail(performed_at);
+CREATE INDEX IF NOT EXISTS idx_audit_trail_entity_type ON audit_trail(entity_type);
+CREATE INDEX IF NOT EXISTS idx_audit_trail_entity_id ON audit_trail(entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_trail_performed_by ON audit_trail(performed_by);
+CREATE INDEX IF NOT EXISTS idx_audit_trail_performed_at ON audit_trail(performed_at);
 
 -- Tally Bridge Sessions
 CREATE TABLE IF NOT EXISTS tally_bridge_sessions (
@@ -146,8 +146,8 @@ CREATE TABLE IF NOT EXISTS tally_bridge_sessions (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_tally_bridge_sessions_session_key ON tally_bridge_sessions(session_key);
-CREATE INDEX idx_tally_bridge_sessions_engagement_id ON tally_bridge_sessions(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_tally_bridge_sessions_session_key ON tally_bridge_sessions(session_key);
+CREATE INDEX IF NOT EXISTS idx_tally_bridge_sessions_engagement_id ON tally_bridge_sessions(engagement_id);
 
 -- Tally Bridge Requests
 CREATE TABLE IF NOT EXISTS tally_bridge_requests (
@@ -163,8 +163,8 @@ CREATE TABLE IF NOT EXISTS tally_bridge_requests (
     FOREIGN KEY (session_id) REFERENCES tally_bridge_sessions(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_tally_bridge_requests_session_id ON tally_bridge_requests(session_id);
-CREATE INDEX idx_tally_bridge_requests_status ON tally_bridge_requests(status);
+CREATE INDEX IF NOT EXISTS idx_tally_bridge_requests_session_id ON tally_bridge_requests(session_id);
+CREATE INDEX IF NOT EXISTS idx_tally_bridge_requests_status ON tally_bridge_requests(status);
 
 -- Feedback Reports
 CREATE TABLE IF NOT EXISTS feedback_reports (
@@ -184,9 +184,9 @@ CREATE TABLE IF NOT EXISTS feedback_reports (
     FOREIGN KEY (resolved_by) REFERENCES profiles(user_id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_feedback_reports_user_id ON feedback_reports(user_id);
-CREATE INDEX idx_feedback_reports_status ON feedback_reports(status);
-CREATE INDEX idx_feedback_reports_feedback_type ON feedback_reports(feedback_type);
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_user_id ON feedback_reports(user_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_status ON feedback_reports(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_feedback_type ON feedback_reports(feedback_type);
 
 -- Feedback Attachments
 CREATE TABLE IF NOT EXISTS feedback_attachments (
@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS feedback_attachments (
     FOREIGN KEY (feedback_id) REFERENCES feedback_reports(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_feedback_attachments_feedback_id ON feedback_attachments(feedback_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_attachments_feedback_id ON feedback_attachments(feedback_id);
 
 -- ============================================================================
 -- TRIGGERS

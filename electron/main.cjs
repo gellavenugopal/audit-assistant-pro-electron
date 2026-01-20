@@ -63,61 +63,7 @@ function getSqliteDb() {
         sqliteDb.pragma('synchronous = NORMAL');
 
         safeLog('✅ SQLite database opened at:', dbPath);
-
-        // Always ensure core tables exist (idempotent).
-        // Make created_by nullable to allow client creation without user context
-        sqliteDb.exec(`
-          CREATE TABLE IF NOT EXISTS clients (
-            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-            name TEXT NOT NULL,
-            industry TEXT NOT NULL,
-            constitution TEXT DEFAULT 'company',
-            cin TEXT,
-            pan TEXT,
-            address TEXT,
-            state TEXT,
-            pin TEXT,
-            contact_person TEXT,
-            contact_email TEXT,
-            contact_phone TEXT,
-            status TEXT NOT NULL DEFAULT 'active',
-            notes TEXT,
-            created_by TEXT DEFAULT 'system',
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-          );
-          CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
-          CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status);
-          
-          -- Alter existing table if created_by is NOT NULL (SQLite doesn't support ALTER COLUMN, so we skip if table exists)
-          -- The table will be created with nullable created_by on first run
-          CREATE TABLE IF NOT EXISTS engagements (
-            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-            name TEXT NOT NULL,
-            client_id TEXT,
-            client_name TEXT NOT NULL,
-            engagement_type TEXT NOT NULL DEFAULT 'statutory',
-            financial_year TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'planning' CHECK (status IN ('planning', 'fieldwork', 'review', 'completion')),
-            partner_id TEXT,
-            manager_id TEXT,
-            firm_id TEXT,
-            materiality_amount REAL,
-            performance_materiality REAL,
-            trivial_threshold REAL,
-            start_date TEXT,
-            end_date TEXT,
-            notes TEXT,
-            created_by TEXT DEFAULT 'system',
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-          );
-          CREATE INDEX IF NOT EXISTS idx_engagements_client_id ON engagements(client_id);
-          CREATE INDEX IF NOT EXISTS idx_engagements_status ON engagements(status);
-        `);
-
-        safeLog('🔧 Initializing complete database schema...');
-        safeLog('   Schema directory should be at:', path.join(__dirname, '..', 'sqlite', 'schema'));
+        safeLog('🔧 Initializing database schema from schema files...');
 
         // Always initialize full schema to ensure all tables exist
         // This is idempotent (uses CREATE TABLE IF NOT EXISTS)
@@ -127,9 +73,17 @@ function getSqliteDb() {
 
       } catch (dbError) {
         safeLog('❌ Failed to create SQLite database:', dbError.message);
-        safeLog('   This usually means better-sqlite3 needs to be rebuilt for Electron.');
-        safeLog('   The native bindings file is missing or incompatible.');
-        safeLog('   Error:', dbError.stack);
+        safeLog('   Error details:', dbError.stack);
+
+        // Show error dialog to user
+        const { dialog } = require('electron');
+        if (app && app.isReady()) {
+          dialog.showErrorBox(
+            'Database Initialization Error',
+            `Failed to initialize database:\n\n${dbError.message}\n\nDetails: ${dbError.stack ? dbError.stack.substring(0, 500) : 'See console logs'}\n\nPlease check the console for full details and reinstall if the problem persists.`
+          );
+        }
+
         throw dbError;
       }
     }
@@ -144,19 +98,53 @@ function getSqliteDb() {
 
 /**
  * Initialize database schema by reading and executing all schema files
+ * Uses ONLY the schema files from sqlite/schema/ directory
  */
 function initializeDatabaseSchema(db) {
-  // Try multiple possible schema directory locations
-  let schemaDir = path.join(__dirname, '..', 'sqlite', 'schema');
+  safeLog('   📦 Initializing database schema from SQL files...');
 
-  // If not found, try relative to app root
-  if (!fs.existsSync(schemaDir)) {
-    schemaDir = path.join(process.cwd(), 'sqlite', 'schema');
+  // Helper function to clean SQL statement - removes comments but keeps the SQL
+  const cleanStatement = (stmt) => {
+    return stmt
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => !line.startsWith('--'))  // Remove comment-only lines
+      .join('\n')
+      .trim();
+  };
+
+  // Determine schema directory location - try multiple paths
+  let schemaDir = null;
+  const possiblePaths = [];
+
+  if (app.isPackaged) {
+    // In production, try resources path first
+    possiblePaths.push(path.join(process.resourcesPath, 'sqlite', 'schema'));
+    possiblePaths.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'sqlite', 'schema'));
+    possiblePaths.push(path.join(__dirname, '..', 'sqlite', 'schema'));
+    safeLog('   📦 Running as packaged app');
+    safeLog('   resourcesPath:', process.resourcesPath);
+  } else {
+    // In development
+    possiblePaths.push(path.join(__dirname, '..', 'sqlite', 'schema'));
+    possiblePaths.push(path.join(process.cwd(), 'sqlite', 'schema'));
+    safeLog('   🔧 Running in development mode');
   }
 
-  // If still not found, try relative to resources path (for packaged apps)
-  if (!fs.existsSync(schemaDir) && process.resourcesPath) {
-    schemaDir = path.join(process.resourcesPath, 'sqlite', 'schema');
+  // Find first existing schema directory
+  for (const p of possiblePaths) {
+    safeLog(`   Checking path: ${p}`);
+    if (fs.existsSync(p)) {
+      schemaDir = p;
+      safeLog(`   ✓ Found schema directory at: ${p}`);
+      break;
+    }
+  }
+
+  if (!schemaDir) {
+    const errorMsg = `Schema directory not found! Tried paths:\n${possiblePaths.join('\n')}`;
+    safeLog(`   ❌ ${errorMsg}`);
+    throw new Error(errorMsg);
   }
 
   const schemaFiles = [
@@ -170,44 +158,32 @@ function initializeDatabaseSchema(db) {
     '08_template_system_tables.sql'
   ];
 
-  safeLog('   Executing schema files from:', schemaDir);
+  safeLog(`   Executing ${schemaFiles.length} schema files...`);
 
-  // Check if schema directory exists
-  if (!fs.existsSync(schemaDir)) {
-    safeLog('   ❌ Schema directory not found at:', schemaDir);
-    safeLog('   Tried locations:');
-    safeLog('     1.', path.join(__dirname, '..', 'sqlite', 'schema'));
-    safeLog('     2.', path.join(process.cwd(), 'sqlite', 'schema'));
-    if (process.resourcesPath) {
-      safeLog('     3.', path.join(process.resourcesPath, 'sqlite', 'schema'));
-    }
-    throw new Error(`Schema directory not found. Tried: ${schemaDir}`);
-  }
-
-  safeLog('   ✓ Schema directory found:', schemaDir);
+  let totalSuccess = 0;
+  let totalSkip = 0;
+  let totalErrors = 0;
 
   schemaFiles.forEach((file, index) => {
     const filePath = path.join(schemaDir, file);
 
     if (!fs.existsSync(filePath)) {
       safeLog(`   ❌ Schema file not found: ${filePath}`);
-      throw new Error(`Missing schema file: ${file} at ${filePath}`);
+      throw new Error(`Missing required schema file: ${file}`);
     }
 
     const sql = fs.readFileSync(filePath, 'utf8');
 
     if (!sql || sql.trim().length === 0) {
       safeLog(`   ⚠️  Schema file is empty: ${file}`);
-      return; // Skip empty files
+      return;
     }
 
     // Split SQL into individual statements and execute each separately
-    // This ensures that if one statement fails (e.g., index already exists),
-    // the rest of the statements still execute
     const statements = sql
       .split(';')
-      .map(stmt => stmt.trim())
-      .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'));
+      .map(stmt => cleanStatement(stmt))
+      .filter(stmt => stmt.length > 0);
 
     let successCount = 0;
     let skipCount = 0;
@@ -218,26 +194,32 @@ function initializeDatabaseSchema(db) {
         db.exec(statement + ';');
         successCount++;
       } catch (error) {
-        // "already exists" errors are OK - table/index already there
+        // "already exists" errors are OK - table/index/trigger already there
         if (error.message && error.message.includes('already exists')) {
           skipCount++;
         } else {
           // Real error - log it but continue with other statements
           errorCount++;
-          safeLog(`      ⚠️  Error in ${file}:`, error.message);
-          if (statement.length < 100) {
-            safeLog(`         Statement: ${statement.substring(0, 100)}`);
-          }
+          safeLog(`      ⚠️  Error in ${file}: ${error.message}`);
+          // Log statement preview for debugging
+          const preview = statement.substring(0, 100).replace(/\n/g, ' ');
+          safeLog(`         Statement: ${preview}...`);
         }
       }
     }
 
+    totalSuccess += successCount;
+    totalSkip += skipCount;
+    totalErrors += errorCount;
+
     if (errorCount > 0) {
-      safeLog(`   ${index + 1}. ⚠️  ${file} - ${successCount} ok, ${skipCount} skipped, ${errorCount} errors`);
+      safeLog(`   ${index + 1}. ⚠️  ${file} - ${successCount} ok, ${skipCount} existed, ${errorCount} errors`);
     } else {
-      safeLog(`   ${index + 1}. ✓ ${file} - ${successCount} statements, ${skipCount} already existed`);
+      safeLog(`   ${index + 1}. ✓ ${file} - ${successCount} ok, ${skipCount} existed`);
     }
   });
+
+  safeLog(`   📊 Total: ${totalSuccess} statements executed, ${totalSkip} already existed, ${totalErrors} errors`);
 
   // Verify tables created
   const tableCount = db.prepare(

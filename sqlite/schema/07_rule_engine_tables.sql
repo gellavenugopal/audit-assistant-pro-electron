@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS aile_rule_sets (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_aile_rule_sets_is_active ON aile_rule_sets(is_active);
-CREATE INDEX idx_aile_rule_sets_is_default ON aile_rule_sets(is_default);
+CREATE INDEX IF NOT EXISTS idx_aile_rule_sets_is_active ON aile_rule_sets(is_active);
+CREATE INDEX IF NOT EXISTS idx_aile_rule_sets_is_default ON aile_rule_sets(is_default);
 
 -- AILE Mapping Rules
 CREATE TABLE IF NOT EXISTS aile_mapping_rules (
@@ -45,9 +45,9 @@ CREATE TABLE IF NOT EXISTS aile_mapping_rules (
     FOREIGN KEY (rule_set_id) REFERENCES aile_rule_sets(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_aile_mapping_rules_rule_set_id ON aile_mapping_rules(rule_set_id);
-CREATE INDEX idx_aile_mapping_rules_match_field ON aile_mapping_rules(match_field);
-CREATE INDEX idx_aile_mapping_rules_priority ON aile_mapping_rules(priority);
+CREATE INDEX IF NOT EXISTS idx_aile_mapping_rules_rule_set_id ON aile_mapping_rules(rule_set_id);
+CREATE INDEX IF NOT EXISTS idx_aile_mapping_rules_match_field ON aile_mapping_rules(match_field);
+CREATE INDEX IF NOT EXISTS idx_aile_mapping_rules_priority ON aile_mapping_rules(priority);
 
 -- Rule Engine: Group Rules
 CREATE TABLE IF NOT EXISTS rule_engine_group_rules (
@@ -68,8 +68,8 @@ CREATE TABLE IF NOT EXISTS rule_engine_group_rules (
     FOREIGN KEY (rule_set_id) REFERENCES aile_rule_sets(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_rule_engine_group_rules_rule_set_id ON rule_engine_group_rules(rule_set_id);
-CREATE INDEX idx_rule_engine_group_rules_tally_group ON rule_engine_group_rules(tally_group);
+CREATE INDEX IF NOT EXISTS idx_rule_engine_group_rules_rule_set_id ON rule_engine_group_rules(rule_set_id);
+CREATE INDEX IF NOT EXISTS idx_rule_engine_group_rules_tally_group ON rule_engine_group_rules(tally_group);
 
 -- Rule Engine: Keyword Rules
 CREATE TABLE IF NOT EXISTS rule_engine_keyword_rules (
@@ -90,8 +90,8 @@ CREATE TABLE IF NOT EXISTS rule_engine_keyword_rules (
     FOREIGN KEY (rule_set_id) REFERENCES aile_rule_sets(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_rule_engine_keyword_rules_rule_set_id ON rule_engine_keyword_rules(rule_set_id);
-CREATE INDEX idx_rule_engine_keyword_rules_keyword ON rule_engine_keyword_rules(keyword);
+CREATE INDEX IF NOT EXISTS idx_rule_engine_keyword_rules_rule_set_id ON rule_engine_keyword_rules(rule_set_id);
+CREATE INDEX IF NOT EXISTS idx_rule_engine_keyword_rules_keyword ON rule_engine_keyword_rules(keyword);
 
 -- Rule Engine: Override Rules (Manual)
 CREATE TABLE IF NOT EXISTS rule_engine_override_rules (
@@ -109,8 +109,8 @@ CREATE TABLE IF NOT EXISTS rule_engine_override_rules (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_rule_engine_override_rules_engagement_id ON rule_engine_override_rules(engagement_id);
-CREATE INDEX idx_rule_engine_override_rules_ledger_name ON rule_engine_override_rules(ledger_name);
+CREATE INDEX IF NOT EXISTS idx_rule_engine_override_rules_engagement_id ON rule_engine_override_rules(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_rule_engine_override_rules_ledger_name ON rule_engine_override_rules(ledger_name);
 
 -- Rule Engine: Validation Rules
 CREATE TABLE IF NOT EXISTS rule_engine_validation_rules (
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS rule_engine_validation_rules (
     FOREIGN KEY (rule_set_id) REFERENCES aile_rule_sets(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_rule_engine_validation_rules_rule_set_id ON rule_engine_validation_rules(rule_set_id);
+CREATE INDEX IF NOT EXISTS idx_rule_engine_validation_rules_rule_set_id ON rule_engine_validation_rules(rule_set_id);
 
 -- ============================================================================
 -- TRIGGERS

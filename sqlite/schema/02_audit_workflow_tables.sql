@@ -44,10 +44,10 @@ CREATE TABLE IF NOT EXISTS audit_procedures (
     FOREIGN KEY (template_id) REFERENCES standard_procedures(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_audit_procedures_engagement_id ON audit_procedures(engagement_id);
-CREATE INDEX idx_audit_procedures_assigned_to ON audit_procedures(assigned_to);
-CREATE INDEX idx_audit_procedures_status ON audit_procedures(status);
-CREATE INDEX idx_audit_procedures_area ON audit_procedures(area);
+CREATE INDEX IF NOT EXISTS idx_audit_procedures_engagement_id ON audit_procedures(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_audit_procedures_assigned_to ON audit_procedures(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_audit_procedures_status ON audit_procedures(status);
+CREATE INDEX IF NOT EXISTS idx_audit_procedures_area ON audit_procedures(area);
 
 -- Procedure Assignees
 CREATE TABLE IF NOT EXISTS procedure_assignees (
@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS procedure_assignees (
     UNIQUE(procedure_id, user_id)
 );
 
-CREATE INDEX idx_procedure_assignees_procedure_id ON procedure_assignees(procedure_id);
-CREATE INDEX idx_procedure_assignees_user_id ON procedure_assignees(user_id);
+CREATE INDEX IF NOT EXISTS idx_procedure_assignees_procedure_id ON procedure_assignees(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_procedure_assignees_user_id ON procedure_assignees(user_id);
 
 -- Procedure Checklist Items
 CREATE TABLE IF NOT EXISTS procedure_checklist_items (
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS procedure_checklist_items (
     FOREIGN KEY (completed_by) REFERENCES profiles(user_id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_procedure_checklist_items_procedure_id ON procedure_checklist_items(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_procedure_checklist_items_procedure_id ON procedure_checklist_items(procedure_id);
 
 -- Procedure Evidence Requirements
 CREATE TABLE IF NOT EXISTS procedure_evidence_requirements (
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS procedure_evidence_requirements (
     FOREIGN KEY (procedure_id) REFERENCES audit_procedures(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_procedure_evidence_requirements_procedure_id ON procedure_evidence_requirements(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_procedure_evidence_requirements_procedure_id ON procedure_evidence_requirements(procedure_id);
 
 -- Evidence Files
 CREATE TABLE IF NOT EXISTS evidence_files (
@@ -130,8 +130,8 @@ CREATE TABLE IF NOT EXISTS evidence_files (
     FOREIGN KEY (uploaded_by) REFERENCES profiles(user_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_evidence_files_engagement_id ON evidence_files(engagement_id);
-CREATE INDEX idx_evidence_files_uploaded_by ON evidence_files(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_evidence_files_engagement_id ON evidence_files(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_files_uploaded_by ON evidence_files(uploaded_by);
 
 -- Evidence Links
 CREATE TABLE IF NOT EXISTS evidence_links (
@@ -147,8 +147,8 @@ CREATE TABLE IF NOT EXISTS evidence_links (
     FOREIGN KEY (linked_by) REFERENCES profiles(user_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_evidence_links_procedure_id ON evidence_links(procedure_id);
-CREATE INDEX idx_evidence_links_evidence_id ON evidence_links(evidence_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_links_procedure_id ON evidence_links(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_links_evidence_id ON evidence_links(evidence_id);
 
 -- Risks
 CREATE TABLE IF NOT EXISTS risks (
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS risks (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_risks_engagement_id ON risks(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_risks_engagement_id ON risks(engagement_id);
 
 -- Review Notes
 CREATE TABLE IF NOT EXISTS review_notes (
@@ -194,8 +194,8 @@ CREATE TABLE IF NOT EXISTS review_notes (
     FOREIGN KEY (assigned_to) REFERENCES profiles(user_id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_review_notes_engagement_id ON review_notes(engagement_id);
-CREATE INDEX idx_review_notes_procedure_id ON review_notes(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_review_notes_engagement_id ON review_notes(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_review_notes_procedure_id ON review_notes(procedure_id);
 
 -- Compliance Applicability
 CREATE TABLE IF NOT EXISTS compliance_applicability (
@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS compliance_applicability (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_compliance_applicability_engagement ON compliance_applicability(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_applicability_engagement ON compliance_applicability(engagement_id);
 
 -- Materiality Risk Assessment
 CREATE TABLE IF NOT EXISTS materiality_risk_assessment (
@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS materiality_risk_assessment (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_materiality_risk_assessment_engagement ON materiality_risk_assessment(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_materiality_risk_assessment_engagement ON materiality_risk_assessment(engagement_id);
 
 -- Notifications
 CREATE TABLE IF NOT EXISTS notifications (
@@ -241,8 +241,8 @@ CREATE TABLE IF NOT EXISTS notifications (
     FOREIGN KEY (user_id) REFERENCES profiles(user_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_notifications_user_id ON notifications(user_id);
-CREATE INDEX idx_notifications_is_read ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
 
 -- ============================================================================
 -- TRIGGERS

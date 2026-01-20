@@ -29,8 +29,8 @@ CREATE TABLE IF NOT EXISTS audit_programs_new (
     FOREIGN KEY (financial_year_id) REFERENCES financial_years(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_audit_programs_new_engagement_id ON audit_programs_new(engagement_id);
-CREATE INDEX idx_audit_programs_new_client_id ON audit_programs_new(client_id);
+CREATE INDEX IF NOT EXISTS idx_audit_programs_new_engagement_id ON audit_programs_new(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_audit_programs_new_client_id ON audit_programs_new(client_id);
 
 -- Audit Program Sections
 CREATE TABLE IF NOT EXISTS audit_program_sections (
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS audit_program_sections (
     FOREIGN KEY (audit_program_id) REFERENCES audit_programs_new(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_audit_program_sections_audit_program_id ON audit_program_sections(audit_program_id);
+CREATE INDEX IF NOT EXISTS idx_audit_program_sections_audit_program_id ON audit_program_sections(audit_program_id);
 
 -- Audit Program Boxes
 CREATE TABLE IF NOT EXISTS audit_program_boxes (
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS audit_program_boxes (
     FOREIGN KEY (section_id) REFERENCES audit_program_sections(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_audit_program_boxes_section_id ON audit_program_boxes(section_id);
+CREATE INDEX IF NOT EXISTS idx_audit_program_boxes_section_id ON audit_program_boxes(section_id);
 
 -- Audit Program Attachments
 CREATE TABLE IF NOT EXISTS audit_program_attachments (
@@ -86,9 +86,9 @@ CREATE TABLE IF NOT EXISTS audit_program_attachments (
     FOREIGN KEY (uploaded_by) REFERENCES profiles(user_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_audit_program_attachments_audit_program_id ON audit_program_attachments(audit_program_id);
-CREATE INDEX idx_audit_program_attachments_section_id ON audit_program_attachments(section_id);
-CREATE INDEX idx_audit_program_attachments_box_id ON audit_program_attachments(box_id);
+CREATE INDEX IF NOT EXISTS idx_audit_program_attachments_audit_program_id ON audit_program_attachments(audit_program_id);
+CREATE INDEX IF NOT EXISTS idx_audit_program_attachments_section_id ON audit_program_attachments(section_id);
+CREATE INDEX IF NOT EXISTS idx_audit_program_attachments_box_id ON audit_program_attachments(box_id);
 
 -- Engagement Letter Templates
 CREATE TABLE IF NOT EXISTS engagement_letter_templates (
@@ -111,9 +111,9 @@ CREATE TABLE IF NOT EXISTS engagement_letter_templates (
     FOREIGN KEY (uploaded_by) REFERENCES profiles(user_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_engagement_letter_templates_type ON engagement_letter_templates(template_type);
-CREATE INDEX idx_engagement_letter_templates_active ON engagement_letter_templates(is_active);
-CREATE INDEX idx_engagement_letter_templates_uploaded_by ON engagement_letter_templates(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_engagement_letter_templates_type ON engagement_letter_templates(template_type);
+CREATE INDEX IF NOT EXISTS idx_engagement_letter_templates_active ON engagement_letter_templates(is_active);
+CREATE INDEX IF NOT EXISTS idx_engagement_letter_templates_uploaded_by ON engagement_letter_templates(uploaded_by);
 
 -- ============================================================================
 -- TRIGGERS

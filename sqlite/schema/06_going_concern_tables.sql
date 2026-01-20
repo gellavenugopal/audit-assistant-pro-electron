@@ -27,8 +27,8 @@ CREATE TABLE IF NOT EXISTS going_concern_workpapers (
     FOREIGN KEY (procedure_id) REFERENCES audit_procedures(id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_going_concern_workpapers_engagement_id ON going_concern_workpapers(engagement_id);
-CREATE INDEX idx_going_concern_workpapers_procedure_id ON going_concern_workpapers(procedure_id);
+CREATE INDEX IF NOT EXISTS idx_going_concern_workpapers_engagement_id ON going_concern_workpapers(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_going_concern_workpapers_procedure_id ON going_concern_workpapers(procedure_id);
 
 -- Going Concern Checklist Items
 CREATE TABLE IF NOT EXISTS going_concern_checklist_items (
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS going_concern_checklist_items (
     FOREIGN KEY (workpaper_id) REFERENCES going_concern_workpapers(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_going_concern_checklist_items_workpaper_id ON going_concern_checklist_items(workpaper_id);
+CREATE INDEX IF NOT EXISTS idx_going_concern_checklist_items_workpaper_id ON going_concern_checklist_items(workpaper_id);
 
 -- GC Annexure: Net Worth
 CREATE TABLE IF NOT EXISTS gc_annexure_net_worth (
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS gc_annexure_net_worth (
     FOREIGN KEY (workpaper_id) REFERENCES going_concern_workpapers(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_gc_annexure_net_worth_workpaper_id ON gc_annexure_net_worth(workpaper_id);
+CREATE INDEX IF NOT EXISTS idx_gc_annexure_net_worth_workpaper_id ON gc_annexure_net_worth(workpaper_id);
 
 -- GC Annexure: Profitability
 CREATE TABLE IF NOT EXISTS gc_annexure_profitability (
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS gc_annexure_profitability (
     FOREIGN KEY (workpaper_id) REFERENCES going_concern_workpapers(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_gc_annexure_profitability_workpaper_id ON gc_annexure_profitability(workpaper_id);
+CREATE INDEX IF NOT EXISTS idx_gc_annexure_profitability_workpaper_id ON gc_annexure_profitability(workpaper_id);
 
 -- GC Annexure: Borrowings
 CREATE TABLE IF NOT EXISTS gc_annexure_borrowings (
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS gc_annexure_borrowings (
     FOREIGN KEY (workpaper_id) REFERENCES going_concern_workpapers(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_gc_annexure_borrowings_workpaper_id ON gc_annexure_borrowings(workpaper_id);
+CREATE INDEX IF NOT EXISTS idx_gc_annexure_borrowings_workpaper_id ON gc_annexure_borrowings(workpaper_id);
 
 -- GC Annexure: Cash Flows
 CREATE TABLE IF NOT EXISTS gc_annexure_cash_flows (
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS gc_annexure_cash_flows (
     FOREIGN KEY (workpaper_id) REFERENCES going_concern_workpapers(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_gc_annexure_cash_flows_workpaper_id ON gc_annexure_cash_flows(workpaper_id);
+CREATE INDEX IF NOT EXISTS idx_gc_annexure_cash_flows_workpaper_id ON gc_annexure_cash_flows(workpaper_id);
 
 -- GC Annexure: Ratios
 CREATE TABLE IF NOT EXISTS gc_annexure_ratios (
@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS gc_annexure_ratios (
     FOREIGN KEY (workpaper_id) REFERENCES going_concern_workpapers(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_gc_annexure_ratios_workpaper_id ON gc_annexure_ratios(workpaper_id);
+CREATE INDEX IF NOT EXISTS idx_gc_annexure_ratios_workpaper_id ON gc_annexure_ratios(workpaper_id);
 
 -- ============================================================================
 -- TRIGGERS

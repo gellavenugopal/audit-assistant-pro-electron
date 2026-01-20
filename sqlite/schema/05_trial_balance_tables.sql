@@ -35,9 +35,9 @@ CREATE TABLE IF NOT EXISTS trial_balance_lines (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_trial_balance_lines_engagement_id ON trial_balance_lines(engagement_id);
-CREATE INDEX idx_trial_balance_lines_account_code ON trial_balance_lines(account_code);
-CREATE INDEX idx_trial_balance_lines_aile ON trial_balance_lines(aile);
+CREATE INDEX IF NOT EXISTS idx_trial_balance_lines_engagement_id ON trial_balance_lines(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_trial_balance_lines_account_code ON trial_balance_lines(account_code);
+CREATE INDEX IF NOT EXISTS idx_trial_balance_lines_aile ON trial_balance_lines(aile);
 
 -- Schedule III Config
 CREATE TABLE IF NOT EXISTS schedule_iii_config (
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS schedule_iii_config (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_schedule_iii_config_engagement_id ON schedule_iii_config(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_iii_config_engagement_id ON schedule_iii_config(engagement_id);
 
 -- TB New Entity Info
 CREATE TABLE IF NOT EXISTS tb_new_entity_info (
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS tb_new_entity_info (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_tb_new_entity_info_engagement_id ON tb_new_entity_info(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_tb_new_entity_info_engagement_id ON tb_new_entity_info(engagement_id);
 
 -- TB New Ledgers
 CREATE TABLE IF NOT EXISTS tb_new_ledgers (
@@ -96,8 +96,8 @@ CREATE TABLE IF NOT EXISTS tb_new_ledgers (
     FOREIGN KEY (entity_info_id) REFERENCES tb_new_entity_info(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_tb_new_ledgers_engagement_id ON tb_new_ledgers(engagement_id);
-CREATE INDEX idx_tb_new_ledgers_entity_info_id ON tb_new_ledgers(entity_info_id);
+CREATE INDEX IF NOT EXISTS idx_tb_new_ledgers_engagement_id ON tb_new_ledgers(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_tb_new_ledgers_entity_info_id ON tb_new_ledgers(entity_info_id);
 
 -- TB New Stock Items
 CREATE TABLE IF NOT EXISTS tb_new_stock_items (
@@ -116,8 +116,8 @@ CREATE TABLE IF NOT EXISTS tb_new_stock_items (
     FOREIGN KEY (entity_info_id) REFERENCES tb_new_entity_info(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_tb_new_stock_items_engagement_id ON tb_new_stock_items(engagement_id);
-CREATE INDEX idx_tb_new_stock_items_entity_info_id ON tb_new_stock_items(entity_info_id);
+CREATE INDEX IF NOT EXISTS idx_tb_new_stock_items_engagement_id ON tb_new_stock_items(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_tb_new_stock_items_entity_info_id ON tb_new_stock_items(entity_info_id);
 
 -- TB New Classification Mappings
 CREATE TABLE IF NOT EXISTS tb_new_classification_mappings (
@@ -137,8 +137,8 @@ CREATE TABLE IF NOT EXISTS tb_new_classification_mappings (
     FOREIGN KEY (entity_info_id) REFERENCES tb_new_entity_info(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_tb_new_classification_mappings_engagement_id ON tb_new_classification_mappings(engagement_id);
-CREATE INDEX idx_tb_new_classification_mappings_entity_info_id ON tb_new_classification_mappings(entity_info_id);
+CREATE INDEX IF NOT EXISTS idx_tb_new_classification_mappings_engagement_id ON tb_new_classification_mappings(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_tb_new_classification_mappings_entity_info_id ON tb_new_classification_mappings(entity_info_id);
 
 -- TB New Sessions
 CREATE TABLE IF NOT EXISTS tb_new_sessions (
@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS tb_new_sessions (
     FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_tb_new_sessions_engagement_id ON tb_new_sessions(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_tb_new_sessions_engagement_id ON tb_new_sessions(engagement_id);
 
 -- ============================================================================
 -- TRIGGERS
