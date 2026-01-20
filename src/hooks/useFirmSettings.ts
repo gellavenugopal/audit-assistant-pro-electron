@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface FirmSettings {
   id: string;
@@ -23,11 +25,11 @@ export function useFirmSettings() {
 
   const fetchFirmSettings = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('firm_settings')
         .select('*')
         .limit(1)
-        .maybeSingle();
+        .single();
 
       if (error) throw error;
       setFirmSettings(data);
@@ -44,12 +46,10 @@ export function useFirmSettings() {
     try {
       if (firmSettings) {
         // Update existing
-        const { data: updated, error } = await supabase
+        const { data: updated, error } = await db
           .from('firm_settings')
-          .update(data)
           .eq('id', firmSettings.id)
-          .select()
-          .single();
+          .update(data);
 
         if (error) throw error;
         setFirmSettings(updated);
@@ -57,15 +57,13 @@ export function useFirmSettings() {
         return updated;
       } else {
         // Create new
-        const { data: created, error } = await supabase
+        const { data: created, error } = await db
           .from('firm_settings')
           .insert({
             ...data,
             firm_name: data.firm_name || 'My Firm',
             created_by: user.id,
-          })
-          .select()
-          .single();
+          });
 
         if (error) throw error;
         setFirmSettings(created);

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 import {
   AuditExecutionAttachment,
   AuditExecutionBox,
@@ -26,11 +28,12 @@ export function useAuditExecution(engagementId?: string | null) {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_programs_new')
         .select('*')
         .eq('engagement_id', engagementId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .execute();
 
       if (error) throw error;
       setPrograms((data || []) as AuditExecutionProgram[]);
@@ -43,10 +46,11 @@ export function useAuditExecution(engagementId?: string | null) {
   };
 
   const resolveFinancialYearId = async (financialYear: string) => {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('financial_years')
       .select('id, year_code, display_name')
-      .eq('is_active', true);
+      .eq('is_active', 1)
+      .execute();
 
     if (error) throw error;
 
@@ -69,7 +73,7 @@ export function useAuditExecution(engagementId?: string | null) {
     }
 
     try {
-      const { data: engagement, error: engagementError } = await supabase
+      const { data: engagement, error: engagementError } = await db
         .from('engagements')
         .select('client_id, financial_year')
         .eq('id', engagementId)
@@ -87,7 +91,7 @@ export function useAuditExecution(engagementId?: string | null) {
         return null;
       }
 
-      const { data: program, error } = await supabase
+      const { data: program, error } = await db
         .from('audit_programs_new')
         .insert({
           engagement_id: engagementId,

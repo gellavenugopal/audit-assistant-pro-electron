@@ -1,0 +1,26 @@
+{
+  "name": "audit-assistant-pro-sqlite",
+  "version": "1.0.0",
+  "description": "SQLite migration for Audit Assistant Pro",
+  "scripts": {
+    "migrate": "ts-node sqlite/migrate-from-supabase.ts",
+    "migrate:export": "ts-node sqlite/migrate-from-supabase.ts export ./supabase-backup.json",
+    "migrate:tables": "ts-node sqlite/migrate-from-supabase.ts tables",
+    "db:init": "ts-node -e \"require('./sqlite/database-manager').getDatabase()\"",
+    "db:backup": "node -e \"require('fs').copyFileSync('./audit_assistant.db', './audit_assistant.backup.db')\"",
+    "db:vacuum": "sqlite3 audit_assistant.db 'VACUUM;'",
+    "db:check": "sqlite3 audit_assistant.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'",
+    "test:sqlite": "vitest run --config vitest.config.sqlite.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.2.2",
+    "bcrypt": "^5.1.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/bcrypt": "^5.0.2",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.17"
+  }
+}

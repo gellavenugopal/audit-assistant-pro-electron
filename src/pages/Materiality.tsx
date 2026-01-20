@@ -18,7 +18,9 @@ import { useEngagement } from '@/contexts/EngagementContext';
 import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { RiskRegisterContent } from '@/pages/RiskRegister';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 // ICAI-CAQD SUGGESTED MATERIALITY GUIDANCE (ADVISORY)
 const CAQD_GUIDE: Record<string, Record<string, string>> = {

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface EngagementAssignment {
   id: string;
@@ -32,11 +34,12 @@ export function useEngagementAssignments(engagementId?: string) {
 
     try {
       // Fetch assignments
-      const { data: assignmentsData, error: assignmentsError } = await supabase
+      const { data: assignmentsData, error: assignmentsError } = await db
         .from('engagement_assignments')
         .select('*')
         .eq('engagement_id', engagementId)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .execute();
 
       if (assignmentsError) throw assignmentsError;
 
@@ -45,10 +48,11 @@ export function useEngagementAssignments(engagementId?: string) {
       let profilesMap: Record<string, { full_name: string; email: string; avatar_url: string | null }> = {};
 
       if (userIds.length > 0) {
-        const { data: profilesData } = await supabase
+        const { data: profilesData } = await db
           .from('profiles')
           .select('user_id, full_name, email, avatar_url')
-          .in('user_id', userIds);
+          .in('user_id', userIds)
+          .execute();
 
         profilesMap = (profilesData || []).reduce((acc, p) => {
           acc[p.user_id] = { full_name: p.full_name, email: p.email, avatar_url: p.avatar_url };

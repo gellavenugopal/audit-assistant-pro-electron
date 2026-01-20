@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+// Edge functions not available in SQLite - Tally Bridge needs alternative implementation
+// import { supabase } from "@/integrations/supabase/client";
 
 interface TallyCompanyInfo {
   companyName: string;
@@ -49,33 +50,41 @@ export const useTallyBridge = () => {
   });
 
   const checkSession = useCallback(async (sessionCode: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase.functions.invoke("tally-bridge", {
-        body: { action: "check-session", sessionCode },
-      });
-
-      if (error) throw error;
-      return data?.connected || false;
-    } catch (err) {
-      console.error("Error checking session:", err);
-      return false;
-    }
-  }, []);
+    // Edge functions not available in SQLite
+    // TODO: Implement Tally Bridge service for SQLite
+    toast({
+      title: "Not Available",
+      description: "Tally Bridge requires edge functions. Please use Supabase or implement alternative service.",
+      variant: "destructive",
+    });
+    return false;
+    // try {
+    //   const { data, error } = await supabase.functions.invoke("tally-bridge", {
+    //     body: { action: "check-session", sessionCode },
+    //   });
+    //   if (error) throw error;
+    //   return data?.connected || false;
+    // } catch (err) {
+    //   console.error("Error checking session:", err);
+    //   return false;
+    // }
+  }, [toast]);
 
   const sendTallyRequest = useCallback(async (sessionCode: string, xmlRequest: string): Promise<string | null> => {
-    try {
-      const { data, error } = await supabase.functions.invoke("tally-bridge", {
-        body: { action: "send-request", sessionCode, xmlRequest },
-      });
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      
-      return data?.data || null;
-    } catch (err) {
-      console.error("Error sending Tally request:", err);
-      throw err;
-    }
+    // Edge functions not available in SQLite
+    // TODO: Implement Tally Bridge service for SQLite
+    throw new Error("Tally Bridge requires edge functions. Not available in SQLite.");
+    // try {
+    //   const { data, error } = await supabase.functions.invoke("tally-bridge", {
+    //     body: { action: "send-request", sessionCode, xmlRequest },
+    //   });
+    //   if (error) throw error;
+    //   if (data?.error) throw new Error(data.error);
+    //   return data?.data || null;
+    // } catch (err) {
+    //   console.error("Error sending Tally request:", err);
+    //   throw err;
+    // }
   }, []);
 
   const connectWithSession = useCallback(async (sessionCode: string) => {

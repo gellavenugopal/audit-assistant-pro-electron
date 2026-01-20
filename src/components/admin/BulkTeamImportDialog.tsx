@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -55,7 +57,7 @@ export function BulkTeamImportDialog({ onSuccess }: BulkTeamImportDialogProps) {
     // Get current user's name for inviter
     let inviterName = 'Admin';
     try {
-      const { data: profile } = await supabase
+      const { data: profile } = await db
         .from('profiles')
         .select('full_name')
         .eq('user_id', user?.id)
@@ -71,17 +73,19 @@ export function BulkTeamImportDialog({ onSuccess }: BulkTeamImportDialogProps) {
 
     for (const member of parsedMembers) {
       try {
-        // Invite each team member via the send-invite edge function
-        const { error } = await supabase.functions.invoke('send-invite', {
-          body: {
-            email: member.email,
-            role: member.role,
-            full_name: member.full_name,
-            phone: member.phone,
-            inviterName,
-            appUrl,
-          },
-        });
+        // Edge functions not available in SQLite
+        toast.warning('Email invitation feature not yet implemented in SQLite.');
+        const error = new Error('Email invitations require edge functions');
+        // const { error } = await supabase.functions.invoke('send-invite', {
+        //   body: {
+        //     email: member.email,
+        //     role: member.role,
+        //     full_name: member.full_name,
+        //     phone: member.phone,
+        //     inviterName,
+        //     appUrl,
+        //   },
+        // });
 
         if (error) {
           errorCount++;

@@ -1,9 +1,11 @@
 /**
  * Utility to run database migrations programmatically
- * This is a workaround when Supabase CLI is not available
+ * For SQLite, migrations are handled via schema files
  */
 
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 export async function addIfcColumns() {
   try {
@@ -19,7 +21,9 @@ export async function addIfcColumns() {
     ];
 
     for (const sql of migrations) {
-      const { error } = await supabase.rpc('exec_sql', { sql_query: sql });
+      // SQLite migrations are handled via schema files
+      // Use db.execute() for direct SQL execution if needed
+      const { error } = await db.execute(sql);
       if (error) {
         console.error('Migration error:', error);
         throw error;

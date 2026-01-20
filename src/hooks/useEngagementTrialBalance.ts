@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 
 export type EngagementPeriodType = 'CY' | 'PY';
 

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import type { Database } from '@/integrations/supabase/types';
 
-type AppRole = Database['public']['Enums']['app_role'];
+const db = getSQLiteClient();
+
+type AppRole = 'partner' | 'manager' | 'senior' | 'staff';
 
 interface TeamMember {
   user_id: string;
@@ -26,10 +27,11 @@ export function useTeamMembers(engagementId?: string) {
       let targetUserIds: string[] | null = null;
 
       if (engagementId) {
-        const { data: assignments, error: assignmentsError } = await supabase
+        const { data: assignments, error: assignmentsError } = await db
           .from('engagement_assignments')
           .select('user_id')
-          .eq('engagement_id', engagementId);
+          .eq('engagement_id', engagementId)
+          .execute();
 
         if (assignmentsError) throw assignmentsError;
 
@@ -42,22 +44,22 @@ export function useTeamMembers(engagementId?: string) {
         }
       }
 
-      const profilesQuery = supabase
+      let profilesQuery = db
         .from('profiles')
         .select('user_id, full_name, email, avatar_url');
 
-      const rolesQuery = supabase
+      let rolesQuery = db
         .from('user_roles')
         .select('user_id, role');
 
       if (targetUserIds) {
-        profilesQuery.in('user_id', targetUserIds);
-        rolesQuery.in('user_id', targetUserIds);
+        profilesQuery = profilesQuery.in('user_id', targetUserIds);
+        rolesQuery = rolesQuery.in('user_id', targetUserIds);
       }
 
       const [{ data: profiles, error: profilesError }, { data: roles, error: rolesError }] = await Promise.all([
-        profilesQuery,
-        rolesQuery,
+        profilesQuery.execute(),
+        rolesQuery.execute(),
       ]);
 
       if (rolesError) throw rolesError;

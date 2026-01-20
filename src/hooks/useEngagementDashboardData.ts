@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 type ActivityLog = {
   id: string;
@@ -399,26 +401,10 @@ export function useEngagementDashboardData(engagementId?: string) {
 
     if (!engagementId) return undefined;
 
-    const channel = supabase
-      .channel(`engagement-dashboard-${engagementId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'compliance_applicability' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'materiality_risk_assessment' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'risks' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'evidence_files' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'review_notes' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_report_setup' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_trial_balance_header' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_trial_balance_lines' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_tb_classification' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_programs_new' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_program_sections' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_program_boxes' }, fetchData)
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Real-time subscriptions not available in SQLite
+    // Use polling if real-time updates are needed
+    // const interval = setInterval(fetchData, 30000);
+    // return () => clearInterval(interval);
   }, [engagementId]);
 
   return { data, loading, refetch: fetchData };

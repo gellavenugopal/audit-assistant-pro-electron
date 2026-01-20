@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface IFCControlResponse {
   id: string;
@@ -46,11 +48,12 @@ export function useIFCControlResponses(engagementId: string | undefined) {
     
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('ifc_control_responses')
         .select('*')
         .eq('engagement_id', engagementId)
-        .order('clause_id');
+        .order('clause_id', { ascending: true })
+        .execute();
 
       if (error) throw error;
       setResponses(data || []);
@@ -73,8 +76,9 @@ export function useIFCControlResponses(engagementId: string | undefined) {
       const existing = responses.find(r => r.clause_id === clauseId);
       
       if (existing) {
-        const { error } = await supabase
+        const { error } = await db
           .from('ifc_control_responses')
+          .eq('id', existing.id)
           .update({
             ...responseData,
             updated_at: new Date().toISOString(),

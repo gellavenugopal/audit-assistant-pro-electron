@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -53,7 +55,7 @@ export function BulkClientImportDialog({ onSuccess }: BulkClientImportDialogProp
 
     for (const client of parsedClients) {
       try {
-        const { error } = await supabase.from('clients').insert({
+        const { error } = await db.from('clients').insert({
           name: client.name,
           industry: client.industry,
           contact_person: client.contact_person,

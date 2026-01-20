@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface CAROClauseResponse {
   id: string;
@@ -42,10 +44,11 @@ export function useCAROClauseResponses(engagementId: string | undefined) {
     }
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('caro_clause_responses')
         .select('*')
-        .eq('engagement_id', engagementId);
+        .eq('engagement_id', engagementId)
+        .execute();
 
       if (error) throw error;
       setResponses(data || []);
@@ -63,15 +66,13 @@ export function useCAROClauseResponses(engagementId: string | undefined) {
 
     try {
       if (existingResponse) {
-        const { data: updated, error } = await supabase
+        const { data: updated, error } = await db
           .from('caro_clause_responses')
+          .eq('id', existingResponse.id)
           .update({
             ...data,
             version_number: existingResponse.version_number + 1,
-          })
-          .eq('id', existingResponse.id)
-          .select()
-          .single();
+          });
 
         if (error) throw error;
         setResponses(prev => prev.map(r => r.id === updated.id ? updated : r));

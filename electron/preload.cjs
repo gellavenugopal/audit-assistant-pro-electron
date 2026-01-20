@@ -5,6 +5,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // Add any IPC methods you need here
   platform: process.platform,
+  // SQLite methods
+  sqliteAuth: (payload) => ipcRenderer.invoke('sqlite-auth', payload),
+  sqliteGetCurrentUser: () => ipcRenderer.invoke('sqlite-get-current-user'),
+  sqliteQuery: (payload) => ipcRenderer.invoke('sqlite-query', payload),
   gstzen: {
     login: (credentials) => ipcRenderer.invoke('gstzen-login', credentials),
     generateOtp: (data, token) => ipcRenderer.invoke('gstzen-generate-otp', { data, token }),

@@ -12,11 +12,10 @@ import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { useFirmSettings } from '@/hooks/useFirmSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import EmailVerificationStatus from '@/components/auth/EmailVerificationStatus';
-import { supabase } from '@/integrations/supabase/client';
+import { auth as sqliteAuth } from '@/integrations/sqlite/client';
 import { toast } from 'sonner';
-import type { Database } from '@/integrations/supabase/types';
 
-type AppRole = Database['public']['Enums']['app_role'];
+type AppRole = 'partner' | 'manager' | 'senior' | 'staff' | 'viewer';
 
 const roleLabels: Record<AppRole, string> = {
   partner: 'Partner',
@@ -82,9 +81,12 @@ export default function Settings() {
     }
 
     setIsSendingReset(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: `${window.location.origin}/auth?reset=true`,
-    });
+    // Password reset via email not yet implemented in SQLite
+    toast.warning('Password reset via email not yet supported. Please contact administrator.');
+    // const { error } = await sqliteAuth.resetPasswordForEmail(resetEmail, {
+    //   redirectTo: `${window.location.origin}/auth?reset=true`,
+    // });
+    const error = null;
     setIsSendingReset(false);
 
     if (error) {

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient, storage } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface EvidenceFile {
   id: string;
@@ -43,7 +45,7 @@ export function useEvidenceFiles(engagementId?: string) {
 
   const logActivity = async (action: string, entity: string, details: string, entityId?: string, logEngagementId?: string) => {
     if (!user || !profile) return;
-    await supabase.from('activity_logs').insert([{
+    await db.from('activity_logs').insert({
       user_id: user.id,
       user_name: profile.full_name,
       action,
@@ -51,7 +53,7 @@ export function useEvidenceFiles(engagementId?: string) {
       entity_id: entityId || null,
       engagement_id: logEngagementId || null,
       details,
-    }]);
+    });
   };
 
   const logAuditTrail = async (
@@ -63,7 +65,7 @@ export function useEvidenceFiles(engagementId?: string) {
     reason?: string
   ) => {
     if (!user) return;
-    await supabase.from('audit_trail').insert([{
+    await db.from('audit_trail').insert({
       entity_type: entityType,
       entity_id: entityId,
       action,
@@ -71,7 +73,7 @@ export function useEvidenceFiles(engagementId?: string) {
       new_value: newValue || null,
       reason: reason || null,
       performed_by: user.id,
-    }]);
+    });
   };
 
   const fetchFiles = async () => {
@@ -82,20 +84,22 @@ export function useEvidenceFiles(engagementId?: string) {
     }
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('evidence_files')
         .select('*')
         .eq('engagement_id', effectiveEngagementId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .execute();
 
       if (error) throw error;
 
       // Fetch uploader names
       const uploaderIds = [...new Set(data?.map(f => f.uploaded_by) || [])];
-      const { data: profiles } = await supabase
+      const { data: profiles } = await db
         .from('profiles')
         .select('user_id, full_name')
-        .in('user_id', uploaderIds);
+        .in('user_id', uploaderIds)
+        .execute();
 
       const profileMap = new Map(profiles?.map(p => [p.user_id, p.full_name]) || []);
       
@@ -136,14 +140,14 @@ export function useEvidenceFiles(engagementId?: string) {
       const filePath = `${effectiveEngagementId}/${user.id}/${Date.now()}-${file.name}`;
 
       // Upload to storage
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError } = await storage
         .from('evidence')
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 
       // Save metadata to database
-      const { data, error: dbError } = await supabase
+      const { data, error: dbError } = await db
         .from('evidence_files')
         .insert({
           name: metadata.name || file.name,
@@ -155,9 +159,7 @@ export function useEvidenceFiles(engagementId?: string) {
           workpaper_ref: metadata.workpaper_ref || null,
           uploaded_by: user.id,
           engagement_id: effectiveEngagementId,
-        })
-        .select()
-        .single();
+        });
 
       if (dbError) throw dbError;
 
@@ -176,10 +178,10 @@ export function useEvidenceFiles(engagementId?: string) {
 
   const updateFile = async (id: string, updates: Partial<EvidenceFile>) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('evidence_files')
-        .update(updates)
-        .eq('id', id);
+        .eq('id', id)
+        .update(updates);
 
       if (error) throw error;
       
@@ -199,17 +201,17 @@ export function useEvidenceFiles(engagementId?: string) {
 
     try {
       // Delete from storage
-      const { error: storageError } = await supabase.storage
+      const { error: storageError } = await storage
         .from('evidence')
         .remove([file.file_path]);
 
       if (storageError) throw storageError;
 
       // Delete from database
-      const { error: dbError } = await supabase
+      const { error: dbError } = await db
         .from('evidence_files')
-        .delete()
-        .eq('id', file.id);
+        .eq('id', file.id)
+        .delete();
 
       if (dbError) throw dbError;
 
@@ -226,7 +228,7 @@ export function useEvidenceFiles(engagementId?: string) {
 
   const downloadFile = async (file: EvidenceFile) => {
     try {
-      const { data, error } = await supabase.storage
+      const { data, error } = await storage
         .from('evidence')
         .download(file.file_path);
 
@@ -247,10 +249,10 @@ export function useEvidenceFiles(engagementId?: string) {
   };
 
   const getFileUrl = async (file: EvidenceFile) => {
-    const { data } = await supabase.storage
+    const { data } = await storage
       .from('evidence')
-      .createSignedUrl(file.file_path, 3600);
-    return data?.signedUrl || null;
+      .getPublicUrl(file.file_path);
+    return data?.publicUrl || null;
   };
 
   // Approval workflow actions
@@ -259,10 +261,10 @@ export function useEvidenceFiles(engagementId?: string) {
     if (!file) return;
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('evidence_files')
-        .update({ approval_stage: 'prepared' })
-        .eq('id', id);
+        .eq('id', id)
+        .update({ approval_stage: 'prepared' });
 
       if (error) throw error;
 
@@ -287,10 +289,10 @@ export function useEvidenceFiles(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('evidence_files')
-        .update({ approval_stage: 'reviewed' })
-        .eq('id', id);
+        .eq('id', id)
+        .update({ approval_stage: 'reviewed' });
 
       if (error) throw error;
 
@@ -315,10 +317,10 @@ export function useEvidenceFiles(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('evidence_files')
-        .update({ approval_stage: 'approved' })
-        .eq('id', id);
+        .eq('id', id)
+        .update({ approval_stage: 'approved' });
 
       if (error) throw error;
 
@@ -348,14 +350,14 @@ export function useEvidenceFiles(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('evidence_files')
+        .eq('id', id)
         .update({ 
-          locked: false, 
+          locked: 0, 
           unlock_reason: reason,
           approval_stage: 'reviewed'
-        })
-        .eq('id', id);
+        });
 
       if (error) throw error;
 

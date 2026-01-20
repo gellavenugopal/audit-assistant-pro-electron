@@ -1,5 +1,9 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
+const crypto = require('crypto');
+const fs = require('fs');
+let Database;
+let bcrypt;
 
 function safeLog(...args) {
   try {
@@ -18,6 +22,211 @@ try {
 } catch (error) {
   console.warn('ODBC module not available - Tally integration will be disabled');
 }
+
+// SQLite is optional - only load if available
+let sqliteDb = null;
+function getSqliteDb() {
+  try {
+    if (!Database) {
+      try {
+        Database = require('better-sqlite3');
+        safeLog('✅ better-sqlite3 loaded successfully');
+      } catch (error) {
+        safeLog('❌ better-sqlite3 module not available:', error.message);
+        safeLog('   Error details:', error.stack);
+        safeLog('   This usually means the module needs to be rebuilt for Electron.');
+        safeLog('   Try running: npx electron-rebuild -f -w better-sqlite3');
+        return null;
+      }
+    }
+    if (!bcrypt) {
+      try {
+        bcrypt = require('bcrypt');
+        safeLog('✅ bcrypt loaded successfully');
+      } catch (error) {
+        safeLog('❌ bcrypt module not available:', error.message);
+        safeLog('   Error details:', error.stack);
+        safeLog('   This usually means the module needs to be rebuilt for Electron.');
+        safeLog('   Try running: npx electron-rebuild -f -w bcrypt');
+        return null;
+      }
+    }
+    if (!sqliteDb) {
+      try {
+        const userDataPath = app.getPath('userData');
+        const dbPath = path.join(userDataPath, 'audit_assistant.db');
+        sqliteDb = new Database(dbPath);
+        
+        // Enable foreign keys and optimizations
+        sqliteDb.pragma('foreign_keys = ON');
+        sqliteDb.pragma('journal_mode = WAL');
+        sqliteDb.pragma('synchronous = NORMAL');
+        
+        safeLog('✅ SQLite database opened at:', dbPath);
+
+        // Always ensure core tables exist (idempotent).
+        // Make created_by nullable to allow client creation without user context
+        sqliteDb.exec(`
+          CREATE TABLE IF NOT EXISTS clients (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            name TEXT NOT NULL,
+            industry TEXT NOT NULL,
+            constitution TEXT DEFAULT 'company',
+            cin TEXT,
+            pan TEXT,
+            address TEXT,
+            state TEXT,
+            pin TEXT,
+            contact_person TEXT,
+            contact_email TEXT,
+            contact_phone TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            notes TEXT,
+            created_by TEXT DEFAULT 'system',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
+          CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status);
+          
+          -- Alter existing table if created_by is NOT NULL (SQLite doesn't support ALTER COLUMN, so we skip if table exists)
+          -- The table will be created with nullable created_by on first run
+          CREATE TABLE IF NOT EXISTS engagements (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            name TEXT NOT NULL,
+            client_id TEXT,
+            client_name TEXT NOT NULL,
+            engagement_type TEXT NOT NULL DEFAULT 'statutory',
+            financial_year TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'planning' CHECK (status IN ('planning', 'fieldwork', 'review', 'completion')),
+            partner_id TEXT,
+            manager_id TEXT,
+            firm_id TEXT,
+            materiality_amount REAL,
+            performance_materiality REAL,
+            trivial_threshold REAL,
+            start_date TEXT,
+            end_date TEXT,
+            notes TEXT,
+            created_by TEXT DEFAULT 'system',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_engagements_client_id ON engagements(client_id);
+          CREATE INDEX IF NOT EXISTS idx_engagements_status ON engagements(status);
+        `);
+        
+      } catch (dbError) {
+        safeLog('❌ Failed to create SQLite database:', dbError.message);
+        safeLog('   This usually means better-sqlite3 needs to be rebuilt for Electron.');
+        safeLog('   The native bindings file is missing or incompatible.');
+        safeLog('   Error:', dbError.stack);
+        throw dbError;
+      }
+    }
+    
+    // Double-check that clients table exists before returning
+    // This ensures schema was initialized
+    try {
+      sqliteDb.prepare("SELECT 1 FROM clients LIMIT 1").get();
+    } catch (verifyError) {
+      if (verifyError.message.includes('no such table')) {
+        safeLog('⚠️  Warning: clients table not found, attempting to initialize schema now...');
+        try {
+          initializeDatabaseSchema(sqliteDb);
+          safeLog('✅ Schema initialized on-demand');
+        } catch (initError) {
+          safeLog('❌ Failed to initialize schema on-demand:', initError.message);
+        }
+      }
+    }
+    return sqliteDb;
+  } catch (error) {
+    safeLog('❌ Failed to initialize SQLite database:', error.message);
+    safeLog('   Full error:', error.stack);
+    return null;
+  }
+}
+
+/**
+ * Initialize database schema by reading and executing all schema files
+ */
+function initializeDatabaseSchema(db) {
+  const schemaDir = path.join(__dirname, '..', 'sqlite', 'schema');
+  const schemaFiles = [
+    '01_core_tables.sql',
+    '02_audit_workflow_tables.sql',
+    '03_audit_program_tables.sql',
+    '04_audit_report_tables.sql',
+    '05_trial_balance_tables.sql',
+    '06_going_concern_tables.sql',
+    '07_rule_engine_tables.sql',
+    '08_template_system_tables.sql'
+  ];
+  
+  safeLog('   Executing schema files from:', schemaDir);
+  
+  // Check if schema directory exists
+  if (!fs.existsSync(schemaDir)) {
+    throw new Error(`Schema directory not found: ${schemaDir}`);
+  }
+  
+  schemaFiles.forEach((file, index) => {
+    const filePath = path.join(schemaDir, file);
+    
+    if (!fs.existsSync(filePath)) {
+      safeLog(`   ❌ Schema file not found: ${filePath}`);
+      throw new Error(`Missing schema file: ${file} at ${filePath}`);
+    }
+    
+    const sql = fs.readFileSync(filePath, 'utf8');
+    
+    if (!sql || sql.trim().length === 0) {
+      safeLog(`   ⚠️  Schema file is empty: ${file}`);
+      return; // Skip empty files
+    }
+    
+    try {
+      db.exec(sql);
+      safeLog(`   ${index + 1}. ✓ ${file}`);
+    } catch (error) {
+      safeLog(`   ${index + 1}. ❌ ${file} - ${error.message}`);
+      safeLog(`      SQL error details:`, error);
+      // Continue with other files, but log the error
+      // Some errors might be "table already exists" which is OK
+      if (!error.message.includes('already exists')) {
+        throw error;
+      }
+    }
+  });
+  
+  // Verify tables created
+  const tableCount = db.prepare(
+    "SELECT COUNT(*) as count FROM sqlite_master WHERE type='table'"
+  ).get();
+  
+  safeLog(`✅ Database schema initialized! (${tableCount.count} tables)`);
+  
+  // Verify specific important tables exist
+  const importantTables = ['clients', 'engagements', 'profiles', 'user_roles'];
+  const missingTables = [];
+  for (const tableName of importantTables) {
+    const exists = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+    ).get(tableName);
+    if (!exists) {
+      missingTables.push(tableName);
+    }
+  }
+  
+  if (missingTables.length > 0) {
+    throw new Error(`Critical tables missing after initialization: ${missingTables.join(', ')}`);
+  }
+  
+  safeLog(`✅ Verified critical tables exist: ${importantTables.join(', ')}`);
+}
+
+let currentUserId = null;
 
 const isDev = process.env.NODE_ENV === 'development' || (app && !app.isPackaged);
 
@@ -45,6 +254,216 @@ function setAppMenu() {
 
 function registerIpcHandlers() {
   const { ipcMain } = require('electron');
+
+  // --- SQLite AUTH & QUERY HANDLERS ---
+  ipcMain.handle('sqlite-auth', async (event, payload) => {
+    const db = getSqliteDb();
+    if (!db) {
+      return { data: null, error: { message: 'SQLite not available. Please ensure better-sqlite3 and bcrypt are installed.' } };
+    }
+
+    const { action, email, password, fullName } = payload || {};
+
+    try {
+      if (action === 'signup') {
+        if (!email || !password) {
+          return { data: null, error: { message: 'Email and password are required.' } };
+        }
+
+        const existing = db.prepare('SELECT id FROM profiles WHERE email = ?').get(email);
+        if (existing) {
+          return { data: null, error: { message: 'This email is already registered.' } };
+        }
+
+        const id = crypto.randomBytes(16).toString('hex');
+        const user_id = id;
+        const name = fullName || email.split('@')[0];
+        const passwordHash = bcrypt.hashSync(password, 10);
+
+        const insertProfile = db.prepare(`
+          INSERT INTO profiles (id, user_id, full_name, email, password_hash, is_active)
+          VALUES (?, ?, ?, ?, ?, 1)
+        `);
+        insertProfile.run(id, user_id, name, email, passwordHash);
+
+        const countRow = db.prepare('SELECT COUNT(*) as count FROM user_roles').get();
+        const isFirstUser = !countRow || countRow.count === 0;
+        const role = isFirstUser ? 'admin' : 'staff';
+
+        const insertRole = db.prepare(`
+          INSERT INTO user_roles (id, user_id, role)
+          VALUES (?, ?, ?)
+        `);
+        insertRole.run(crypto.randomBytes(16).toString('hex'), user_id, role);
+
+        currentUserId = user_id;
+
+        return {
+          data: {
+            id,
+            user_id,
+            email,
+            full_name: name,
+            role,
+          },
+          error: null,
+        };
+      }
+
+      if (action === 'login') {
+        if (!email || !password) {
+          return { data: null, error: { message: 'Email and password are required.' } };
+        }
+
+        const row = db.prepare('SELECT * FROM profiles WHERE email = ? AND is_active = 1').get(email);
+        if (!row || !row.password_hash) {
+          return { data: null, error: { message: 'Invalid login credentials' } };
+        }
+
+        const ok = bcrypt.compareSync(password, row.password_hash);
+        if (!ok) {
+          return { data: null, error: { message: 'Invalid login credentials' } };
+        }
+
+        currentUserId = row.user_id;
+
+        return {
+          data: {
+            id: row.id,
+            user_id: row.user_id,
+            email: row.email,
+            full_name: row.full_name,
+          },
+          error: null,
+        };
+      }
+
+      if (action === 'logout') {
+        currentUserId = null;
+        return { data: null, error: null };
+      }
+
+      return { data: null, error: { message: 'Unknown auth action' } };
+    } catch (error) {
+      console.error('SQLite auth error:', error);
+      return { data: null, error: { message: error.message || 'SQLite auth failed' } };
+    }
+  });
+
+  ipcMain.handle('sqlite-get-current-user', async () => {
+    const db = getSqliteDb();
+    if (!db || !currentUserId) {
+      return null;
+    }
+    try {
+      const row = db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(currentUserId);
+      if (!row) return null;
+      return {
+        id: row.id,
+        user_id: row.user_id,
+        email: row.email,
+        full_name: row.full_name,
+      };
+    } catch (error) {
+      console.error('SQLite getCurrentUser error:', error);
+      return null;
+    }
+  });
+
+  ipcMain.handle('sqlite-query', async (event, payload) => {
+    const db = getSqliteDb();
+    if (!db) {
+      safeLog('❌ sqlite-query called but database is not available');
+      return { data: null, error: { message: 'SQLite not available. Please ensure better-sqlite3 and bcrypt are installed and rebuilt for Electron. Run: npx electron-rebuild -f -w better-sqlite3,bcrypt' } };
+    }
+
+    try {
+      const { table, action, columns, filters, data, orderBy } = payload || {};
+      if (!table || !action) {
+        return { data: null, error: { message: 'Table and action are required.' } };
+      }
+
+      const colList = columns && typeof columns === 'string' ? columns : '*';
+      const whereClauses = [];
+      const params = [];
+
+      if (Array.isArray(filters)) {
+        for (const f of filters) {
+          if (f && f.column) {
+            whereClauses.push(`${f.column} = ?`);
+            params.push(f.value);
+          }
+        }
+      }
+
+      const whereSql = whereClauses.length ? ` WHERE ${whereClauses.join(' AND ')}` : '';
+      
+      // Build ORDER BY clause
+      let orderSql = '';
+      if (orderBy && orderBy.column) {
+        const direction = orderBy.ascending ? 'ASC' : 'DESC';
+        orderSql = ` ORDER BY ${orderBy.column} ${direction}`;
+      }
+
+      if (action === 'select') {
+        const sql = `SELECT ${colList} FROM ${table}${whereSql}${orderSql}`;
+        const stmt = db.prepare(sql);
+        const rows = stmt.all(...params);
+        return { data: rows, error: null };
+      }
+
+      if (action === 'insert') {
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          return { data: null, error: { message: 'No data to insert.' } };
+        }
+        const rows = Array.isArray(data) ? data : [data];
+        const inserted = [];
+        for (const row of rows) {
+          // Ensure created_by has a value - use 'system' as fallback if user context is missing
+          const cleanRow = { ...row };
+          // If created_by is null/undefined/empty, use 'system' as default
+          if (!cleanRow.created_by) {
+            cleanRow.created_by = 'system';
+          }
+          
+          const keys = Object.keys(cleanRow);
+          const placeholders = keys.map(() => '?').join(', ');
+          const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
+          const stmt = db.prepare(sql);
+          const result = stmt.run(...keys.map((k) => cleanRow[k]));
+          
+          // Fetch the inserted row to get the auto-generated ID
+          const insertedRow = db.prepare(`SELECT * FROM ${table} WHERE rowid = ?`).get(result.lastInsertRowid);
+          inserted.push(insertedRow || cleanRow);
+        }
+        return { data: inserted, error: null };
+      }
+
+      if (action === 'update') {
+        if (!data) {
+          return { data: null, error: { message: 'No data to update.' } };
+        }
+        const keys = Object.keys(data);
+        const setSql = keys.map((k) => `${k} = ?`).join(', ');
+        const sql = `UPDATE ${table} SET ${setSql}${whereSql}`;
+        const stmt = db.prepare(sql);
+        stmt.run(...keys.map((k) => data[k]), ...params);
+        return { data: null, error: null };
+      }
+
+      if (action === 'delete') {
+        const sql = `DELETE FROM ${table}${whereSql}`;
+        const stmt = db.prepare(sql);
+        stmt.run(...params);
+        return { data: null, error: null };
+      }
+
+      return { data: null, error: { message: 'Unknown query action' } };
+    } catch (error) {
+      console.error('SQLite query error:', error);
+      return { data: null, error: { message: error.message || 'SQLite query failed' } };
+    }
+  });
 
   // Check if ODBC connection is already active (without creating new connection)
   ipcMain.handle('odbc-check-connection', async () => {

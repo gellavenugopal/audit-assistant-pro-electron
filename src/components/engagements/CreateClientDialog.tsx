@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -64,23 +66,31 @@ export function CreateClientDialog({
 
     setSaving(true);
     try {
-      const { data: newClient, error } = await supabase.from('clients').insert({
-        name: form.name,
-        industry: form.industry,
-        constitution: form.constitution || 'company',
-        contact_person: form.contact_person || null,
-        contact_email: form.contact_email || null,
-        contact_phone: form.contact_phone || null,
-        address: form.address || null,
-        pan: form.pan || null,
-        cin: form.cin || null,
-        state: form.state || null,
-        pin: form.pin || null,
-        created_by: user?.id,
-      }).select('id, name').single();
+      const { data: inserted, error } = await db
+        .from('clients')
+        .insert({
+          name: form.name,
+          industry: form.industry,
+          constitution: form.constitution || 'company',
+          contact_person: form.contact_person || null,
+          contact_email: form.contact_email || null,
+          contact_phone: form.contact_phone || null,
+          address: form.address || null,
+          pan: form.pan || null,
+          cin: form.cin || null,
+          state: form.state || null,
+          pin: form.pin || null,
+          created_by: user?.id,
+        })
+        .execute();
 
       if (error) throw error;
-      
+
+      const newClient = Array.isArray(inserted) ? inserted[0] : inserted;
+      if (!newClient) {
+        throw new Error('Failed to create client (no data returned)');
+      }
+
       toast.success('Client created');
       onClientCreated(newClient.name, newClient.id);
       setForm({ name: '', industry: '', constitution: 'company', contact_person: '', contact_email: '', contact_phone: '', address: '', pan: '', cin: '', state: '', pin: '' });

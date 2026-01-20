@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient, auth as sqliteAuth } from '@/integrations/sqlite/client';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 
 const IFC_REPORT_CONTENT_SECTION = 'audit_report_ifc_content';
 const IFC_REPORT_CONTENT_TITLE = 'IFC Report Content';
@@ -212,18 +214,18 @@ export function useIFCReportContent(engagementId: string | undefined) {
       }
 
       if (content) {
-        const { error } = await supabase
+        const { error } = await db
           .from('ifc_report_content')
+          .eq('id', content.id)
           .update({
             ...updates,
             updated_at: new Date().toISOString(),
-          })
-          .eq('id', content.id);
+          });
 
         if (error) throw error;
       } else {
-        const { data: userData } = await supabase.auth.getUser();
-        const { error } = await supabase
+        const { data: userData } = await sqliteAuth.getUser();
+        const { error } = await db
           .from('ifc_report_content')
           .insert({
             engagement_id: engagementId,

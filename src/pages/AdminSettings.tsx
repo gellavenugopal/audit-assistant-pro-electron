@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { Button } from '@/components/ui/button';
@@ -221,7 +223,7 @@ export default function AdminSettings() {
     if (!confirm('Are you sure you want to delete this financial year?')) return;
     
     try {
-      const { error } = await supabase.from('financial_years').delete().eq('id', id);
+      const { error } = await db.from('financial_years').eq('id', id).delete();
       if (error) throw error;
       toast.success('Financial year deleted');
       fetchFinancialYears();
@@ -344,7 +346,7 @@ export default function AdminSettings() {
     if (!confirm('Are you sure you want to delete this client?')) return;
     
     try {
-      const { error } = await supabase.from('clients').delete().eq('id', id);
+      const { error } = await db.from('clients').eq('id', id).delete();
       if (error) {
         // Handle FK violation specifically
         if (error.code === '23503' || error.message?.includes('violates foreign key constraint')) {
@@ -426,21 +428,23 @@ export default function AdminSettings() {
         .eq('user_id', user?.id)
         .single();
 
-      const response = await supabase.functions.invoke('send-invite', {
-        body: {
-          email: teamForm.email,
-          role: teamForm.role,
-          full_name: teamForm.full_name,
-          phone: teamForm.phone || null,
-          inviterName: profile?.full_name || 'Admin',
-          appUrl: window.location.origin,
-        }
-      });
+      // Edge functions not available in SQLite
+      toast.warning('Email invitation feature not yet implemented in SQLite.');
+      // const response = await supabase.functions.invoke('send-invite', {
+      //   body: {
+      //     email: teamForm.email,
+      //     role: teamForm.role,
+      //     full_name: teamForm.full_name,
+      //     phone: teamForm.phone || null,
+      //     inviterName: profile?.full_name || 'Admin',
+      //     appUrl: window.location.origin,
+      //   }
+      // });
 
-      if (response.error) throw response.error;
-      if (response.data?.error) throw new Error(response.data.error);
+      // if (response.error) throw response.error;
+      // if (response.data?.error) throw new Error(response.data.error);
 
-      toast.success(`Invitation sent to ${teamForm.email}`);
+      // toast.success(`Invitation sent to ${teamForm.email}`);
       setTeamDialogOpen(false);
       setTeamForm({ full_name: '', email: '', phone: '', role: 'staff' });
       fetchMembers();
@@ -480,14 +484,16 @@ export default function AdminSettings() {
 
     setIsResetting(true);
     try {
-      const response = await supabase.functions.invoke('admin-reset-password', {
-        body: { email: resetEmail, password: resetPassword }
-      });
+      // Edge functions not available in SQLite
+      toast.warning('Admin password reset feature not yet implemented in SQLite.');
+      // const response = await supabase.functions.invoke('admin-reset-password', {
+      //   body: { email: resetEmail, password: resetPassword }
+      // });
 
-      if (response.error) throw response.error;
-      if (response.data?.error) throw new Error(response.data.error);
+      // if (response.error) throw response.error;
+      // if (response.data?.error) throw new Error(response.data.error);
 
-      toast.success(`Password reset successfully for ${resetEmail}`);
+      // toast.success(`Password reset successfully for ${resetEmail}`);
       setResetEmail('');
       setResetPassword('');
     } catch (error: any) {

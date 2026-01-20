@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { CAROClause } from './useCAROClauseLibrary';
+
+const db = getSQLiteClient();
 
 export interface CAROStandardAnswer {
   id: string;
@@ -22,9 +24,10 @@ export function useCAROStandardAnswers() {
 
   const fetchStandardAnswers = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('caro_standard_answers')
-        .select('*');
+        .select('*')
+        .execute();
 
       if (error) throw error;
       setStandardAnswers(data || []);

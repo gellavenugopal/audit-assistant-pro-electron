@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface AuditReportSetup {
   id: string;
@@ -84,11 +86,11 @@ export function useAuditReportSetup(engagementId: string | undefined) {
     }
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_report_setup')
         .select('*')
         .eq('engagement_id', engagementId)
-        .maybeSingle();
+        .single();
 
       if (error) throw error;
       setSetup(data as AuditReportSetup | null);
@@ -103,15 +105,13 @@ export function useAuditReportSetup(engagementId: string | undefined) {
     if (!engagementId || !user) return null;
 
     try {
-      const { data: newSetup, error } = await supabase
+      const { data: newSetup, error } = await db
         .from('audit_report_setup')
         .insert({
           engagement_id: engagementId,
           created_by: user.id,
           ...data,
-        })
-        .select()
-        .single();
+        });
 
       if (error) throw error;
       setSetup(newSetup as AuditReportSetup);
@@ -128,12 +128,10 @@ export function useAuditReportSetup(engagementId: string | undefined) {
     if (!setup) return null;
 
     try {
-      const { data: updatedSetup, error } = await supabase
+      const { data: updatedSetup, error } = await db
         .from('audit_report_setup')
-        .update(data)
         .eq('id', setup.id)
-        .select()
-        .single();
+        .update(data);
 
       if (error) throw error;
       setSetup(updatedSetup as AuditReportSetup);

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import type { Database } from '@/integrations/supabase/types';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 
 export function useAuditReportDocument(
   engagementId: string | null | undefined,
@@ -9,7 +10,7 @@ export function useAuditReportDocument(
   sectionTitle?: string
 ) {
   const { user } = useAuth();
-  const [document, setDocument] = useState<Database['public']['Tables']['audit_report_documents']['Row'] | null>(null);
+  const [document, setDocument] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,12 +24,12 @@ export function useAuditReportDocument(
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_report_documents')
         .select('*')
         .eq('engagement_id', engagementId)
         .eq('section_name', sectionName)
-        .maybeSingle();
+        .single();
 
       if (error) throw error;
       setDocument(data || null);
@@ -50,7 +51,7 @@ export function useAuditReportDocument(
 
       setSaving(true);
       try {
-        const payload: Database['public']['Tables']['audit_report_documents']['Insert'] = {
+        const payload = {
           engagement_id: engagementId,
           section_name: sectionName,
           section_title: overrideTitle || sectionTitle || sectionName,
@@ -58,11 +59,34 @@ export function useAuditReportDocument(
           changed_by: user?.id || null,
         };
 
-        const { data, error } = await supabase
+        // Check if document exists
+        const existing = await db
           .from('audit_report_documents')
-          .upsert(payload, { onConflict: 'engagement_id,section_name' })
           .select('*')
+          .eq('engagement_id', engagementId)
+          .eq('section_name', sectionName)
           .single();
+
+        let data, error;
+        if (existing.data) {
+          // Update existing
+          const result = await db
+            .from('audit_report_documents')
+            .update(payload)
+            .eq('engagement_id', engagementId)
+            .eq('section_name', sectionName)
+            .execute();
+          data = result.data;
+          error = result.error;
+        } else {
+          // Insert new
+          const result = await db
+            .from('audit_report_documents')
+            .insert(payload)
+            .execute();
+          data = result.data;
+          error = result.error;
+        }
 
         if (error) throw error;
         setDocument(data);

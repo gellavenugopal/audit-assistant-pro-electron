@@ -71,7 +71,9 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
@@ -722,9 +724,14 @@ export default function AuditExecution() {
 
   const handleOpenAttachment = async (attachment: { file_path: string; file_name: string }) => {
     try {
-      const { data, error } = await supabase.storage
-        .from('evidence')
-        .createSignedUrl(attachment.file_path, 3600);
+      // Storage signed URLs not available in SQLite
+      // Files are stored locally, use direct file path
+      toast.warning('File access needs to be implemented for SQLite storage');
+      // const { data, error } = await storage
+      //   .from('evidence')
+      //   .createSignedUrl(attachment.file_path, 3600);
+      const data = null;
+      const error = new Error('Storage signed URLs not available in SQLite');
       if (error) throw error;
       if (data?.signedUrl) {
         window.open(data.signedUrl, '_blank');

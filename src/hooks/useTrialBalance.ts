@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+
+const db = getSQLiteClient();
 
 export interface TrialBalanceLine {
   id: string;
@@ -73,12 +75,12 @@ export function useTrialBalance(engagementId: string | undefined) {
 
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('trial_balance_lines')
         .select('*')
         .eq('engagement_id', engagementId)
-        .order('branch_name', { ascending: true, nullsFirst: true })
-        .order('account_code', { ascending: true });
+        .order('account_code', { ascending: true })
+        .execute();
 
       if (error) throw error;
       

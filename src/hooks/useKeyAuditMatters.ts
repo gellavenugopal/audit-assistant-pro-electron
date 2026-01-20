@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface KeyAuditMatter {
   id: string;
@@ -27,11 +29,12 @@ export function useKeyAuditMatters(engagementId: string | undefined) {
     }
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('key_audit_matters')
         .select('*')
         .eq('engagement_id', engagementId)
-        .order('sort_order');
+        .order('sort_order', { ascending: true })
+        .execute();
 
       if (error) throw error;
       setKams(data || []);
@@ -46,7 +49,7 @@ export function useKeyAuditMatters(engagementId: string | undefined) {
     if (!engagementId || !user) return null;
 
     try {
-      const { data: newKam, error } = await supabase
+      const { data: newKam, error } = await db
         .from('key_audit_matters')
         .insert({
           engagement_id: engagementId,
@@ -55,9 +58,7 @@ export function useKeyAuditMatters(engagementId: string | undefined) {
           audit_response: data.audit_response || '',
           sort_order: kams.length,
           created_by: user.id,
-        })
-        .select()
-        .single();
+        });
 
       if (error) throw error;
       setKams(prev => [...prev, newKam]);
@@ -72,12 +73,10 @@ export function useKeyAuditMatters(engagementId: string | undefined) {
 
   const updateKam = async (id: string, data: Partial<KeyAuditMatter>) => {
     try {
-      const { data: updated, error } = await supabase
+      const { data: updated, error } = await db
         .from('key_audit_matters')
-        .update(data)
         .eq('id', id)
-        .select()
-        .single();
+        .update(data);
 
       if (error) throw error;
       setKams(prev => prev.map(k => k.id === id ? updated : k));

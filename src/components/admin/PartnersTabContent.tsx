@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -306,16 +308,19 @@ export function PartnersTabContent() {
     
     setInviting(record.id);
     try {
-      const { error } = await supabase.functions.invoke('send-invite', {
-        body: {
-          email: record.email,
-          role: 'partner',
-          full_name: record.name,
-          phone: record.phone || undefined,
-          inviterName: profile?.full_name || 'Admin',
-          appUrl: window.location.origin,
-        },
-      });
+      // Edge functions not available in SQLite
+      toast.warning('Email invitation feature not yet implemented in SQLite.');
+      const error = new Error('Email invitations require edge functions');
+      // const { error } = await supabase.functions.invoke('send-invite', {
+      //   body: {
+      //     email: record.email,
+      //     role: 'partner',
+      //     full_name: record.name,
+      //     phone: record.phone || undefined,
+      //     inviterName: profile?.full_name || 'Admin',
+      //     appUrl: window.location.origin,
+      //   },
+      // });
 
       if (error) throw error;
       toast.success(`Invitation sent to ${record.email}`);
