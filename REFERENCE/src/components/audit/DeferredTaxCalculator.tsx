@@ -28,7 +28,8 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { Plus, Edit2, Save, X, Trash2, FileDown } from 'lucide-react';
 import { useEngagement } from '@/contexts/EngagementContext';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+const db = getSQLiteClient();
 
 // =====================================================
 // MASTER DATA - Exact conversion from Python
@@ -64,7 +65,7 @@ interface DTLRecord {
 
 export default function DeferredTaxCalculator() {
   const { currentEngagement } = useEngagement();
-  
+
   // State for header details
   const [entityName, setEntityName] = useState('');
   const [financialYear, setFinancialYear] = useState('');
@@ -108,10 +109,11 @@ export default function DeferredTaxCalculator() {
     // Fetch team members
     const fetchTeamMembers = async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('profiles')
           .select('user_id, full_name')
-          .order('full_name');
+          .order('full_name')
+          .execute();
 
         if (error) throw error;
 
@@ -136,7 +138,7 @@ export default function DeferredTaxCalculator() {
   // Handle head selection change
   const onHeadChange = (value: string) => {
     setSelectedHead(value);
-    
+
     if (value === '<Manual Entry>') {
       setManualHead('');
     } else {
@@ -197,7 +199,7 @@ export default function DeferredTaxCalculator() {
   // Collect entry data
   const collectEntryData = (): DTLRecord | null => {
     const head = selectedHead === '<Manual Entry>' ? manualHead.trim() : selectedHead;
-    
+
     if (!head || head === 'Select Deferred Tax Head') {
       toast.error('Select or enter a Deferred Tax Head.');
       return null;
@@ -314,7 +316,7 @@ export default function DeferredTaxCalculator() {
     const newRecords = records.filter((_, index) => index !== selectedRow);
     setRecords(newRecords);
     clearEntry();
-    
+
     const msg = deletingEditRow ? 'Entry deleted and edit cancelled.' : 'Entry deleted.';
     toast.success(msg);
   };
@@ -322,7 +324,7 @@ export default function DeferredTaxCalculator() {
   // Populate form with record data
   const populateForm = (record: DTLRecord) => {
     const headOptions = Object.keys(DT_MASTER);
-    
+
     if (headOptions.includes(record.Head)) {
       setSelectedHead(record.Head);
       setManualHead('');
@@ -783,11 +785,10 @@ export default function DeferredTaxCalculator() {
                       <TableCell className="text-right">{record['Tax Rate (%)'].toFixed(2)}%</TableCell>
                       <TableCell>
                         <span
-                          className={`px-2 py-1 rounded text-xs font-semibold ${
-                            record.Type === 'DTA'
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}
+                          className={`px-2 py-1 rounded text-xs font-semibold ${record.Type === 'DTA'
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                            }`}
                         >
                           {record.Type}
                         </span>

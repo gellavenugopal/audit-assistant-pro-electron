@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { db } from '@/integrations/sqlite/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+const db = getSQLiteClient();
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,7 +46,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { 
+import {
   Search,
   AlertTriangle,
   CheckCircle2,
@@ -91,53 +92,53 @@ export function DataIntegrityPanel() {
   const { user, profile } = useAuth();
   const [scanning, setScanning] = useState(false);
   const [scanned, setScanned] = useState(false);
-  
+
   // Problem engagements by category
   const [orphans, setOrphans] = useState<ProblemEngagement[]>([]);
   const [unlinked, setUnlinked] = useState<ProblemEngagement[]>([]);
   const [inactiveClientEngagements, setInactiveClientEngagements] = useState<ProblemEngagement[]>([]);
   const [allClients, setAllClients] = useState<ActiveClient[]>([]);
-  
+
   // Selection state - separate for each bucket
   const [selectedOrphanIds, setSelectedOrphanIds] = useState<Set<string>>(new Set());
   const [selectedUnlinkedIds, setSelectedUnlinkedIds] = useState<Set<string>>(new Set());
-  
+
   // Collapsible state
   const [orphansOpen, setOrphansOpen] = useState(true);
   const [unlinkedOpen, setUnlinkedOpen] = useState(true);
   const [inactiveOpen, setInactiveOpen] = useState(false);
-  
+
   // Reassign dialog state
   const [reassignDialogOpen, setReassignDialogOpen] = useState(false);
   const [reassignTarget, setReassignTarget] = useState<ProblemEngagement | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [reassigning, setReassigning] = useState(false);
-  
+
   // Create client dialog state
   const [createClientDialogOpen, setCreateClientDialogOpen] = useState(false);
   const [createClientTarget, setCreateClientTarget] = useState<ProblemEngagement | null>(null);
   const [newClientName, setNewClientName] = useState('');
   const [newClientIndustry, setNewClientIndustry] = useState('');
   const [creatingClient, setCreatingClient] = useState(false);
-  
+
   // Archive dialog state
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<ProblemEngagement | null>(null);
   const [archiving, setArchiving] = useState(false);
-  
+
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ProblemEngagement | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [childCounts, setChildCounts] = useState<ChildCounts | null>(null);
-  
+
   // Bulk action state
   const [bulkReassignOpen, setBulkReassignOpen] = useState(false);
   const [bulkReassignType, setBulkReassignType] = useState<'orphan' | 'unlinked'>('orphan');
   const [bulkArchiving, setBulkArchiving] = useState(false);
 
-  const activeClients = useMemo(() => 
+  const activeClients = useMemo(() =>
     allClients.filter(c => c.status === 'active'),
     [allClients]
   );
@@ -191,7 +192,7 @@ export function DataIntegrityPanel() {
       setScanned(true);
       setSelectedOrphanIds(new Set());
       setSelectedUnlinkedIds(new Set());
-      
+
       const totalProblems = orphanList.length + unlinkedList.length;
       if (totalProblems === 0) {
         toast.success('All clear! No orphan or unlinked engagements found.');
@@ -235,13 +236,13 @@ export function DataIntegrityPanel() {
   // Reassign action
   const handleReassign = async () => {
     if (!reassignTarget || !selectedClientId) return;
-    
+
     setReassigning(true);
     try {
       const selectedClient = activeClients.find(c => c.id === selectedClientId);
       const { error } = await db
         .from('engagements')
-        .update({ 
+        .update({
           client_id: selectedClientId,
           client_name: selectedClient?.name || reassignTarget.client_name
         })
@@ -264,17 +265,17 @@ export function DataIntegrityPanel() {
   // Create client and link
   const handleCreateClient = async () => {
     if (!createClientTarget || !newClientName.trim()) return;
-    
+
     // Check if client with same name exists
     const existingClient = allClients.find(
       c => c.name.toLowerCase() === newClientName.trim().toLowerCase()
     );
-    
+
     if (existingClient) {
       toast.error(`Client "${newClientName}" already exists. Please use "Reassign" instead.`);
       return;
     }
-    
+
     setCreatingClient(true);
     try {
       // Create client
@@ -296,7 +297,7 @@ export function DataIntegrityPanel() {
       // Link engagement to new client
       const { error: updateError } = await db
         .from('engagements')
-        .update({ 
+        .update({
           client_id: insertedClient.id,
           client_name: insertedClient.name
         })
@@ -321,7 +322,7 @@ export function DataIntegrityPanel() {
   // Archive action
   const handleArchive = async () => {
     if (!archiveTarget) return;
-    
+
     setArchiving(true);
     try {
       const { error } = await db
@@ -353,12 +354,12 @@ export function DataIntegrityPanel() {
 
   const handleDelete = async () => {
     if (!deleteTarget || deleteConfirmText !== 'DELETE') return;
-    
+
     if (childCounts && hasChildren(childCounts)) {
       toast.error('Cannot delete: engagement has linked data. Archive instead.');
       return;
     }
-    
+
     setDeleting(true);
     try {
       const { error } = await db
@@ -385,14 +386,14 @@ export function DataIntegrityPanel() {
   const handleBulkArchive = async (type: 'orphan' | 'unlinked') => {
     const selectedIds = type === 'orphan' ? selectedOrphanIds : selectedUnlinkedIds;
     if (selectedIds.size === 0) return;
-    
+
     setBulkArchiving(true);
     try {
       // Update each engagement individually since SQLite client doesn't support .in()
       const updatePromises = Array.from(selectedIds).map(id =>
         db.from('engagements').update({ status: 'archived' }).eq('id', id).execute()
       );
-      
+
       await Promise.all(updatePromises);
       toast.success(`${selectedIds.size} engagement(s) archived`);
       handleScan();
@@ -406,22 +407,22 @@ export function DataIntegrityPanel() {
   const handleBulkReassign = async () => {
     const selectedIds = bulkReassignType === 'orphan' ? selectedOrphanIds : selectedUnlinkedIds;
     if (selectedIds.size === 0 || !selectedClientId) return;
-    
+
     setReassigning(true);
     try {
       const selectedClient = activeClients.find(c => c.id === selectedClientId);
-      
+
       // Update each engagement individually since SQLite client doesn't support .in()
       const updatePromises = Array.from(selectedIds).map(id =>
         db.from('engagements')
-          .update({ 
+          .update({
             client_id: selectedClientId,
             client_name: selectedClient?.name || ''
           })
           .eq('id', id)
           .execute()
       );
-      
+
       await Promise.all(updatePromises);
       toast.success(`${selectedIds.size} engagement(s) reassigned`);
       setBulkReassignOpen(false);
@@ -437,7 +438,7 @@ export function DataIntegrityPanel() {
   const toggleSelect = (id: string, type: 'orphan' | 'unlinked') => {
     const setter = type === 'orphan' ? setSelectedOrphanIds : setSelectedUnlinkedIds;
     const current = type === 'orphan' ? selectedOrphanIds : selectedUnlinkedIds;
-    
+
     const newSet = new Set(current);
     if (newSet.has(id)) {
       newSet.delete(id);
@@ -451,7 +452,7 @@ export function DataIntegrityPanel() {
     const list = type === 'orphan' ? orphans : unlinked;
     const current = type === 'orphan' ? selectedOrphanIds : selectedUnlinkedIds;
     const setter = type === 'orphan' ? setSelectedOrphanIds : setSelectedUnlinkedIds;
-    
+
     if (current.size === list.length) {
       setter(new Set());
     } else {
@@ -468,9 +469,9 @@ export function DataIntegrityPanel() {
     selectedIds?: Set<string>
   ) => {
     if (items.length === 0) return null;
-    
+
     const showCheckbox = type !== 'inactive_client';
-    
+
     return (
       <Table>
         <TableHeader>
@@ -605,7 +606,7 @@ export function DataIntegrityPanel() {
               )}
               Scan for Problems
             </Button>
-            
+
             {scanned && (
               <div className="flex items-center gap-2">
                 {allClear ? (
@@ -812,8 +813,8 @@ export function DataIntegrityPanel() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateClientDialogOpen(false)}>Cancel</Button>
-              <Button 
-                onClick={handleCreateClient} 
+              <Button
+                onClick={handleCreateClient}
                 disabled={!newClientName.trim() || creatingClient || allClients.some(c => c.name.toLowerCase() === newClientName.trim().toLowerCase())}
               >
                 {creatingClient && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
@@ -890,7 +891,7 @@ export function DataIntegrityPanel() {
                 This action is IRREVERSIBLE. The engagement "{deleteTarget?.name}" and all its data will be permanently deleted.
               </DialogDescription>
             </DialogHeader>
-            
+
             {childCounts && hasChildren(childCounts) ? (
               <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
                 <p className="font-medium text-destructive mb-2">Cannot delete: Linked data exists</p>
@@ -921,11 +922,11 @@ export function DataIntegrityPanel() {
                 </div>
               </div>
             )}
-            
+
             <DialogFooter>
               <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
               {childCounts && hasChildren(childCounts) ? (
-                <Button 
+                <Button
                   variant="outline"
                   onClick={() => {
                     setDeleteDialogOpen(false);
