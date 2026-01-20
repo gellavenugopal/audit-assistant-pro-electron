@@ -208,17 +208,22 @@ export default function Materiality() {
       if (!currentEngagement?.id) return;
       isHydratingRef.current = true;
       try {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('materiality_risk_assessment')
           .select('*')
           .eq('engagement_id', currentEngagement.id)
-          .maybeSingle();
+          .single();
 
         if (error) throw error;
         if (!data) return;
 
-        const riskState = (data.risk_state || {}) as Record<string, any>;
-        const materialityState = (data.materiality_state || {}) as Record<string, any>;
+        // Parse JSON strings from SQLite (stored as TEXT)
+        const riskState = typeof data.risk_state === 'string' 
+          ? JSON.parse(data.risk_state) 
+          : (data.risk_state || {}) as Record<string, any>;
+        const materialityState = typeof data.materiality_state === 'string'
+          ? JSON.parse(data.materiality_state)
+          : (data.materiality_state || {}) as Record<string, any>;
 
         if (Array.isArray(riskState.riskFactors)) setRiskFactors(riskState.riskFactors);
         if (riskState.riskItems) setRiskItems(riskState.riskItems);
@@ -270,17 +275,37 @@ export default function Materiality() {
       try {
         const payload = {
           engagement_id: currentEngagement.id,
-          risk_state: buildRiskStatePayload(),
-          materiality_state: buildMaterialityStatePayload(),
+          risk_state: JSON.stringify(buildRiskStatePayload()),
+          materiality_state: JSON.stringify(buildMaterialityStatePayload()),
           updated_by: user?.id || null,
           created_by: user?.id || null,
         };
 
-        const { error } = await supabase
+        // Check if record exists (upsert logic for SQLite)
+        const { data: existing } = await db
           .from('materiality_risk_assessment')
-          .upsert(payload, { onConflict: 'engagement_id' });
+          .select('id')
+          .eq('engagement_id', currentEngagement.id)
+          .single();
 
-        if (error) throw error;
+        if (existing) {
+          // Update existing record
+          const { error } = await db
+            .from('materiality_risk_assessment')
+            .update(payload)
+            .eq('engagement_id', currentEngagement.id)
+            .execute();
+          
+          if (error) throw error;
+        } else {
+          // Insert new record
+          const { error } = await db
+            .from('materiality_risk_assessment')
+            .insert(payload)
+            .execute();
+          
+          if (error) throw error;
+        }
       } catch (e) {
         console.error('Failed to save materiality risk assessment:', e);
       }

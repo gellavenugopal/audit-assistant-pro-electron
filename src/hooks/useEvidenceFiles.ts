@@ -53,7 +53,7 @@ export function useEvidenceFiles(engagementId?: string) {
       entity_id: entityId || null,
       engagement_id: logEngagementId || null,
       details,
-    });
+    }).execute();
   };
 
   const logAuditTrail = async (
@@ -73,7 +73,7 @@ export function useEvidenceFiles(engagementId?: string) {
       new_value: newValue || null,
       reason: reason || null,
       performed_by: user.id,
-    });
+    }).execute();
   };
 
   const fetchFiles = async () => {
@@ -95,13 +95,20 @@ export function useEvidenceFiles(engagementId?: string) {
 
       // Fetch uploader names
       const uploaderIds = [...new Set(data?.map(f => f.uploaded_by) || [])];
-      const { data: profiles } = await db
-        .from('profiles')
-        .select('user_id, full_name')
-        .in('user_id', uploaderIds)
-        .execute();
-
-      const profileMap = new Map(profiles?.map(p => [p.user_id, p.full_name]) || []);
+      
+      // Fetch all profiles and filter - SQLite doesn't have .in() yet
+      let profileMap = new Map<string, string>();
+      
+      if (uploaderIds.length > 0) {
+        const { data: allProfiles } = await db
+          .from('profiles')
+          .select('user_id, full_name')
+          .execute();
+        
+        // Filter to only the uploader IDs we need
+        const profiles = allProfiles?.filter(p => uploaderIds.includes(p.user_id)) || [];
+        profileMap = new Map(profiles.map(p => [p.user_id, p.full_name]));
+      }
       
       const filesWithNames = data?.map(f => ({
         ...f,
@@ -159,16 +166,22 @@ export function useEvidenceFiles(engagementId?: string) {
           workpaper_ref: metadata.workpaper_ref || null,
           uploaded_by: user.id,
           engagement_id: effectiveEngagementId,
-        });
+        })
+        .execute();
 
       if (dbError) throw dbError;
 
+      const newFile = Array.isArray(data) ? data[0] : data;
+      if (!newFile) {
+        throw new Error('Failed to save file metadata');
+      }
+
       // Log activity
-      await logActivity('Uploaded', 'Evidence', `Uploaded file: ${metadata.name || file.name}`, data.id, effectiveEngagementId);
+      await logActivity('Uploaded', 'Evidence', `Uploaded file: ${metadata.name || file.name}`, newFile.id, effectiveEngagementId);
 
       toast.success('File uploaded successfully');
       await fetchFiles();
-      return data;
+      return newFile;
     } catch (error: any) {
       console.error('Error uploading file:', error);
       toast.error(error.message || 'Failed to upload file');
@@ -180,8 +193,9 @@ export function useEvidenceFiles(engagementId?: string) {
     try {
       const { error } = await db
         .from('evidence_files')
+        .update(updates)
         .eq('id', id)
-        .update(updates);
+        .execute();
 
       if (error) throw error;
       
@@ -210,8 +224,9 @@ export function useEvidenceFiles(engagementId?: string) {
       // Delete from database
       const { error: dbError } = await db
         .from('evidence_files')
+        .delete()
         .eq('id', file.id)
-        .delete();
+        .execute();
 
       if (dbError) throw dbError;
 
@@ -263,8 +278,9 @@ export function useEvidenceFiles(engagementId?: string) {
     try {
       const { error } = await db
         .from('evidence_files')
+        .update({ approval_stage: 'prepared' })
         .eq('id', id)
-        .update({ approval_stage: 'prepared' });
+        .execute();
 
       if (error) throw error;
 
@@ -291,8 +307,9 @@ export function useEvidenceFiles(engagementId?: string) {
     try {
       const { error } = await db
         .from('evidence_files')
+        .update({ approval_stage: 'reviewed' })
         .eq('id', id)
-        .update({ approval_stage: 'reviewed' });
+        .execute();
 
       if (error) throw error;
 
@@ -319,8 +336,9 @@ export function useEvidenceFiles(engagementId?: string) {
     try {
       const { error } = await db
         .from('evidence_files')
+        .update({ approval_stage: 'approved' })
         .eq('id', id)
-        .update({ approval_stage: 'approved' });
+        .execute();
 
       if (error) throw error;
 
@@ -352,12 +370,13 @@ export function useEvidenceFiles(engagementId?: string) {
     try {
       const { error } = await db
         .from('evidence_files')
-        .eq('id', id)
         .update({ 
           locked: 0, 
           unlock_reason: reason,
           approval_stage: 'reviewed'
-        });
+        })
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
 

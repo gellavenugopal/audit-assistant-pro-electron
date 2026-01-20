@@ -53,7 +53,7 @@ export function useReviewNotes(engagementId?: string) {
       entity_id: entityId || null,
       engagement_id: logEngagementId || null,
       details,
-    });
+    }).execute();
   };
 
   const logAuditTrail = async (
@@ -73,7 +73,7 @@ export function useReviewNotes(engagementId?: string) {
       new_value: newValue || null,
       reason: reason || null,
       performed_by: user.id,
-    });
+    }).execute();
   };
 
   const fetchNotes = async () => {
@@ -115,11 +115,17 @@ export function useReviewNotes(engagementId?: string) {
           created_by: user.id,
           status: 'open',
           priority: note.priority || 'medium'
-        });
+        })
+        .execute();
 
       if (error) throw error;
       
-      await logActivity('Created', 'Review Note', `Raised review note: ${note.title}`, data.id, note.engagement_id);
+      const newNote = Array.isArray(data) ? data[0] : data;
+      if (!newNote) {
+        throw new Error('Failed to create review note');
+      }
+      
+      await logActivity('Created', 'Review Note', `Raised review note: ${note.title}`, newNote.id, note.engagement_id);
       
       // Send notification to assigned user
       if (note.assigned_to && note.assigned_to !== user.id) {
@@ -134,7 +140,7 @@ export function useReviewNotes(engagementId?: string) {
       
       toast.success('Review note raised successfully');
       await fetchNotes();
-      return data;
+      return newNote;
     } catch (error: any) {
       console.error('Error creating review note:', error);
       toast.error(error.message || 'Failed to create review note');
@@ -146,8 +152,9 @@ export function useReviewNotes(engagementId?: string) {
     try {
       const { error } = await db
         .from('review_notes')
+        .update(updates)
         .eq('id', id)
-        .update(updates);
+        .execute();
 
       if (error) throw error;
       
@@ -214,8 +221,9 @@ export function useReviewNotes(engagementId?: string) {
     try {
       const { error } = await db
         .from('review_notes')
+        .delete()
         .eq('id', id)
-        .delete();
+        .execute();
 
       if (error) throw error;
       
@@ -236,8 +244,9 @@ export function useReviewNotes(engagementId?: string) {
     try {
       const { error } = await db
         .from('review_notes')
+        .update({ approval_stage: 'prepared' })
         .eq('id', id)
-        .update({ approval_stage: 'prepared' });
+        .execute();
 
       if (error) throw error;
 
@@ -264,8 +273,9 @@ export function useReviewNotes(engagementId?: string) {
     try {
       const { error } = await db
         .from('review_notes')
+        .update({ approval_stage: 'reviewed' })
         .eq('id', id)
-        .update({ approval_stage: 'reviewed' });
+        .execute();
 
       if (error) throw error;
 
@@ -292,8 +302,9 @@ export function useReviewNotes(engagementId?: string) {
     try {
       const { error } = await db
         .from('review_notes')
+        .update({ approval_stage: 'approved' })
         .eq('id', id)
-        .update({ approval_stage: 'approved' });
+        .execute();
 
       if (error) throw error;
 
@@ -325,12 +336,13 @@ export function useReviewNotes(engagementId?: string) {
     try {
       const { error } = await db
         .from('review_notes')
-        .eq('id', id)
         .update({ 
           locked: 0, 
           unlock_reason: reason,
           approval_stage: 'reviewed'
-        });
+        })
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
 
