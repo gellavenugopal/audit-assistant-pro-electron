@@ -131,7 +131,7 @@ export function useTrialBalance(engagementId: string | undefined) {
     if (!engagementId || !user) return null;
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('trial_balance_lines')
         .insert({
           engagement_id: engagementId,
@@ -163,7 +163,7 @@ export function useTrialBalance(engagementId: string | undefined) {
 
   const updateLine = async (id: string, input: Partial<TrialBalanceLineInput>) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('trial_balance_lines')
         .update(input)
         .eq('id', id)
@@ -191,7 +191,7 @@ export function useTrialBalance(engagementId: string | undefined) {
 
   const deleteLine = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('trial_balance_lines')
         .delete()
         .eq('id', id);
@@ -221,7 +221,7 @@ export function useTrialBalance(engagementId: string | undefined) {
       const batchSize = 100;
       for (let i = 0; i < ids.length; i += batchSize) {
         const batch = ids.slice(i, i + batchSize);
-        const { error } = await supabase
+        const { error } = await db
           .from('trial_balance_lines')
           .delete()
           .in('id', batch);
@@ -248,7 +248,7 @@ export function useTrialBalance(engagementId: string | undefined) {
 
   const updateLines = async (ids: string[], input: Partial<TrialBalanceLineInput>) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('trial_balance_lines')
         .update(input)
         .in('id', ids);
@@ -309,7 +309,7 @@ export function useTrialBalance(engagementId: string | undefined) {
           const batchSize = 100;
           for (let i = 0; i < duplicateArray.length; i += batchSize) {
             const batch = duplicateArray.slice(i, i + batchSize);
-            const { error: deleteError } = await supabase
+            const { error: deleteError } = await db
               .from('trial_balance_lines')
               .delete()
               .in('id', batch);
@@ -319,14 +319,14 @@ export function useTrialBalance(engagementId: string | undefined) {
         }
 
         // Insert new/updated lines
-        const { error: insertError } = await supabase
+        const { error: insertError } = await db
           .from('trial_balance_lines')
           .insert(linesToUpsert);
 
         if (insertError) throw insertError;
       } else {
         // Delete all existing lines and insert fresh (original behavior)
-        const { error: deleteError } = await supabase
+        const { error: deleteError } = await db
           .from('trial_balance_lines')
           .delete()
           .eq('engagement_id', engagementId);
@@ -340,7 +340,7 @@ export function useTrialBalance(engagementId: string | undefined) {
           created_by: user.id,
         }));
 
-        const { error: insertError } = await supabase
+        const { error: insertError } = await db
           .from('trial_balance_lines')
           .insert(linesToInsert);
 

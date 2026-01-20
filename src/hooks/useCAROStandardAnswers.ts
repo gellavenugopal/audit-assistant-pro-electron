@@ -79,7 +79,7 @@ export function useCAROStandardAnswers() {
 
     try {
       if (existingAnswer) {
-        const { data, error } = await supabase
+        const { error } = await db
           .from('caro_standard_answers')
           .update({
             positive_wording: positiveWording,
@@ -87,15 +87,24 @@ export function useCAROStandardAnswers() {
             na_wording: naWording,
           })
           .eq('id', existingAnswer.id)
-          .select()
-          .single();
+          .execute();
 
         if (error) throw error;
-        setStandardAnswers(prev => prev.map(a => a.id === data.id ? data : a));
+        
+        // Fetch updated record
+        const { data } = await db
+          .from('caro_standard_answers')
+          .select('*')
+          .eq('id', existingAnswer.id)
+          .single();
+        
+        if (data) {
+          setStandardAnswers(prev => prev.map(a => a.id === data.id ? data : a));
+        }
         toast.success('Standard answer updated');
         return data;
       } else {
-        const { data, error } = await supabase
+        const { data: insertedData, error } = await db
           .from('caro_standard_answers')
           .insert({
             clause_id: clauseId,
@@ -104,10 +113,12 @@ export function useCAROStandardAnswers() {
             na_wording: naWording,
             created_by: user.id,
           })
-          .select()
-          .single();
+          .execute();
 
         if (error) throw error;
+        const data = Array.isArray(insertedData) ? insertedData[0] : insertedData;
+        if (!data) throw new Error('Failed to save standard answer');
+        
         setStandardAnswers(prev => [...prev, data]);
         toast.success('Standard answer saved');
         return data;
@@ -124,10 +135,11 @@ export function useCAROStandardAnswers() {
     if (!existingAnswer) return;
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('caro_standard_answers')
         .delete()
-        .eq('id', existingAnswer.id);
+        .eq('id', existingAnswer.id)
+        .execute();
 
       if (error) throw error;
       setStandardAnswers(prev => prev.filter(a => a.id !== existingAnswer.id));

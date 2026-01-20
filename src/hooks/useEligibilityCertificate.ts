@@ -70,17 +70,19 @@ export function useEligibilityCertificate(engagementId?: string | null) {
           // Update existing
           const result = await db
             .from('audit_report_documents')
+            .update(payload)
             .eq('engagement_id', engagementId)
             .eq('section_name', SECTION_NAME)
-            .update(payload);
+            .execute();
           data = result.data;
           error = result.error;
         } else {
           // Insert new
           const result = await db
             .from('audit_report_documents')
-            .insert(payload);
-          data = result.data;
+            .insert(payload)
+            .execute();
+          data = Array.isArray(result.data) ? result.data[0] : result.data;
           error = result.error;
         }
 

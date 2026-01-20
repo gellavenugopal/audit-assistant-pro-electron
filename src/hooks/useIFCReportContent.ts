@@ -95,7 +95,7 @@ export function useIFCReportContent(engagementId: string | undefined) {
 
   const fetchDocumentContent = async () => {
     if (!engagementId) return null;
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('audit_report_documents')
       .select('*')
       .eq('engagement_id', engagementId)
@@ -119,7 +119,7 @@ export function useIFCReportContent(engagementId: string | undefined) {
 
   const saveDocumentContent = async (nextContent: IFCReportContent) => {
     if (!engagementId) return false;
-    const { error } = await supabase
+    const { error } = await db
       .from('audit_report_documents')
       .upsert(
         {
@@ -149,7 +149,7 @@ export function useIFCReportContent(engagementId: string | undefined) {
     try {
       setLoading(true);
       if (!useDocumentStorage) {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('ifc_report_content')
           .select('*')
           .eq('engagement_id', engagementId)

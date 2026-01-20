@@ -91,14 +91,15 @@ export function useEngagementAssignments(engagementId?: string) {
         return false;
       }
 
-      const { error } = await supabase
+      const { error } = await db
         .from('engagement_assignments')
         .insert({
           engagement_id: engagementId,
           user_id: userId,
           role,
           assigned_by: user.id,
-        });
+        })
+        .execute();
 
       if (error) throw error;
 
@@ -119,10 +120,11 @@ export function useEngagementAssignments(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('engagement_assignments')
         .update({ role })
-        .eq('id', assignmentId);
+        .eq('id', assignmentId)
+        .execute();
 
       if (error) throw error;
 
@@ -143,10 +145,11 @@ export function useEngagementAssignments(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('engagement_assignments')
         .delete()
-        .eq('id', assignmentId);
+        .eq('id', assignmentId)
+        .execute();
 
       if (error) throw error;
 

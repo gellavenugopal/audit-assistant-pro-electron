@@ -44,23 +44,20 @@ export function useTeamMembers(engagementId?: string) {
         }
       }
 
-      let profilesQuery = db
-        .from('profiles')
-        .select('user_id, full_name, email, avatar_url');
-
-      let rolesQuery = db
-        .from('user_roles')
-        .select('user_id, role');
-
-      if (targetUserIds) {
-        profilesQuery = profilesQuery.in('user_id', targetUserIds);
-        rolesQuery = rolesQuery.in('user_id', targetUserIds);
-      }
-
-      const [{ data: profiles, error: profilesError }, { data: roles, error: rolesError }] = await Promise.all([
-        profilesQuery.execute(),
-        rolesQuery.execute(),
+      // Fetch all profiles and roles, filter in JavaScript if needed
+      const [{ data: allProfiles, error: profilesError }, { data: allRoles, error: rolesError }] = await Promise.all([
+        db.from('profiles').select('user_id, full_name, email, avatar_url').execute(),
+        db.from('user_roles').select('user_id, role').execute(),
       ]);
+      
+      // Filter by targetUserIds if specified
+      const profiles = targetUserIds 
+        ? (allProfiles || []).filter(p => targetUserIds.includes(p.user_id))
+        : allProfiles;
+      
+      const roles = targetUserIds
+        ? (allRoles || []).filter(r => targetUserIds.includes(r.user_id))
+        : allRoles;
 
       if (rolesError) throw rolesError;
       if (profilesError) throw profilesError;
@@ -107,10 +104,11 @@ export function useTeamMembers(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('user_roles')
         .update({ role: newRole })
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .execute();
 
       if (error) throw error;
 

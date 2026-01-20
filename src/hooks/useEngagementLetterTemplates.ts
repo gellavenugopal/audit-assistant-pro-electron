@@ -61,12 +61,13 @@ export function useEngagementLetterTemplates() {
         // Update existing template
         const { error } = await db
           .from('engagement_letter_templates')
-          .eq('id', existing.id)
           .update({
             template_name: templateName,
             file_content: fileContent,
             file_name: fileName,
-          });
+          })
+          .eq('id', existing.id)
+          .execute();
 
         if (error) throw error;
         toast.success('Template updated successfully');
@@ -80,7 +81,8 @@ export function useEngagementLetterTemplates() {
             file_content: fileContent,
             file_name: fileName,
             uploaded_by: userData.user.id,
-          });
+          })
+          .execute();
 
         if (error) throw error;
         toast.success('Template uploaded successfully');
@@ -97,10 +99,11 @@ export function useEngagementLetterTemplates() {
 
   const deleteTemplate = async (id: string): Promise<boolean> => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('engagement_letter_templates')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       toast.success('Template deleted');

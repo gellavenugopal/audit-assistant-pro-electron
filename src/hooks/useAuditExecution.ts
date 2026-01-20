@@ -91,7 +91,7 @@ export function useAuditExecution(engagementId?: string | null) {
         return null;
       }
 
-      const { data: program, error } = await db
+      const { data, error } = await db
         .from('audit_programs_new')
         .insert({
           engagement_id: engagementId,
@@ -102,8 +102,11 @@ export function useAuditExecution(engagementId?: string | null) {
           workpaper_reference: workpaperReference || null,
           created_by: user.id,
         })
-        .select()
-        .single();
+        .execute();
+      
+      if (error) throw error;
+      const program = Array.isArray(data) ? data[0] : data;
+      if (!program) throw new Error('Failed to create program');
 
       if (error) throw error;
 
@@ -117,12 +120,13 @@ export function useAuditExecution(engagementId?: string | null) {
         status: 'not-commenced',
       }));
 
-      const { data: sections, error: sectionsError } = await supabase
+      const { data: sectionsData, error: sectionsError } = await db
         .from('audit_program_sections')
         .insert(sectionsToInsert)
-        .select('id');
+        .execute();
 
       if (sectionsError) throw sectionsError;
+      const sections = sectionsData || [];
 
       const boxesToInsert = (sections || []).flatMap((section, sectionIndex) =>
         DEFAULT_BOX_HEADERS.map((header, orderIndex) => ({
@@ -136,9 +140,10 @@ export function useAuditExecution(engagementId?: string | null) {
         }))
       );
 
-      const { error: boxesError } = await supabase
+      const { error: boxesError } = await db
         .from('audit_program_boxes')
-        .insert(boxesToInsert);
+        .insert(boxesToInsert)
+        .execute();
 
       if (boxesError) throw boxesError;
 
@@ -154,10 +159,11 @@ export function useAuditExecution(engagementId?: string | null) {
 
   const updateProgram = async (id: string, updates: Partial<AuditExecutionProgram>) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_programs_new')
         .update(updates)
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
 
@@ -171,10 +177,11 @@ export function useAuditExecution(engagementId?: string | null) {
 
   const deleteProgram = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_programs_new')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
 
@@ -214,7 +221,7 @@ export function useAuditExecutionSections(programId?: string | null) {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_program_sections')
         .select('*')
         .eq('audit_program_id', programId)
@@ -238,10 +245,11 @@ export function useAuditExecutionSections(programId?: string | null) {
     );
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_program_sections')
         .update({ status })
-        .eq('id', sectionId);
+        .eq('id', sectionId)
+        .execute();
 
       if (error) throw error;
     } catch (error: any) {
@@ -263,10 +271,11 @@ export function useAuditExecutionSections(programId?: string | null) {
     );
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_program_sections')
         .update({ locked: nextLocked })
-        .eq('id', sectionId);
+        .eq('id', sectionId)
+        .execute();
 
       if (error) throw error;
     } catch (error: any) {
@@ -284,10 +293,11 @@ export function useAuditExecutionSections(programId?: string | null) {
     );
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_program_sections')
         .update({ name: newName })
-        .eq('id', sectionId);
+        .eq('id', sectionId)
+        .execute();
 
       if (error) throw error;
     } catch (error: any) {
@@ -309,10 +319,11 @@ export function useAuditExecutionSections(programId?: string | null) {
     );
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_program_sections')
         .update({ is_applicable: nextApplicable })
-        .eq('id', sectionId);
+        .eq('id', sectionId)
+        .execute();
 
       if (error) throw error;
     } catch (error: any) {
@@ -338,13 +349,13 @@ export function useAuditExecutionSections(programId?: string | null) {
     });
 
     try {
-      const { error: firstError } = await supabase
+      const { error: firstError } = await db
         .from('audit_program_sections')
         .update({ order: second.order })
         .eq('id', firstId);
       if (firstError) throw firstError;
 
-      const { error: secondError } = await supabase
+      const { error: secondError } = await db
         .from('audit_program_sections')
         .update({ order: first.order })
         .eq('id', secondId);
@@ -380,7 +391,7 @@ export function useAuditExecutionSections(programId?: string | null) {
       sections.length > 0 ? Math.max(...sections.map((section) => section.order)) + 1 : 0;
 
     try {
-      const { data: newSection, error } = await supabase
+      const { data: newSection, error } = await db
         .from('audit_program_sections')
         .insert({
           audit_program_id: programId,
@@ -406,9 +417,10 @@ export function useAuditExecutionSections(programId?: string | null) {
         created_by: user.id,
       }));
 
-      const { error: boxesError } = await supabase
+      const { error: boxesError } = await db
         .from('audit_program_boxes')
-        .insert(boxesToInsert);
+        .insert(boxesToInsert)
+        .execute();
 
       if (boxesError) throw boxesError;
 
@@ -423,7 +435,7 @@ export function useAuditExecutionSections(programId?: string | null) {
 
   const deleteSection = async (sectionId: string) => {
     try {
-      const { data: boxes, error: boxFetchError } = await supabase
+      const { data: boxes, error: boxFetchError } = await db
         .from('audit_program_boxes')
         .select('id')
         .eq('section_id', sectionId);
@@ -433,26 +445,26 @@ export function useAuditExecutionSections(programId?: string | null) {
       const boxIds = (boxes || []).map((box) => box.id);
 
       if (boxIds.length > 0) {
-        const { error: boxAttachmentError } = await supabase
+        const { error: boxAttachmentError } = await db
           .from('audit_program_attachments')
           .delete()
           .in('box_id', boxIds);
         if (boxAttachmentError) throw boxAttachmentError;
       }
 
-      const { error: sectionAttachmentError } = await supabase
+      const { error: sectionAttachmentError } = await db
         .from('audit_program_attachments')
         .delete()
         .eq('section_id', sectionId);
       if (sectionAttachmentError) throw sectionAttachmentError;
 
-      const { error: boxDeleteError } = await supabase
+      const { error: boxDeleteError } = await db
         .from('audit_program_boxes')
         .delete()
         .eq('section_id', sectionId);
       if (boxDeleteError) throw boxDeleteError;
 
-      const { error: sectionDeleteError } = await supabase
+      const { error: sectionDeleteError } = await db
         .from('audit_program_sections')
         .delete()
         .eq('id', sectionId);
@@ -499,7 +511,7 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_program_boxes')
         .select('*')
         .eq('section_id', sectionId)
@@ -521,7 +533,7 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
     const nextOrder = boxes.length;
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_program_boxes')
         .insert({
           section_id: sectionId,
@@ -547,7 +559,7 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
     );
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_program_boxes')
         .update(updates)
         .eq('id', boxId);
@@ -573,7 +585,7 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
 
   const deleteBox = async (boxId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_program_boxes')
         .delete()
         .eq('id', boxId);
@@ -590,10 +602,11 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
     setBoxes(orderedBoxes);
     await Promise.all(
       orderedBoxes.map((box, index) =>
-        supabase
+        db
           .from('audit_program_boxes')
           .update({ order: index })
           .eq('id', box.id)
+          .execute()
       )
     );
   };
@@ -657,7 +670,7 @@ export function useAuditExecutionAttachments(programId?: string | null) {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_program_attachments')
         .select('*')
         .eq('audit_program_id', programId)
@@ -677,7 +690,7 @@ export function useAuditExecutionAttachments(programId?: string | null) {
     attachment: Omit<AuditExecutionAttachment, 'id' | 'uploaded_at'>
   ) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_program_attachments')
         .insert(attachment)
         .select()
@@ -695,7 +708,7 @@ export function useAuditExecutionAttachments(programId?: string | null) {
 
   const deleteAttachment = async (attachmentId: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('audit_program_attachments')
         .delete()
         .eq('id', attachmentId);

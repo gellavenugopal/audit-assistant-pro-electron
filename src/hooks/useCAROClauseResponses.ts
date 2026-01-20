@@ -66,30 +66,43 @@ export function useCAROClauseResponses(engagementId: string | undefined) {
 
     try {
       if (existingResponse) {
-        const { data: updated, error } = await db
+        const { error } = await db
           .from('caro_clause_responses')
-          .eq('id', existingResponse.id)
           .update({
             ...data,
             version_number: existingResponse.version_number + 1,
-          });
+          })
+          .eq('id', existingResponse.id)
+          .execute();
 
         if (error) throw error;
-        setResponses(prev => prev.map(r => r.id === updated.id ? updated : r));
+        
+        // Fetch updated record
+        const { data: updated } = await db
+          .from('caro_clause_responses')
+          .select('*')
+          .eq('id', existingResponse.id)
+          .single();
+        
+        if (updated) {
+          setResponses(prev => prev.map(r => r.id === updated.id ? updated : r));
+        }
         return updated;
       } else {
-        const { data: created, error } = await supabase
+        const { data: insertedData, error } = await db
           .from('caro_clause_responses')
           .insert({
             engagement_id: engagementId,
             clause_id: clauseId,
             ...data,
           })
-          .select()
-          .single();
+          .execute();
 
         if (error) throw error;
-        setResponses(prev => [...prev, created]);
+        const created = Array.isArray(insertedData) ? insertedData[0] : insertedData;
+        if (created) {
+          setResponses(prev => [...prev, created]);
+        }
         return created;
       }
     } catch (error: any) {

@@ -59,7 +59,7 @@ export const useTallyBridge = () => {
     });
     return false;
     // try {
-    //   const { data, error } = await supabase.functions.invoke("tally-bridge", {
+    //   const { data, error } = await db.functions.invoke("tally-bridge", {
     //     body: { action: "check-session", sessionCode },
     //   });
     //   if (error) throw error;
@@ -75,7 +75,7 @@ export const useTallyBridge = () => {
     // TODO: Implement Tally Bridge service for SQLite
     throw new Error("Tally Bridge requires edge functions. Not available in SQLite.");
     // try {
-    //   const { data, error } = await supabase.functions.invoke("tally-bridge", {
+    //   const { data, error } = await db.functions.invoke("tally-bridge", {
     //     body: { action: "send-request", sessionCode, xmlRequest },
     //   });
     //   if (error) throw error;

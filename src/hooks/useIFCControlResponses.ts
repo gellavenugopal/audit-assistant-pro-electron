@@ -78,22 +78,23 @@ export function useIFCControlResponses(engagementId: string | undefined) {
       if (existing) {
         const { error } = await db
           .from('ifc_control_responses')
-          .eq('id', existing.id)
           .update({
             ...responseData,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', existing.id);
+          .eq('id', existing.id)
+          .execute();
 
         if (error) throw error;
       } else {
-        const { error } = await supabase
+        const { error } = await db
           .from('ifc_control_responses')
           .insert({
             engagement_id: engagementId,
             clause_id: clauseId,
             ...responseData,
-          });
+          })
+          .execute();
 
         if (error) throw error;
       }

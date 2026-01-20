@@ -120,7 +120,7 @@ export function useEngagementTrialBalance(
 
     setLoading(true);
     try {
-      const { data: headerData, error: headerError } = await supabase
+      const { data: headerData, error: headerError } = await db
         .from('engagement_trial_balance_header')
         .select('*')
         .eq('engagement_id', engagementId)
@@ -137,7 +137,7 @@ export function useEngagementTrialBalance(
         return;
       }
 
-      const { data: lineData, error: lineError } = await supabase
+      const { data: lineData, error: lineError } = await db
         .from('engagement_trial_balance_lines')
         .select('*')
         .eq('tb_header_id', headerData.id)
@@ -150,7 +150,7 @@ export function useEngagementTrialBalance(
 
       if (lineRows.length > 0) {
         const lineIds = lineRows.map(line => line.id);
-        const { data: classificationData, error: classificationError } = await supabase
+        const { data: classificationData, error: classificationError } = await db
           .from('engagement_tb_classification')
           .select('*')
           .in('tb_line_id', lineIds);
@@ -180,7 +180,7 @@ export function useEngagementTrialBalance(
     async (options: EnsureHeaderOptions = {}) => {
       if (!engagementId || !periodType || !financialYear) return null;
 
-      const { data: existing, error: existingError } = await supabase
+      const { data: existing, error: existingError } = await db
         .from('engagement_trial_balance_header')
         .select('*')
         .eq('engagement_id', engagementId)
@@ -196,13 +196,19 @@ export function useEngagementTrialBalance(
           if (options.sourceType !== undefined) updates.source_type = options.sourceType;
           if (options.importedAt !== undefined) updates.imported_at = options.importedAt;
           if (Object.keys(updates).length > 0) {
-            const { data: updated, error: updateError } = await supabase
+            const { data: updatedData, error: updateError } = await db
               .from('engagement_trial_balance_header')
               .update(updates)
               .eq('id', existing.id)
-              .select()
-              .single();
+              .execute();
             if (updateError) throw updateError;
+            
+            // Fetch the updated record
+            const { data: updated } = await db
+              .from('engagement_trial_balance_header')
+              .select('*')
+              .eq('id', existing.id)
+              .single();
             return updated as EngagementTrialBalanceHeader;
           }
         }
@@ -218,13 +224,14 @@ export function useEngagementTrialBalance(
         imported_by: user?.id ?? null,
       };
 
-      const { data: inserted, error: insertError } = await supabase
+      const { data: insertedData, error: insertError } = await db
         .from('engagement_trial_balance_header')
         .insert(insertPayload)
-        .select()
-        .single();
+        .execute();
 
       if (insertError) throw insertError;
+      const inserted = Array.isArray(insertedData) ? insertedData[0] : insertedData;
+      if (!inserted) throw new Error('Failed to create trial balance header');
       return inserted as EngagementTrialBalanceHeader;
     },
     [engagementId, financialYear, periodType, user?.id]
@@ -232,13 +239,13 @@ export function useEngagementTrialBalance(
 
   const deleteLinesByIds = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
-    const batchSize = 100;
-    for (let i = 0; i < ids.length; i += batchSize) {
-      const batch = ids.slice(i, i + batchSize);
-      const { error } = await supabase
+    // SQLite doesn't have .in() yet, so delete one by one or use SQL directly
+    for (const id of ids) {
+      const { error } = await db
         .from('engagement_trial_balance_lines')
         .delete()
-        .in('id', batch);
+        .eq('id', id)
+        .execute();
       if (error) throw error;
     }
   }, []);
@@ -259,10 +266,11 @@ export function useEngagementTrialBalance(
 
       if (!headerRow) return false;
 
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await db
         .from('engagement_trial_balance_lines')
         .delete()
-        .eq('tb_header_id', headerRow.id);
+        .eq('tb_header_id', headerRow.id)
+        .execute();
 
       if (deleteError) throw deleteError;
 
@@ -287,10 +295,10 @@ export function useEngagementTrialBalance(
         is_revenue: line.is_revenue ?? null,
       }));
 
-      const { data: insertedLines, error: insertError } = await supabase
+      const { data: insertedLines, error: insertError } = await db
         .from('engagement_trial_balance_lines')
         .insert(linesToInsert)
-        .select('id, composite_key');
+        .execute();
 
       if (insertError) throw insertError;
 
@@ -336,9 +344,10 @@ export function useEngagementTrialBalance(
         );
 
       if (classificationRows.length > 0) {
-        const { error: classificationError } = await supabase
+        const { error: classificationError } = await db
           .from('engagement_tb_classification')
-          .insert(classificationRows);
+          .insert(classificationRows)
+          .execute();
 
         if (classificationError) throw classificationError;
       }
@@ -365,7 +374,7 @@ export function useEngagementTrialBalance(
 
       if (!headerRow) return false;
 
-      const { data: existingLines, error: existingError } = await supabase
+      const { data: existingLines, error: existingError } = await db
         .from('engagement_trial_balance_lines')
         .select('id, composite_key')
         .eq('tb_header_id', headerRow.id);
@@ -398,13 +407,13 @@ export function useEngagementTrialBalance(
           is_revenue: line.is_revenue ?? null,
         }));
 
-        const { error: upsertError } = await supabase
+        const { error: upsertError } = await db
           .from('engagement_trial_balance_lines')
           .upsert(linesToUpsert, { onConflict: 'tb_header_id,composite_key' });
 
         if (upsertError) throw upsertError;
 
-        const { data: refreshedLines, error: refreshedError } = await supabase
+        const { data: refreshedLines, error: refreshedError } = await db
           .from('engagement_trial_balance_lines')
           .select('id, composite_key')
           .eq('tb_header_id', headerRow.id)
@@ -455,7 +464,7 @@ export function useEngagementTrialBalance(
           );
 
         if (classificationRows.length > 0) {
-          const { error: classificationError } = await supabase
+          const { error: classificationError } = await db
             .from('engagement_tb_classification')
             .upsert(classificationRows, { onConflict: 'tb_line_id,statement_type' });
 
@@ -472,12 +481,13 @@ export function useEngagementTrialBalance(
   const clearPeriodData = useCallback(async () => {
     if (!engagementId || !periodType || !financialYear) return false;
 
-    const { error } = await supabase
+    const { error } = await db
       .from('engagement_trial_balance_header')
       .delete()
       .eq('engagement_id', engagementId)
       .eq('period_type', periodType)
-      .eq('financial_year', financialYear);
+      .eq('financial_year', financialYear)
+      .execute();
 
     if (error) throw error;
     await fetchData();

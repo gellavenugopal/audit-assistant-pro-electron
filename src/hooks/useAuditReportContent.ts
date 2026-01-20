@@ -211,7 +211,7 @@ export function useAuditReportContent(engagementId: string | undefined) {
     if (!canCreate || !engagementId || !user) return null;
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_report_main_content')
         .insert({
           engagement_id: engagementId,
@@ -237,7 +237,7 @@ export function useAuditReportContent(engagementId: string | undefined) {
     if (!content) return null;
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_report_main_content')
         .update(sanitizeUpdate(patch) as any)
         .eq('id', content.id)

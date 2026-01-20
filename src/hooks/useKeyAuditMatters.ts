@@ -49,7 +49,7 @@ export function useKeyAuditMatters(engagementId: string | undefined) {
     if (!engagementId || !user) return null;
 
     try {
-      const { data: newKam, error } = await db
+      const { data: kamData, error } = await db
         .from('key_audit_matters')
         .insert({
           engagement_id: engagementId,
@@ -58,9 +58,13 @@ export function useKeyAuditMatters(engagementId: string | undefined) {
           audit_response: data.audit_response || '',
           sort_order: kams.length,
           created_by: user.id,
-        });
+        })
+        .execute();
 
       if (error) throw error;
+      const newKam = Array.isArray(kamData) ? kamData[0] : kamData;
+      if (!newKam) throw new Error('Failed to create KAM');
+      
       setKams(prev => [...prev, newKam]);
       toast.success('Key Audit Matter added');
       return newKam;
@@ -73,13 +77,24 @@ export function useKeyAuditMatters(engagementId: string | undefined) {
 
   const updateKam = async (id: string, data: Partial<KeyAuditMatter>) => {
     try {
-      const { data: updated, error } = await db
+      const { error } = await db
         .from('key_audit_matters')
+        .update(data)
         .eq('id', id)
-        .update(data);
+        .execute();
 
       if (error) throw error;
-      setKams(prev => prev.map(k => k.id === id ? updated : k));
+      
+      // Fetch updated record
+      const { data: updated } = await db
+        .from('key_audit_matters')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (updated) {
+        setKams(prev => prev.map(k => k.id === id ? updated : k));
+      }
       toast.success('Key Audit Matter updated');
       return updated;
     } catch (error: any) {
@@ -91,10 +106,11 @@ export function useKeyAuditMatters(engagementId: string | undefined) {
 
   const deleteKam = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('key_audit_matters')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       setKams(prev => prev.filter(k => k.id !== id));
