@@ -274,7 +274,7 @@ export default function AuditExecution() {
         const sectionsToDelete: string[] = [];
 
         const deleteSectionDirect = async (sectionId: string) => {
-          const { data: boxes, error: boxFetchError } = await supabase
+          const { data: boxes, error: boxFetchError } = await db
             .from('audit_program_boxes')
             .select('id')
             .eq('section_id', sectionId);
@@ -284,26 +284,26 @@ export default function AuditExecution() {
           const boxIds = (boxes || []).map((box) => box.id);
 
           if (boxIds.length > 0) {
-            const { error: boxAttachmentError } = await supabase
+            const { error: boxAttachmentError } = await db
               .from('audit_program_attachments')
               .delete()
               .in('box_id', boxIds);
             if (boxAttachmentError) throw boxAttachmentError;
           }
 
-          const { error: sectionAttachmentError } = await supabase
+          const { error: sectionAttachmentError } = await db
             .from('audit_program_attachments')
             .delete()
             .eq('section_id', sectionId);
           if (sectionAttachmentError) throw sectionAttachmentError;
 
-          const { error: boxDeleteError } = await supabase
+          const { error: boxDeleteError } = await db
             .from('audit_program_boxes')
             .delete()
             .eq('section_id', sectionId);
           if (boxDeleteError) throw boxDeleteError;
 
-          const { error: sectionDeleteError } = await supabase
+          const { error: sectionDeleteError } = await db
             .from('audit_program_sections')
             .delete()
             .eq('id', sectionId);
@@ -314,7 +314,7 @@ export default function AuditExecution() {
           const duplicateIds = duplicateGroups.flatMap(([, list]) =>
             list.map((section) => section.id)
           );
-          const { data: boxes, error } = await supabase
+          const { data: boxes, error } = await db
             .from('audit_program_boxes')
             .select('*')
             .in('section_id', duplicateIds);
@@ -360,7 +360,7 @@ export default function AuditExecution() {
                 const targetContent = String(targetBox?.content || '').trim();
                 const sourceContent = String(box.content || '').trim();
                 if (targetBox && !targetContent && sourceContent) {
-                  const { error: updateError } = await supabase
+                  const { error: updateError } = await db
                     .from('audit_program_boxes')
                     .update({ content: box.content })
                     .eq('id', targetBox.id);
@@ -399,7 +399,7 @@ export default function AuditExecution() {
               ? nextOrder++
               : DEFAULT_SECTION_NAMES.indexOf(templateName);
 
-            const { data: newSection, error: sectionError } = await supabase
+            const { data: newSection, error: sectionError } = await db
               .from('audit_program_sections')
               .insert({
                 audit_program_id: selectedProgramId,
@@ -425,7 +425,7 @@ export default function AuditExecution() {
               created_by: user.id,
             }));
 
-            const { error: boxesError } = await supabase
+            const { error: boxesError } = await db
               .from('audit_program_boxes')
               .insert(boxesToInsert);
             if (boxesError) throw boxesError;
@@ -446,7 +446,7 @@ export default function AuditExecution() {
           }
 
           if (Object.keys(updates).length > 0) {
-            const { error: updateError } = await supabase
+            const { error: updateError } = await db
               .from('audit_program_sections')
               .update(updates)
               .eq('id', existingSection.id);
@@ -477,7 +477,7 @@ export default function AuditExecution() {
     const normalizedSearch = searchQuery.trim().toLowerCase();
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_program_boxes')
         .select('section_id,status,header,content')
         .in('section_id', sectionIds);
@@ -703,7 +703,7 @@ export default function AuditExecution() {
     await deleteAttachment(attachment.id);
 
     try {
-      const { data: remainingAttachments, error } = await supabase
+      const { data: remainingAttachments, error } = await db
         .from('audit_program_attachments')
         .select('id')
         .eq('file_path', attachment.file_path)
@@ -846,7 +846,7 @@ export default function AuditExecution() {
       if (sectionIds.length === 0) return;
 
       try {
-        const { data: boxes, error: boxFetchError } = await supabase
+        const { data: boxes, error: boxFetchError } = await db
           .from('audit_program_boxes')
           .select('id')
           .in('section_id', sectionIds);
@@ -858,14 +858,14 @@ export default function AuditExecution() {
         const attachmentDeletes = [];
         if (boxIds.length > 0) {
           attachmentDeletes.push(
-            supabase
+            db
               .from('audit_program_attachments')
               .delete()
               .in('box_id', boxIds)
           );
         }
         attachmentDeletes.push(
-          supabase
+          db
             .from('audit_program_attachments')
             .delete()
             .in('section_id', sectionIds)
@@ -876,13 +876,13 @@ export default function AuditExecution() {
           if (error) throw error;
         });
 
-        const { error: boxDeleteError } = await supabase
+        const { error: boxDeleteError } = await db
           .from('audit_program_boxes')
           .delete()
           .in('section_id', sectionIds);
         if (boxDeleteError) throw boxDeleteError;
 
-        const { error: sectionDeleteError } = await supabase
+        const { error: sectionDeleteError } = await db
           .from('audit_program_sections')
           .delete()
           .in('id', sectionIds);
@@ -1083,7 +1083,7 @@ export default function AuditExecution() {
 
     try {
       const sectionIds = orderedSections.map((section) => section.id);
-      const { data: boxes, error } = await supabase
+      const { data: boxes, error } = await db
         .from('audit_program_boxes')
         .select('*')
         .in('section_id', sectionIds)
@@ -1425,7 +1425,7 @@ export default function AuditExecution() {
       }
 
       const targetSectionIds = Array.from(new Set(rowsToImport.map((row) => row.sectionId)));
-      const { data: existingBoxes, error: boxError } = await supabase
+      const { data: existingBoxes, error: boxError } = await db
         .from('audit_program_boxes')
         .select('*')
         .in('section_id', targetSectionIds);
@@ -1453,7 +1453,7 @@ export default function AuditExecution() {
           const existing = boxMap.get(key);
           if (existing) {
             updatePromises.push(
-              supabase
+              db
                 .from('audit_program_boxes')
                 .update({ content })
                 .eq('id', existing.id)
@@ -1476,7 +1476,7 @@ export default function AuditExecution() {
 
       await Promise.all(updatePromises);
       if (createPayload.length > 0) {
-        const { error: createError } = await supabase
+        const { error: createError } = await db
           .from('audit_program_boxes')
           .insert(createPayload);
         if (createError) throw createError;

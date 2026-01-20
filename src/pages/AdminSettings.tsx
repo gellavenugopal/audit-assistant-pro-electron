@@ -162,7 +162,7 @@ export default function AdminSettings() {
   const fetchFinancialYears = async () => {
     setLoadingFinancialYears(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('financial_years')
         .select('*')
         .order('year_code', { ascending: false });
@@ -184,7 +184,7 @@ export default function AdminSettings() {
 
     setSavingFy(true);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('financial_years')
         .insert({
           year_code: fyForm.year_code,
@@ -206,7 +206,7 @@ export default function AdminSettings() {
 
   const handleToggleFinancialYear = async (id: string, isActive: boolean) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('financial_years')
         .update({ is_active: !isActive })
         .eq('id', id);
@@ -236,7 +236,7 @@ export default function AdminSettings() {
   const fetchFirmSettings = async () => {
     setLoadingFirm(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('firm_settings')
         .select('*')
         .limit(1)
@@ -270,7 +270,7 @@ export default function AdminSettings() {
     setSavingFirm(true);
     try {
       if (firmSettings.id) {
-        const { error } = await supabase
+        const { error } = await db
           .from('firm_settings')
           .update({
             firm_name: firmSettings.firm_name,
@@ -283,7 +283,7 @@ export default function AdminSettings() {
           .eq('id', firmSettings.id);
         if (error) throw error;
       } else {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('firm_settings')
           .insert({
             firm_name: firmSettings.firm_name,
@@ -311,7 +311,7 @@ export default function AdminSettings() {
   const fetchClients = async () => {
     setLoadingClients(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('clients')
         .select('*')
         .order('name');
@@ -328,7 +328,7 @@ export default function AdminSettings() {
 
   const handleDeleteClient = async (id: string, clientName: string) => {
     // Check if client has engagements
-    const { count, error: countError } = await supabase
+    const { count, error: countError } = await db
       .from('engagements')
       .select('*', { count: 'exact', head: true })
       .eq('client_id', id);
@@ -368,7 +368,7 @@ export default function AdminSettings() {
     setTogglingClientStatus(client.id);
     
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('clients')
         .update({ status: newStatus })
         .eq('id', client.id);
@@ -387,13 +387,13 @@ export default function AdminSettings() {
   const fetchMembers = async () => {
     setLoadingMembers(true);
     try {
-      const { data: profiles, error: profilesError } = await supabase
+      const { data: profiles, error: profilesError } = await db
         .from('profiles')
         .select('user_id, full_name, email, phone');
 
       if (profilesError) throw profilesError;
 
-      const { data: roles, error: rolesError } = await supabase
+      const { data: roles, error: rolesError } = await db
         .from('user_roles')
         .select('user_id, role');
 
@@ -422,7 +422,7 @@ export default function AdminSettings() {
     setSavingTeam(true);
     try {
       // Get current user's name for inviter
-      const { data: profile } = await supabase
+      const { data: profile } = await db
         .from('profiles')
         .select('full_name')
         .eq('user_id', user?.id)
@@ -430,7 +430,7 @@ export default function AdminSettings() {
 
       // Edge functions not available in SQLite
       toast.warning('Email invitation feature not yet implemented in SQLite.');
-      // const response = await supabase.functions.invoke('send-invite', {
+      // const response = await db.functions.invoke('send-invite', {
       //   body: {
       //     email: teamForm.email,
       //     role: teamForm.role,
@@ -457,7 +457,7 @@ export default function AdminSettings() {
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('user_roles')
         .update({ role: newRole as typeof ROLES[number] })
         .eq('user_id', userId);
@@ -486,7 +486,7 @@ export default function AdminSettings() {
     try {
       // Edge functions not available in SQLite
       toast.warning('Admin password reset feature not yet implemented in SQLite.');
-      // const response = await supabase.functions.invoke('admin-reset-password', {
+      // const response = await db.functions.invoke('admin-reset-password', {
       //   body: { email: resetEmail, password: resetPassword }
       // });
 

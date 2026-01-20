@@ -112,7 +112,7 @@ export function PartnersTabContent() {
     setLoading(true);
     try {
       // Fetch partner users (profiles + user_roles where role='partner')
-      const { data: rolesData, error: rolesError } = await supabase
+      const { data: rolesData, error: rolesError } = await db
         .from('user_roles')
         .select('user_id')
         .eq('role', 'partner');
@@ -122,7 +122,7 @@ export function PartnersTabContent() {
       const partnerUserIds = rolesData?.map(r => r.user_id) || [];
       
       if (partnerUserIds.length > 0) {
-        const { data: profilesData, error: profilesError } = await supabase
+        const { data: profilesData, error: profilesError } = await db
           .from('profiles')
           .select('user_id, full_name, email, is_active')
           .in('user_id', partnerUserIds);
@@ -134,7 +134,7 @@ export function PartnersTabContent() {
       }
 
       // Fetch partner records
-      const { data: partnersData, error: partnersError } = await supabase
+      const { data: partnersData, error: partnersError } = await db
         .from('partners')
         .select('*')
         .order('name');
@@ -227,7 +227,7 @@ export function PartnersTabContent() {
 
       if (selectedPartner.complianceRecord) {
         // Update existing record
-        const { error } = await supabase
+        const { error } = await db
           .from('partners')
           .update(complianceData)
           .eq('id', selectedPartner.complianceRecord.id);
@@ -236,7 +236,7 @@ export function PartnersTabContent() {
         toast.success('Compliance details updated');
       } else {
         // Create new record linked to user
-        const { error } = await supabase
+        const { error } = await db
           .from('partners')
           .insert({
             ...complianceData,
@@ -265,7 +265,7 @@ export function PartnersTabContent() {
     
     setLinking(partner.complianceRecord.id);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('partners')
         .update({ user_id: partner.user_id })
         .eq('id', partner.complianceRecord.id);
@@ -285,7 +285,7 @@ export function PartnersTabContent() {
     
     setLinking(recordId);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('partners')
         .update({ user_id: null })
         .eq('id', recordId);
@@ -311,7 +311,7 @@ export function PartnersTabContent() {
       // Edge functions not available in SQLite
       toast.warning('Email invitation feature not yet implemented in SQLite.');
       const error = new Error('Email invitations require edge functions');
-      // const { error } = await supabase.functions.invoke('send-invite', {
+      // const { error } = await db.functions.invoke('send-invite', {
       //   body: {
       //     email: record.email,
       //     role: 'partner',
