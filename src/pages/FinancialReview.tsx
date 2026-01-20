@@ -154,7 +154,9 @@ import { cn } from '@/lib/utils';
 
 
 
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 
 

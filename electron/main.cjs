@@ -56,12 +56,12 @@ function getSqliteDb() {
         const userDataPath = app.getPath('userData');
         const dbPath = path.join(userDataPath, 'audit_assistant.db');
         sqliteDb = new Database(dbPath);
-        
+
         // Enable foreign keys and optimizations
         sqliteDb.pragma('foreign_keys = ON');
         sqliteDb.pragma('journal_mode = WAL');
         sqliteDb.pragma('synchronous = NORMAL');
-        
+
         safeLog('✅ SQLite database opened at:', dbPath);
 
         // Always ensure core tables exist (idempotent).
@@ -115,7 +115,16 @@ function getSqliteDb() {
           CREATE INDEX IF NOT EXISTS idx_engagements_client_id ON engagements(client_id);
           CREATE INDEX IF NOT EXISTS idx_engagements_status ON engagements(status);
         `);
-        
+
+        safeLog('🔧 Initializing complete database schema...');
+        safeLog('   Schema directory should be at:', path.join(__dirname, '..', 'sqlite', 'schema'));
+
+        // Always initialize full schema to ensure all tables exist
+        // This is idempotent (uses CREATE TABLE IF NOT EXISTS)
+        // DO NOT wrap in try-catch - we want this to fail loudly if there's a problem
+        initializeDatabaseSchema(sqliteDb);
+        safeLog('✅ All database tables initialized successfully!');
+
       } catch (dbError) {
         safeLog('❌ Failed to create SQLite database:', dbError.message);
         safeLog('   This usually means better-sqlite3 needs to be rebuilt for Electron.');
@@ -124,22 +133,7 @@ function getSqliteDb() {
         throw dbError;
       }
     }
-    
-    // Double-check that clients table exists before returning
-    // This ensures schema was initialized
-    try {
-      sqliteDb.prepare("SELECT 1 FROM clients LIMIT 1").get();
-    } catch (verifyError) {
-      if (verifyError.message.includes('no such table')) {
-        safeLog('⚠️  Warning: clients table not found, attempting to initialize schema now...');
-        try {
-          initializeDatabaseSchema(sqliteDb);
-          safeLog('✅ Schema initialized on-demand');
-        } catch (initError) {
-          safeLog('❌ Failed to initialize schema on-demand:', initError.message);
-        }
-      }
-    }
+
     return sqliteDb;
   } catch (error) {
     safeLog('❌ Failed to initialize SQLite database:', error.message);
@@ -152,7 +146,19 @@ function getSqliteDb() {
  * Initialize database schema by reading and executing all schema files
  */
 function initializeDatabaseSchema(db) {
-  const schemaDir = path.join(__dirname, '..', 'sqlite', 'schema');
+  // Try multiple possible schema directory locations
+  let schemaDir = path.join(__dirname, '..', 'sqlite', 'schema');
+
+  // If not found, try relative to app root
+  if (!fs.existsSync(schemaDir)) {
+    schemaDir = path.join(process.cwd(), 'sqlite', 'schema');
+  }
+
+  // If still not found, try relative to resources path (for packaged apps)
+  if (!fs.existsSync(schemaDir) && process.resourcesPath) {
+    schemaDir = path.join(process.resourcesPath, 'sqlite', 'schema');
+  }
+
   const schemaFiles = [
     '01_core_tables.sql',
     '02_audit_workflow_tables.sql',
@@ -163,52 +169,94 @@ function initializeDatabaseSchema(db) {
     '07_rule_engine_tables.sql',
     '08_template_system_tables.sql'
   ];
-  
+
   safeLog('   Executing schema files from:', schemaDir);
-  
+
   // Check if schema directory exists
   if (!fs.existsSync(schemaDir)) {
-    throw new Error(`Schema directory not found: ${schemaDir}`);
+    safeLog('   ❌ Schema directory not found at:', schemaDir);
+    safeLog('   Tried locations:');
+    safeLog('     1.', path.join(__dirname, '..', 'sqlite', 'schema'));
+    safeLog('     2.', path.join(process.cwd(), 'sqlite', 'schema'));
+    if (process.resourcesPath) {
+      safeLog('     3.', path.join(process.resourcesPath, 'sqlite', 'schema'));
+    }
+    throw new Error(`Schema directory not found. Tried: ${schemaDir}`);
   }
-  
+
+  safeLog('   ✓ Schema directory found:', schemaDir);
+
   schemaFiles.forEach((file, index) => {
     const filePath = path.join(schemaDir, file);
-    
+
     if (!fs.existsSync(filePath)) {
       safeLog(`   ❌ Schema file not found: ${filePath}`);
       throw new Error(`Missing schema file: ${file} at ${filePath}`);
     }
-    
+
     const sql = fs.readFileSync(filePath, 'utf8');
-    
+
     if (!sql || sql.trim().length === 0) {
       safeLog(`   ⚠️  Schema file is empty: ${file}`);
       return; // Skip empty files
     }
-    
-    try {
-      db.exec(sql);
-      safeLog(`   ${index + 1}. ✓ ${file}`);
-    } catch (error) {
-      safeLog(`   ${index + 1}. ❌ ${file} - ${error.message}`);
-      safeLog(`      SQL error details:`, error);
-      // Continue with other files, but log the error
-      // Some errors might be "table already exists" which is OK
-      if (!error.message.includes('already exists')) {
-        throw error;
+
+    // Split SQL into individual statements and execute each separately
+    // This ensures that if one statement fails (e.g., index already exists),
+    // the rest of the statements still execute
+    const statements = sql
+      .split(';')
+      .map(stmt => stmt.trim())
+      .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'));
+
+    let successCount = 0;
+    let skipCount = 0;
+    let errorCount = 0;
+
+    for (const statement of statements) {
+      try {
+        db.exec(statement + ';');
+        successCount++;
+      } catch (error) {
+        // "already exists" errors are OK - table/index already there
+        if (error.message && error.message.includes('already exists')) {
+          skipCount++;
+        } else {
+          // Real error - log it but continue with other statements
+          errorCount++;
+          safeLog(`      ⚠️  Error in ${file}:`, error.message);
+          if (statement.length < 100) {
+            safeLog(`         Statement: ${statement.substring(0, 100)}`);
+          }
+        }
       }
     }
+
+    if (errorCount > 0) {
+      safeLog(`   ${index + 1}. ⚠️  ${file} - ${successCount} ok, ${skipCount} skipped, ${errorCount} errors`);
+    } else {
+      safeLog(`   ${index + 1}. ✓ ${file} - ${successCount} statements, ${skipCount} already existed`);
+    }
   });
-  
+
   // Verify tables created
   const tableCount = db.prepare(
     "SELECT COUNT(*) as count FROM sqlite_master WHERE type='table'"
   ).get();
-  
+
   safeLog(`✅ Database schema initialized! (${tableCount.count} tables)`);
-  
+
   // Verify specific important tables exist
-  const importantTables = ['clients', 'engagements', 'profiles', 'user_roles'];
+  const importantTables = [
+    'clients',
+    'engagements',
+    'profiles',
+    'user_roles',
+    'financial_years',
+    'audit_programs_new',
+    'risks',
+    'evidence_files'
+  ];
   const missingTables = [];
   for (const tableName of importantTables) {
     const exists = db.prepare(
@@ -216,14 +264,15 @@ function initializeDatabaseSchema(db) {
     ).get(tableName);
     if (!exists) {
       missingTables.push(tableName);
+      safeLog(`   ❌ Missing table: ${tableName}`);
     }
   }
-  
+
   if (missingTables.length > 0) {
     throw new Error(`Critical tables missing after initialization: ${missingTables.join(', ')}`);
   }
-  
-  safeLog(`✅ Verified critical tables exist: ${importantTables.join(', ')}`);
+
+  safeLog(`✅ Verified all ${importantTables.length} critical tables exist`);
 }
 
 let currentUserId = null;
@@ -377,8 +426,10 @@ function registerIpcHandlers() {
       return { data: null, error: { message: 'SQLite not available. Please ensure better-sqlite3 and bcrypt are installed and rebuilt for Electron. Run: npx electron-rebuild -f -w better-sqlite3,bcrypt' } };
     }
 
+    // Extract table name outside try-catch so it's available in error handler
+    const { table, action, columns, filters, data, orderBy } = payload || {};
+
     try {
-      const { table, action, columns, filters, data, orderBy } = payload || {};
       if (!table || !action) {
         return { data: null, error: { message: 'Table and action are required.' } };
       }
@@ -397,7 +448,7 @@ function registerIpcHandlers() {
       }
 
       const whereSql = whereClauses.length ? ` WHERE ${whereClauses.join(' AND ')}` : '';
-      
+
       // Build ORDER BY clause
       let orderSql = '';
       if (orderBy && orderBy.column) {
@@ -419,19 +470,19 @@ function registerIpcHandlers() {
         const rows = Array.isArray(data) ? data : [data];
         const inserted = [];
         for (const row of rows) {
-          // Ensure created_by has a value - use 'system' as fallback if user context is missing
           const cleanRow = { ...row };
-          // If created_by is null/undefined/empty, use 'system' as default
-          if (!cleanRow.created_by) {
+          // ONLY set created_by='system' if the field exists in the row but is empty
+          // Don't add created_by to tables that don't have this column (like activity_logs)
+          if ('created_by' in cleanRow && !cleanRow.created_by) {
             cleanRow.created_by = 'system';
           }
-          
+
           const keys = Object.keys(cleanRow);
           const placeholders = keys.map(() => '?').join(', ');
           const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
           const stmt = db.prepare(sql);
           const result = stmt.run(...keys.map((k) => cleanRow[k]));
-          
+
           // Fetch the inserted row to get the auto-generated ID
           const insertedRow = db.prepare(`SELECT * FROM ${table} WHERE rowid = ?`).get(result.lastInsertRowid);
           inserted.push(insertedRow || cleanRow);
@@ -461,6 +512,15 @@ function registerIpcHandlers() {
       return { data: null, error: { message: 'Unknown query action' } };
     } catch (error) {
       console.error('SQLite query error:', error);
+
+      // Better error reporting for missing tables
+      if (error.message && error.message.includes('no such table')) {
+        const tableName = table || 'unknown';
+        safeLog(`❌ Table not found: ${tableName}`);
+        safeLog('   This should have been created on startup. Check schema initialization logs.');
+        return { data: null, error: { message: `Table ${tableName} does not exist. The database schema may not have initialized correctly. Please restart the application.` } };
+      }
+
       return { data: null, error: { message: error.message || 'SQLite query failed' } };
     }
   });
@@ -553,12 +613,12 @@ function registerIpcHandlers() {
       if (!odbcConnection) {
         return { success: false, error: 'Not connected to Tally ODBC' };
       }
-      
+
       // Note: Tally ODBC doesn't directly support date filtering in SELECT queries
       // The balances returned are as of the current Tally date setting
       // To get period-specific balances, Tally's date should be set before querying
       // For now, we fetch all ledgers - the balances reflect Tally's current date context
-      
+
       // Convert dates to Tally format (DD-MMM-YYYY) for potential future use
       const formatDateForTally = (dateStr) => {
         if (!dateStr) return null;
@@ -569,11 +629,11 @@ function registerIpcHandlers() {
         const year = d.getFullYear();
         return `${day}-${month}-${year}`;
       };
-      
+
       const toDateFormatted = formatDateForTally(toDate);
       safeLog(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
       safeLog('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
-      
+
       // First, get company name
       let companyName = '';
       try {
@@ -644,9 +704,9 @@ function registerIpcHandlers() {
           const primaryGroup = (row['$_PrimaryGroup'] || '').toLowerCase();
           const accountHead = (row['$Name'] || '').toLowerCase();
           // Exclude Stock-in-Hand ledgers - we'll add correct Opening Stock separately
-          if (primaryGroup === 'stock-in-hand' || 
-              accountHead.includes('stock-in-hand') ||
-              accountHead === 'stock in hand') {
+          if (primaryGroup === 'stock-in-hand' ||
+            accountHead.includes('stock-in-hand') ||
+            accountHead === 'stock in hand') {
             safeLog(`Trial Balance: Excluding ledger "${row['$Name']}" (Stock-in-Hand) - will add corrected stock entry`);
             return false;
           }
@@ -657,17 +717,17 @@ function registerIpcHandlers() {
           const primaryGroup = row['$_PrimaryGroup'] || '';
           const openingBalance = parseNumeric(row['$OpeningBalance']);
           let closingBalance = parseNumeric(row['$ClosingBalance']);
-          
+
           // For Profit & Loss A/c, use opening balance as closing balance
           // because Tally's TB shows P&L without current year's profit/loss
           // This prevents "Net Profit" from appearing in closing balance
-          if (accountHead.toLowerCase() === 'profit & loss a/c' || 
-              accountHead.toLowerCase() === 'profit and loss a/c' ||
-              accountHead.toLowerCase() === 'profit & loss account' ||
-              accountHead.toLowerCase() === 'profit and loss account') {
+          if (accountHead.toLowerCase() === 'profit & loss a/c' ||
+            accountHead.toLowerCase() === 'profit and loss a/c' ||
+            accountHead.toLowerCase() === 'profit & loss account' ||
+            accountHead.toLowerCase() === 'profit and loss account') {
             closingBalance = openingBalance;
           }
-          
+
           return {
             accountHead,
             openingBalance,
@@ -704,9 +764,9 @@ function registerIpcHandlers() {
 
       safeLog(`Trial Balance: Processed ${processedData.length} ledgers (including stock if applicable)`);
 
-      return { 
-        success: true, 
-        data: processedData, 
+      return {
+        success: true,
+        data: processedData,
         companyName,
         stockInfo: {
           itemCount: stockItems.length,
@@ -1221,7 +1281,7 @@ function registerIpcHandlers() {
 
       // Filter in JavaScript to handle different GSTIN formats and registration types
       // Tally ODBC field names can vary. We normalize/validate before deciding "missing".
-      
+
       // Check if a registration type should require GSTIN (only "Regular" registration)
       const isRegularRegistration = (regType) => {
         if (!regType) return false;
@@ -1241,23 +1301,23 @@ function registerIpcHandlers() {
         if (!s) return false;
         const low = s.toLowerCase();
         // Reject obvious placeholders/empty values
-        if (low === 'null' || low === 'na' || low === 'n/a' || low === 'nil' || 
-            s === '0' || s === '-' || s === '--' || low === 'not available' ||
-            low === 'not applicable') return false;
-        
+        if (low === 'null' || low === 'na' || low === 'n/a' || low === 'nil' ||
+          s === '0' || s === '-' || s === '--' || low === 'not available' ||
+          low === 'not applicable') return false;
+
         // Accept any 15-character alphanumeric string as valid GSTIN
         // This is more lenient to avoid showing ledgers where GSTIN is actually entered
         const upper = s.toUpperCase().replace(/\s/g, '');
         if (upper.length === 15 && /^[A-Z0-9]{15}$/.test(upper)) {
           return true;
         }
-        
+
         // Also accept if it looks like a partial/old format GSTIN (at least has some content)
         // If user has entered something meaningful (more than 5 chars, alphanumeric), consider it fed
         if (upper.length >= 10 && /^[A-Z0-9]+$/.test(upper)) {
           return true;
         }
-        
+
         return false;
       };
 
