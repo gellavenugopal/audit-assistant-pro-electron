@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { PDFDocument } from "pdf-lib";
@@ -15,9 +15,6 @@ import { useTabShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEngagement } from "@/contexts/EngagementContext";
 import { useTallyODBC } from "@/hooks/useTallyODBC";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
-import { gstzenApi } from "@/services/gstzen-api";
 
 // Type definitions (moved from TallyContext)
 export interface TallyTrialBalanceLine {
@@ -54,7 +51,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "lucide-react";
 import DeferredTax from "@/components/audit/DeferredTax";
 import DeferredTaxCalculator from "@/components/audit/DeferredTaxCalculator";
-import RatioAnalysisCalculator from "@/components/audit/RatioAnalysisCalculator";
 import {
   Database,
   FileSpreadsheet,
@@ -529,7 +525,7 @@ const TallyTools = () => {
   // Negative Ledgers - accounts with opposite balances
   // Tally convention: Negative = Debit, Positive = Credit
   const getNegativeLedgers = () => {
-    if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [], expenses: [], incomes: [] };
+    if (!fetchedTBData) return { debtors: [], creditors: [], assets: [], liabilities: [] };
 
     // Debtors should have Dr balance (negative), so Cr balance (positive/closingBalance > 0) is opposite
     const debtors = fetchedTBData.filter(line =>
@@ -553,19 +549,7 @@ const TallyTools = () => {
       liabilityGroups.includes(line.primaryGroup) && line.closingBalance < 0
     );
 
-    // Expenses should have Dr balance (negative), so Cr balance (positive/closingBalance > 0) is opposite
-    const expenseGroups = ["Direct Expenses", "Indirect Expenses", "Purchase Accounts", "Manufacturing Expenses", "Administrative Expenses", "Selling Expenses", "Miscellaneous Expenses"];
-    const expenses = fetchedTBData.filter(line =>
-      expenseGroups.includes(line.primaryGroup) && line.closingBalance > 0
-    );
-
-    // Incomes should have Cr balance (positive), so Dr balance (negative/closingBalance < 0) is opposite
-    const incomeGroups = ["Direct Incomes", "Indirect Incomes", "Sales Accounts", "Revenue", "Other Income"];
-    const incomes = fetchedTBData.filter(line =>
-      incomeGroups.includes(line.primaryGroup) && line.closingBalance < 0
-    );
-
-    return { debtors, creditors, assets, liabilities, expenses, incomes };
+    return { debtors, creditors, assets, liabilities };
   };
 
   // Ledgers with No Transactions - only opening balance, no transactions during the year
@@ -599,21 +583,21 @@ const TallyTools = () => {
   };
 
   const handleExportNegativeLedgersToExcel = () => {
-    const { debtors, creditors, assets, liabilities, expenses, incomes } = getNegativeLedgers();
+    const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
 
     const formatRow = (line: TallyTrialBalanceLine, expectedNature: string) => {
       // For accounts with opposite balance:
-      // - If expected Dr but has Cr: closingBalance > 0, so amount = closingBalance
-      // - If expected Cr but has Dr: closingBalance < 0, so amount = abs(closingBalance)
-      const amount = expectedNature === "Dr" ? line.closingBalance : Math.abs(line.closingBalance);
-      const oppositeNature = expectedNature === "Dr" ? "Cr" : "Dr";
+      // - If expected Dr but has Cr: closingBalance > 0, so closingCr = closingBalance
+      // - If expected Cr but has Dr: closingBalance < 0, so closingDr = abs(closingBalance)
+      const closingCr = line.closingBalance > 0 ? line.closingBalance : 0;
+      const closingDr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
       return {
         "Account Name": line.accountHead,
         "Primary Group": line.primaryGroup,
-        "Parent": line.parent || "",
+        "Parent": line.parent,
         "Expected Nature": expectedNature,
-        "Actual Nature": oppositeNature,
-        "Amount": amount,
+        "Actual Balance": expectedNature === "Dr" ? `Cr ${formatCurrency(closingCr)}` : `Dr ${formatCurrency(closingDr)}`,
+        "Amount": expectedNature === "Dr" ? closingCr : closingDr,
       };
     };
 
@@ -639,16 +623,6 @@ const TallyTools = () => {
       XLSX.utils.book_append_sheet(wb, ws, "Liabilities_Dr_Bal");
     }
 
-    if (expenses.length > 0) {
-      const ws = XLSX.utils.json_to_sheet(expenses.map(l => formatRow(l, "Dr")));
-      XLSX.utils.book_append_sheet(wb, ws, "Expenses_Cr_Bal");
-    }
-
-    if (incomes.length > 0) {
-      const ws = XLSX.utils.json_to_sheet(incomes.map(l => formatRow(l, "Cr")));
-      XLSX.utils.book_append_sheet(wb, ws, "Incomes_Dr_Bal");
-    }
-
     const fileName = `Negative_Ledgers_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
 
@@ -671,16 +645,25 @@ const TallyTools = () => {
     }
 
     const data = noTransactionLedgers.map(line => {
-      // Determine if balance is Dr or Cr
-      const balanceNature = line.openingBalance > 0 ? "Dr" : (line.openingBalance < 0 ? "Cr" : "-");
-      const balanceAmount = Math.abs(line.openingBalance);
+      const openingDr = line.openingBalance > 0 ? line.openingBalance : 0;
+      const openingCr = line.openingBalance < 0 ? Math.abs(line.openingBalance) : 0;
+      const closingDr = line.closingBalance > 0 ? line.closingBalance : 0;
+      const closingCr = line.closingBalance < 0 ? Math.abs(line.closingBalance) : 0;
 
       return {
         "Account Name": line.accountHead,
         "Primary Group": line.primaryGroup,
-        "Parent": line.parent || "",
-        "Balance": formatCurrency(balanceAmount),
-        "Dr/Cr": balanceNature,
+        "Parent": line.parent,
+        "Account Code": line.accountCode,
+        "Branch": line.branch,
+        "Opening Balance": formatCurrency(line.openingBalance),
+        "Opening Dr": formatCurrency(openingDr),
+        "Opening Cr": formatCurrency(openingCr),
+        "Total Debit": formatCurrency(line.totalDebit),
+        "Total Credit": formatCurrency(line.totalCredit),
+        "Closing Balance": formatCurrency(line.closingBalance),
+        "Closing Dr": formatCurrency(closingDr),
+        "Closing Cr": formatCurrency(closingCr),
         "Type": line.isRevenue ? "P&L" : "BS",
       };
     });
@@ -1016,34 +999,42 @@ const TallyTools = () => {
               </Button>
             </div>
 
-            {/* Search/Filter */}
+            {/* Search/Filter & Export */}
             {fetchedTBData && fetchedTBData.length > 0 && (
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="Search by Account Head, Code, Group, Parent, or Branch..."
-                    value={tbSearchTerm}
-                    onChange={(e) => setTbSearchTerm(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
-                {tbSearchTerm && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setTbSearchTerm("")}
-                    className="h-9"
-                  >
-                    Clear
-                  </Button>
-                )}
-                {tbSearchTerm && filteredTBData && (
-                  <div className="text-sm text-muted-foreground whitespace-nowrap">
-                    Showing {filteredTBData.length} of {fetchedTBData.length} accounts
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Search by Account Head, Code, Group, Parent, or Branch..."
+                      value={tbSearchTerm}
+                      onChange={(e) => setTbSearchTerm(e.target.value)}
+                      className="pl-9"
+                    />
                   </div>
-                )}
+                  {tbSearchTerm && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setTbSearchTerm("")}
+                      className="h-9"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                  {tbSearchTerm && filteredTBData && (
+                    <div className="text-sm text-muted-foreground whitespace-nowrap">
+                      Showing {filteredTBData.length} of {fetchedTBData.length} accounts
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-end">
+                  <Button className="h-9" onClick={handleExportToExcel}>
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    Export to Excel
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -1105,6 +1096,13 @@ const TallyTools = () => {
                     <div className="text-sm">
                       <span className="text-muted-foreground">Total Opening Balance:</span>
                       <span className="ml-2 font-mono font-medium">{formatCurrency(totalOpeningBalance)}</span>
+                      {Math.abs(totalOpeningBalance) > 0.01 && (
+                        <div className="mt-1">
+                          <Badge variant="destructive" className="text-xs">
+                            Difference: {formatCurrency(Math.abs(totalOpeningBalance))}
+                          </Badge>
+                        </div>
+                      )}
                     </div>
                     <div className="text-sm">
                       <span className="text-muted-foreground">Total Debit:</span>
@@ -1117,17 +1115,19 @@ const TallyTools = () => {
                     <div className="text-sm">
                       <span className="text-muted-foreground">Total Closing Balance:</span>
                       <span className="ml-2 font-mono font-medium">{formatCurrency(totalClosingBalance)}</span>
-                      {/* Profit/Loss mismatch badge removed */}
+                      {Math.abs(totalClosingBalance) > 0.01 && (
+                        <div className="mt-1">
+                          <Badge variant="destructive" className="text-xs">
+                            Difference: {formatCurrency(Math.abs(totalClosingBalance))}
+                          </Badge>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between mt-6">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button variant="outline" className="h-10" onClick={() => setFetchedTBData(null)}>
                         Clear
-                      </Button>
-                      <Button variant="outline" className="h-10" onClick={handleExportToExcel}>
-                        <FileSpreadsheet className="h-4 w-4 mr-2" />
-                        Export to Excel
                       </Button>
                     </div>
 
@@ -1410,46 +1410,24 @@ const TallyTools = () => {
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Fetch Button & Actions */}
-            <div className="flex items-center justify-between gap-4 p-4 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-2">
-                <Button onClick={handleFetchGSTNotFeed} disabled={isFetchingGSTNotFeed}>
-                  {isFetchingGSTNotFeed ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Fetching...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Fetch from Tally
-                    </>
-                  )}
-                </Button>
-                {fetchedGSTNotFeedData && (
-                  <Button 
-                    variant="outline" 
-                    onClick={() => {
-                      setFetchedGSTNotFeedData(null);
-                      setGstSearchTerm("");
-                    }}
-                  >
+            {/* Fetch Button */}
+            <div className="flex items-center gap-4 p-4 bg-muted/50 rounded-lg">
+              <Button onClick={handleFetchGSTNotFeed} disabled={isFetchingGSTNotFeed}>
+                {isFetchingGSTNotFeed ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Fetching...
+                  </>
+                ) : (
+                  <>
                     <RefreshCw className="h-4 w-4 mr-2" />
-                    Reset
-                  </Button>
+                    Fetch from Tally
+                  </>
                 )}
-              </div>
-              <div className="flex items-center gap-2">
-                {fetchedGSTNotFeedData && fetchedGSTNotFeedData.length > 0 && (
-                  <Button variant="default" onClick={handleExportGSTNotFeedToExcel}>
-                    <FileSpreadsheet className="h-4 w-4 mr-2" />
-                    Export to Excel
-                  </Button>
-                )}
-                <span className="text-sm text-muted-foreground hidden sm:inline">
-                  Filters where GST Type = Regular but GSTIN is blank
-                </span>
-              </div>
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Fetches all ledgers and filters where GST Type = Regular but GSTIN is blank
+              </span>
             </div>
 
             {/* Search/Filter */}
@@ -1540,17 +1518,26 @@ const TallyTools = () => {
                     </table>
                   </div>
 
-                  {/* Summary */}
-                  <div className="p-4 border-t bg-muted/30">
+                  {/* Summary & Export */}
+                  <div className="p-4 border-t bg-muted/30 flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">
                       {gstSearchTerm ? (
                         <>
-                          Showing {filteredData.length} of {fetchedGSTNotFeedData.length} ledgers with missing GSTIN
-                          <span className="ml-1">(filtered)</span>
+                          {filteredData.length} of {fetchedGSTNotFeedData.length} ledgers with missing GSTIN
+                          {gstSearchTerm && <span className="ml-1">(filtered)</span>}
                         </>
                       ) : (
                         `Found ${fetchedGSTNotFeedData.length} ledgers with missing GSTIN`
                       )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => setFetchedGSTNotFeedData(null)}>
+                        Clear
+                      </Button>
+                      <Button variant="outline" onClick={handleExportGSTNotFeedToExcel}>
+                        <FileSpreadsheet className="h-4 w-4 mr-2" />
+                        Export to Excel
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -1589,7 +1576,7 @@ const TallyTools = () => {
 
           <div className="space-y-4">
             {(() => {
-              const { debtors, creditors, assets, liabilities, expenses, incomes } = getNegativeLedgers();
+              const { debtors, creditors, assets, liabilities } = getNegativeLedgers();
 
               // Filter function for search
               const filterData = (data: TallyTrialBalanceLine[]) => {
@@ -1606,11 +1593,9 @@ const TallyTools = () => {
               const filteredCreditors = filterData(creditors);
               const filteredAssets = filterData(assets);
               const filteredLiabilities = filterData(liabilities);
-              const filteredExpenses = filterData(expenses);
-              const filteredIncomes = filterData(incomes);
 
-              const totalCount = debtors.length + creditors.length + assets.length + liabilities.length + expenses.length + incomes.length;
-              const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length + filteredExpenses.length + filteredIncomes.length;
+              const totalCount = debtors.length + creditors.length + assets.length + liabilities.length;
+              const filteredTotalCount = filteredDebtors.length + filteredCreditors.length + filteredAssets.length + filteredLiabilities.length;
 
               const renderTable = (data: TallyTrialBalanceLine[], filteredData: TallyTrialBalanceLine[], expectedNature: string, oppositeNature: string) => (
                 <div className="border rounded-lg overflow-hidden">
@@ -1673,17 +1658,6 @@ const TallyTools = () => {
                     </Alert>
                   ) : (
                     <>
-                      {/* Export Button on Top */}
-                      <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                        <span className="text-sm text-muted-foreground">
-                          Total: {totalCount} accounts with opposite balances
-                        </span>
-                        <Button variant="default" onClick={handleExportNegativeLedgersToExcel}>
-                          <FileSpreadsheet className="h-4 w-4 mr-2" />
-                          Export to Excel
-                        </Button>
-                      </div>
-
                       {/* Search Input */}
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1714,35 +1688,25 @@ const TallyTools = () => {
                       )}
 
                       <Tabs value={negativeLedgersTab} onValueChange={setNegativeLedgersTab}>
-                        <TabsList className="grid w-full grid-cols-6">
-                          <TabsTrigger value="debtors" className="text-xs px-1">
-                            Debtors <Badge variant="secondary" className="ml-1 text-[10px]">
+                        <TabsList className="grid w-full grid-cols-4">
+                          <TabsTrigger value="debtors" className="text-xs">
+                            Debtors (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">
                               {negativeLedgersSearchTerm ? `${filteredDebtors.length}/${debtors.length}` : debtors.length}
                             </Badge>
                           </TabsTrigger>
-                          <TabsTrigger value="creditors" className="text-xs px-1">
-                            Creditors <Badge variant="secondary" className="ml-1 text-[10px]">
+                          <TabsTrigger value="creditors" className="text-xs">
+                            Creditors (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">
                               {negativeLedgersSearchTerm ? `${filteredCreditors.length}/${creditors.length}` : creditors.length}
                             </Badge>
                           </TabsTrigger>
-                          <TabsTrigger value="assets" className="text-xs px-1">
-                            Assets <Badge variant="secondary" className="ml-1 text-[10px]">
+                          <TabsTrigger value="assets" className="text-xs">
+                            Assets (Cr) <Badge variant="secondary" className="ml-1 text-[10px]">
                               {negativeLedgersSearchTerm ? `${filteredAssets.length}/${assets.length}` : assets.length}
                             </Badge>
                           </TabsTrigger>
-                          <TabsTrigger value="liabilities" className="text-xs px-1">
-                            Liabilities <Badge variant="secondary" className="ml-1 text-[10px]">
+                          <TabsTrigger value="liabilities" className="text-xs">
+                            Liabilities (Dr) <Badge variant="secondary" className="ml-1 text-[10px]">
                               {negativeLedgersSearchTerm ? `${filteredLiabilities.length}/${liabilities.length}` : liabilities.length}
-                            </Badge>
-                          </TabsTrigger>
-                          <TabsTrigger value="expenses" className="text-xs px-1">
-                            Expenses <Badge variant="secondary" className="ml-1 text-[10px]">
-                              {negativeLedgersSearchTerm ? `${filteredExpenses.length}/${expenses.length}` : expenses.length}
-                            </Badge>
-                          </TabsTrigger>
-                          <TabsTrigger value="incomes" className="text-xs px-1">
-                            Incomes <Badge variant="secondary" className="ml-1 text-[10px]">
-                              {negativeLedgersSearchTerm ? `${filteredIncomes.length}/${incomes.length}` : incomes.length}
                             </Badge>
                           </TabsTrigger>
                         </TabsList>
@@ -1778,38 +1742,31 @@ const TallyTools = () => {
                             <Alert><AlertDescription>No Liabilities with Debit balance found.</AlertDescription></Alert>
                           )}
                         </TabsContent>
-
-                        <TabsContent value="expenses" className="mt-4">
-                          {expenses.length > 0 ? (
-                            renderTable(expenses, filteredExpenses, "Dr", "Cr")
-                          ) : (
-                            <Alert><AlertDescription>No Expenses with Credit balance found.</AlertDescription></Alert>
-                          )}
-                        </TabsContent>
-
-                        <TabsContent value="incomes" className="mt-4">
-                          {incomes.length > 0 ? (
-                            renderTable(incomes, filteredIncomes, "Cr", "Dr")
-                          ) : (
-                            <Alert><AlertDescription>No Incomes with Debit balance found.</AlertDescription></Alert>
-                          )}
-                        </TabsContent>
                       </Tabs>
 
-                      {/* Summary */}
-                      <div className="p-3 border rounded-lg bg-muted/30">
+                      {/* Summary & Export */}
+                      <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
                         <div className="text-sm text-muted-foreground">
                           {negativeLedgersSearchTerm ? (
                             <>
                               Showing {filteredTotalCount} of {totalCount} accounts with opposite balances
                               <span className="ml-1">(filtered)</span>
+                              <span className="ml-2 text-xs">
+                                (Debtors: {filteredDebtors.length}/{debtors.length}, Creditors: {filteredCreditors.length}/{creditors.length},
+                                Assets: {filteredAssets.length}/{assets.length}, Liabilities: {filteredLiabilities.length}/{liabilities.length})
+                              </span>
                             </>
                           ) : (
                             <>
                               Total: {totalCount} accounts with opposite balances
+                              (Debtors: {debtors.length}, Creditors: {creditors.length}, Assets: {assets.length}, Liabilities: {liabilities.length})
                             </>
                           )}
                         </div>
+                        <Button variant="outline" onClick={handleExportNegativeLedgersToExcel}>
+                          <FileSpreadsheet className="h-4 w-4 mr-2" />
+                          Export All to Excel
+                        </Button>
                       </div>
                     </>
                   )}
@@ -1865,17 +1822,6 @@ const TallyTools = () => {
 
               return (
                 <>
-                  {/* Export Button on Top */}
-                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                    <span className="text-sm text-muted-foreground">
-                      Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions
-                    </span>
-                    <Button variant="default" onClick={handleExportNoTransactionLedgersToExcel}>
-                      <FileSpreadsheet className="h-4 w-4 mr-2" />
-                      Export to Excel
-                    </Button>
-                  </div>
-
                   {/* Search Input */}
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1974,20 +1920,30 @@ const TallyTools = () => {
                     </div>
                   </div>
 
-                  {/* Summary */}
-                  <div className="p-3 border rounded-lg bg-muted/30">
+                  {/* Summary & Export */}
+                  <div className="p-4 border rounded-lg bg-muted/30 flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">
                       {noTransactionsSearchTerm ? (
                         <>
                           Showing {filteredData.length} of {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions
                           <span className="ml-1">(filtered)</span>
+                          <span className="ml-2 text-xs">
+                            ({filteredData.filter(l => !l.isRevenue).length} BS)
+                          </span>
                         </>
                       ) : (
                         <>
-                          Total: {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions
+                          Found {noTransactionLedgers.length} ledger{noTransactionLedgers.length !== 1 ? 's' : ''} with no transactions during the year
+                          <span className="ml-2 text-xs">
+                            ({noTransactionLedgers.filter(l => !l.isRevenue).length} BS)
+                          </span>
                         </>
                       )}
                     </div>
+                    <Button variant="outline" onClick={handleExportNoTransactionLedgersToExcel}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export to Excel
+                    </Button>
                   </div>
                 </>
               );
@@ -2435,254 +2391,6 @@ const TallyTools = () => {
 const GSTTools = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { currentEngagement } = useEngagement();
-  const { user } = useAuth();
-  const [gstinDialogOpen, setGstinDialogOpen] = useState(false);
-  const [gstinInput, setGstinInput] = useState("");
-  const [gstinName, setGstinName] = useState("");
-  const [taxpayerType, setTaxpayerType] = useState<"REGULAR" | "COMPOSITION" | "ISD">("REGULAR");
-  const [gstins, setGstins] = useState<{ id: string; gstin: string; created_at: string }[]>([]);
-  const [isLoadingGstins, setIsLoadingGstins] = useState(false);
-  const [isSavingGstin, setIsSavingGstin] = useState(false);
-  const [editingGstinId, setEditingGstinId] = useState<string | null>(null);
-  const [editingGstinValue, setEditingGstinValue] = useState("");
-  const [isUpdatingGstin, setIsUpdatingGstin] = useState(false);
-  const [isDeletingGstinId, setIsDeletingGstinId] = useState<string | null>(null);
-
-  const clientId = currentEngagement?.client_id;
-
-  const fetchClientGstins = useCallback(async () => {
-    if (!clientId) {
-      setGstins([]);
-      return;
-    }
-
-    setIsLoadingGstins(true);
-    try {
-      const { data, error } = await supabase
-        .from('client_gstins')
-        .select('id, gstin, created_at')
-        .eq('client_id', clientId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setGstins(data || []);
-    } catch (error) {
-      console.error('Error fetching GSTINs:', error);
-      toast({
-        title: 'Failed to load GST numbers',
-        description: error instanceof Error ? error.message : 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoadingGstins(false);
-    }
-  }, [clientId, toast]);
-
-  useEffect(() => {
-    fetchClientGstins();
-  }, [fetchClientGstins]);
-
-  const handleOpenGstinDialog = () => {
-    if (!clientId) {
-      toast({
-        title: 'Client not linked',
-        description: 'This engagement is not linked to a client. Link a client in Admin Settings → Clients.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    setGstinDialogOpen(true);
-  };
-
-  const handleAddGstin = async () => {
-    const normalized = gstinInput.trim().toUpperCase();
-    const name = gstinName.trim();
-    
-    if (!clientId) {
-      toast({
-        title: 'Client not linked',
-        description: 'Please link a client before adding GST numbers.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (!normalized) {
-      toast({ title: 'GSTIN required', description: 'Enter a GST number to continue.' });
-      return;
-    }
-    if (!/^[0-9A-Z]{15}$/.test(normalized)) {
-      toast({
-        title: 'Invalid GSTIN',
-        description: 'GSTIN must be 15 characters (A-Z, 0-9).',
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (!name) {
-      toast({ title: 'Company name required', description: 'Enter the company/taxpayer name.' });
-      return;
-    }
-    if (gstins.some((gstin) => gstin.gstin === normalized)) {
-      toast({ title: 'GSTIN already added', description: 'This GSTIN already exists for this client.' });
-      return;
-    }
-    if (!user?.id) {
-      toast({ title: 'Login required', description: 'Please sign in again to add GST numbers.', variant: 'destructive' });
-      return;
-    }
-
-    setIsSavingGstin(true);
-    try {
-      // Step 1: Create in GSTZen backend using /api/create-gstin/
-      // This API validates the GSTIN internally
-      const createResponse = await gstzenApi.createGstin({
-        gstin: normalized,
-        name: name,
-        taxpayer_type: taxpayerType,
-      });
-
-      if (!createResponse.success || !createResponse.data) {
-        throw new Error(createResponse.error || 'Failed to create GSTIN in GSTZen');
-      }
-
-      const responseData = createResponse.data;
-      
-      // Check if creation was successful
-      if (responseData.status !== 1) {
-        // Handle different error cases
-        const errorMsg = responseData.message || 'Failed to create GSTIN';
-        if (errorMsg.includes('exceeded') || errorMsg.includes('limit')) {
-          throw new Error(errorMsg);
-        } else if (errorMsg.includes('not a valid GSTIN')) {
-          throw new Error('Invalid GSTIN. Please check the GSTIN number.');
-        } else {
-          throw new Error(errorMsg);
-        }
-      }
-
-      // Step 2: Create in Supabase (engagement-specific) only if GSTZen creation succeeded
-      const { data, error } = await supabase
-        .from('client_gstins')
-        .insert({
-          client_id: clientId,
-          gstin: normalized,
-          created_by: user.id,
-        })
-        .select('id, gstin, created_at')
-        .single();
-
-      if (error) throw error;
-
-      setGstins((prev) => [data, ...prev]);
-      setGstinInput('');
-      setGstinName('');
-      setTaxpayerType('REGULAR');
-      setGstinDialogOpen(false);
-      toast({
-        title: 'GST number added',
-        description: `${normalized} linked to ${currentEngagement?.client_name || 'client'} and added to GSTZen account.`,
-      });
-    } catch (error) {
-      console.error('Error adding GSTIN:', error);
-      toast({
-        title: 'Failed to add GST number',
-        description: error instanceof Error ? error.message : 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSavingGstin(false);
-    }
-  };
-
-  const startEditGstin = (gstinId: string, gstinValue: string) => {
-    setEditingGstinId(gstinId);
-    setEditingGstinValue(gstinValue);
-  };
-
-  const cancelEditGstin = () => {
-    setEditingGstinId(null);
-    setEditingGstinValue("");
-  };
-
-  const handleUpdateGstin = async () => {
-    if (!clientId || !editingGstinId) return;
-    const normalized = editingGstinValue.trim().toUpperCase();
-
-    if (!normalized) {
-      toast({ title: 'GSTIN required', description: 'Enter a GST number to continue.' });
-      return;
-    }
-    if (!/^[0-9A-Z]{15}$/.test(normalized)) {
-      toast({
-        title: 'Invalid GSTIN',
-        description: 'GSTIN must be 15 characters (A-Z, 0-9).',
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (gstins.some((gstin) => gstin.gstin === normalized && gstin.id !== editingGstinId)) {
-      toast({ title: 'GSTIN already added', description: 'This GSTIN already exists for this client.' });
-      return;
-    }
-
-    setIsUpdatingGstin(true);
-    try {
-      const { data, error } = await supabase
-        .from('client_gstins')
-        .update({ gstin: normalized })
-        .eq('id', editingGstinId)
-        .eq('client_id', clientId)
-        .select('id, gstin, created_at')
-        .single();
-
-      if (error) throw error;
-
-      setGstins((prev) => prev.map((item) => (item.id === data.id ? data : item)));
-      toast({ title: 'GST number updated', description: `${normalized} updated.` });
-      cancelEditGstin();
-    } catch (error) {
-      console.error('Error updating GSTIN:', error);
-      toast({
-        title: 'Failed to update GST number',
-        description: error instanceof Error ? error.message : 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsUpdatingGstin(false);
-    }
-  };
-
-  const handleDeleteGstin = async (gstinId: string, gstinValue: string) => {
-    if (!clientId) return;
-    if (!confirm(`Delete GSTIN ${gstinValue}?`)) return;
-
-    setIsDeletingGstinId(gstinId);
-    try {
-      const { error } = await supabase
-        .from('client_gstins')
-        .delete()
-        .eq('id', gstinId)
-        .eq('client_id', clientId);
-
-      if (error) throw error;
-
-      setGstins((prev) => prev.filter((item) => item.id !== gstinId));
-      if (editingGstinId === gstinId) {
-        cancelEditGstin();
-      }
-      toast({ title: 'GST number deleted', description: `${gstinValue} removed.` });
-    } catch (error) {
-      console.error('Error deleting GSTIN:', error);
-      toast({
-        title: 'Failed to delete GST number',
-        description: error instanceof Error ? error.message : 'Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsDeletingGstinId(null);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -2710,13 +2418,6 @@ const GSTTools = () => {
       </Alert>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <ToolCard
-          title="GST Number Master"
-          description="Add GST numbers linked to this client. Numbers are scoped per client."
-          icon={<FilePlus className="h-5 w-5 text-primary" />}
-          status="available"
-          onClick={handleOpenGstinDialog}
-        />
         <ToolCard
           title="GSTR1 Data Download"
           description="Download GSTR1 reports directly from GST portal for audit and reconciliation purposes."
@@ -2749,136 +2450,6 @@ const GSTTools = () => {
           status="coming-soon"
         />
       </div>
-
-      <Dialog open={gstinDialogOpen} onOpenChange={setGstinDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>GST Number Master</DialogTitle>
-            <DialogDescription>
-              Manage GST numbers for {currentEngagement?.client_name || 'this client'}. GST numbers are client-specific.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="gstin-input">GSTIN *</Label>
-                <Input
-                  id="gstin-input"
-                  value={gstinInput}
-                  onChange={(e) => setGstinInput(e.target.value.toUpperCase())}
-                  placeholder="Enter GSTIN (15 characters)"
-                  maxLength={15}
-                  className="font-mono"
-                  disabled={isSavingGstin}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="gstin-name">Company/Taxpayer Name *</Label>
-                <Input
-                  id="gstin-name"
-                  value={gstinName}
-                  onChange={(e) => setGstinName(e.target.value)}
-                  placeholder="Enter company or taxpayer name"
-                  disabled={isSavingGstin}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="taxpayer-type">Taxpayer Type *</Label>
-                <Select
-                  value={taxpayerType}
-                  onValueChange={(value) => setTaxpayerType(value as "REGULAR" | "COMPOSITION" | "ISD")}
-                  disabled={isSavingGstin}
-                >
-                  <SelectTrigger id="taxpayer-type">
-                    <SelectValue placeholder="Select taxpayer type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="REGULAR">Regular Tax Payer</SelectItem>
-                    <SelectItem value="COMPOSITION">Composition Tax Payer</SelectItem>
-                    <SelectItem value="ISD">Input Service Distributor</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <Button onClick={handleAddGstin} disabled={isSavingGstin}>
-                {isSavingGstin ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FilePlus className="h-4 w-4 mr-2" />}
-                Add GSTIN
-              </Button>
-            </div>
-
-            <div className="text-xs text-muted-foreground">
-              GST numbers saved here will only appear for this client. The GSTIN will be validated and created in your GSTZen account.
-            </div>
-
-            {isLoadingGstins ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading GST numbers...
-              </div>
-            ) : gstins.length === 0 ? (
-              <div className="text-sm text-muted-foreground">
-                No GST numbers added yet.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {gstins.map((gstin) => (
-                  <div key={gstin.id} className="flex items-center justify-between rounded-md border px-3 py-2">
-                    <div className="flex-1">
-                      {editingGstinId === gstin.id ? (
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <Input
-                            value={editingGstinValue}
-                            onChange={(e) => setEditingGstinValue(e.target.value.toUpperCase())}
-                            maxLength={15}
-                            className="font-mono"
-                          />
-                          <div className="flex gap-2">
-                            <Button size="sm" onClick={handleUpdateGstin} disabled={isUpdatingGstin}>
-                              {isUpdatingGstin ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                              Save
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={cancelEditGstin} disabled={isUpdatingGstin}>
-                              Cancel
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="font-mono text-sm">{gstin.gstin}</div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {editingGstinId !== gstin.id && (
-                        <div className="text-xs text-muted-foreground">
-                          Added {new Date(gstin.created_at).toLocaleDateString()}
-                        </div>
-                      )}
-                      {editingGstinId !== gstin.id && (
-                        <div className="flex items-center gap-2">
-                          <Button size="sm" variant="outline" onClick={() => startEditGstin(gstin.id, gstin.gstin)}>
-                            Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleDeleteGstin(gstin.id, gstin.gstin)}
-                            disabled={isDeletingGstinId === gstin.id}
-                          >
-                            {isDeletingGstinId === gstin.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete'}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
@@ -3740,16 +3311,22 @@ const PDFTools = () => {
 
 const AnalyticsTools = () => {
   const { toast } = useToast();
-  const [showRatioAnalysisDialog, setShowRatioAnalysisDialog] = useState(false);
+  const [showDTLDialog, setShowDTLDialog] = useState(false);
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <ToolCard
+          title="Deferred Tax Calculator (AS-22)"
+          description="Calculate Deferred Tax Assets (DTA) and Deferred Tax Liabilities (DTL) as per Accounting Standard 22 for taxes on income."
+          icon={<Scale className="h-5 w-5 text-primary" />}
+          onClick={() => setShowDTLDialog(true)}
+        />
+        <ToolCard
           title="Ratio Analysis Calculator"
           description="Calculate key financial ratios including liquidity, profitability, and solvency ratios from trial balance."
           icon={<Calculator className="h-5 w-5 text-primary" />}
-          onClick={() => setShowRatioAnalysisDialog(true)}
+          onClick={() => toast({ title: "Ratio Analysis", description: "Import trial balance first" })}
         />
         <ToolCard
           title="Benford's Law Analysis"
@@ -3773,7 +3350,7 @@ const AnalyticsTools = () => {
           title="Sampling Calculator"
           description="Calculate sample sizes using statistical sampling methods (MUS, random, stratified)."
           icon={<Calculator className="h-5 w-5 text-primary" />}
-          status="coming-soon"
+          onClick={() => toast({ title: "Sampling Calculator", description: "Feature available" })}
         />
         <ToolCard
           title="Trend Analysis"
@@ -3783,17 +3360,17 @@ const AnalyticsTools = () => {
         />
       </div>
 
-      {/* Ratio Analysis Calculator Dialog */}
-      <Dialog open={showRatioAnalysisDialog} onOpenChange={setShowRatioAnalysisDialog}>
+      {/* Deferred Tax Calculator Dialog */}
+      <Dialog open={showDTLDialog} onOpenChange={setShowDTLDialog}>
         <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Ratio Analysis Calculator</DialogTitle>
+            <DialogTitle>Deferred Tax Calculator (AS-22)</DialogTitle>
             <DialogDescription>
-              Calculate key financial ratios from trial balance data including liquidity, profitability, solvency, and activity ratios
+              Calculate Deferred Tax Assets (DTA) and Deferred Tax Liabilities (DTL) as per Accounting Standard 22
             </DialogDescription>
           </DialogHeader>
           <div className="mt-4">
-            <RatioAnalysisCalculator />
+            <DeferredTax />
           </div>
         </DialogContent>
       </Dialog>
