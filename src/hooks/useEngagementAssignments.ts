@@ -24,7 +24,7 @@ export function useEngagementAssignments(engagementId?: string) {
   const [loading, setLoading] = useState(true);
   const { user, profile, role: currentUserRole } = useAuth();
 
-  const canManageAssignments = currentUserRole === 'partner' || currentUserRole === 'manager';
+  const canManageAssignments = currentUserRole === 'partner' || currentUserRole === 'manager' || currentUserRole === 'admin';
 
   const fetchAssignments = async () => {
     if (!engagementId) {
@@ -48,13 +48,16 @@ export function useEngagementAssignments(engagementId?: string) {
       let profilesMap: Record<string, { full_name: string; email: string; avatar_url: string | null }> = {};
 
       if (userIds.length > 0) {
-        const { data: profilesData } = await db
+        // Fetch all profiles and filter in JavaScript (SQLite client doesn't support .in())
+        const { data: allProfilesData } = await db
           .from('profiles')
           .select('user_id, full_name, email, avatar_url')
-          .in('user_id', userIds)
           .execute();
 
-        profilesMap = (profilesData || []).reduce((acc, p) => {
+        // Filter to only the profiles we need
+        const profilesData = (allProfilesData || []).filter(p => userIds.includes(p.user_id));
+
+        profilesMap = profilesData.reduce((acc, p) => {
           acc[p.user_id] = { full_name: p.full_name, email: p.email, avatar_url: p.avatar_url };
           return acc;
         }, {} as Record<string, { full_name: string; email: string; avatar_url: string | null }>);

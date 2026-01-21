@@ -37,11 +37,11 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EngagementLetterTemplateManager } from '@/components/admin/EngagementLetterTemplateManager';
-import { 
-  Settings, 
-  Building2, 
-  Users, 
-  UserCog, 
+import {
+  Settings,
+  Building2,
+  Users,
+  UserCog,
   Plus,
   Pencil,
   Trash2,
@@ -102,7 +102,7 @@ export default function AdminSettings() {
   const { user } = useAuth();
   const { refreshEngagements } = useEngagement();
   const [activeTab, setActiveTab] = useState('firm');
-  
+
   // Clients state
   const [clients, setClients] = useState<Client[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
@@ -221,9 +221,9 @@ export default function AdminSettings() {
 
   const handleDeleteFinancialYear = async (id: string) => {
     if (!confirm('Are you sure you want to delete this financial year?')) return;
-    
+
     try {
-      const { error } = await db.from('financial_years').eq('id', id).delete();
+      const { error } = await db.from('financial_years').delete().eq('id', id).execute();
       if (error) throw error;
       toast.success('Financial year deleted');
       fetchFinancialYears();
@@ -344,9 +344,9 @@ export default function AdminSettings() {
     }
 
     if (!confirm('Are you sure you want to delete this client?')) return;
-    
+
     try {
-      const { error } = await db.from('clients').eq('id', id).delete();
+      const { error } = await db.from('clients').delete().eq('id', id).execute();
       if (error) {
         // Handle FK violation specifically
         if (error.code === '23503' || error.message?.includes('violates foreign key constraint')) {
@@ -366,7 +366,7 @@ export default function AdminSettings() {
   const handleToggleClientStatus = async (client: Client) => {
     const newStatus = client.status === 'active' ? 'inactive' : 'active';
     setTogglingClientStatus(client.id);
-    
+
     try {
       const { error } = await db
         .from('clients')
@@ -389,13 +389,15 @@ export default function AdminSettings() {
     try {
       const { data: profiles, error: profilesError } = await db
         .from('profiles')
-        .select('user_id, full_name, email, phone');
+        .select('user_id, full_name, email, phone')
+        .execute();
 
       if (profilesError) throw profilesError;
 
       const { data: roles, error: rolesError } = await db
         .from('user_roles')
-        .select('user_id, role');
+        .select('user_id, role')
+        .execute();
 
       if (rolesError) throw rolesError;
 
@@ -421,35 +423,74 @@ export default function AdminSettings() {
 
     setSavingTeam(true);
     try {
-      // Get current user's name for inviter
-      const { data: profile } = await db
+      // Check if email already exists
+      const { data: existingUser } = await db
         .from('profiles')
-        .select('full_name')
-        .eq('user_id', user?.id)
-        .single();
+        .select('email')
+        .eq('email', teamForm.email.toLowerCase().trim())
+        .execute();
 
-      // Edge functions not available in SQLite
-      toast.warning('Email invitation feature not yet implemented in SQLite.');
-      // const response = await db.functions.invoke('send-invite', {
-      //   body: {
-      //     email: teamForm.email,
-      //     role: teamForm.role,
-      //     full_name: teamForm.full_name,
-      //     phone: teamForm.phone || null,
-      //     inviterName: profile?.full_name || 'Admin',
-      //     appUrl: window.location.origin,
-      //   }
-      // });
+      if (existingUser && existingUser.length > 0) {
+        toast.error('A user with this email already exists');
+        return;
+      }
 
-      // if (response.error) throw response.error;
-      // if (response.data?.error) throw new Error(response.data.error);
+      // Generate a random user_id (UUID-like)
+      const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 
-      // toast.success(`Invitation sent to ${teamForm.email}`);
+      // Create profile with a default temporary password (user can change later)
+      const defaultPassword = 'Welcome@123'; // Default password for new users
+
+      // Use the auth signup to create the user properly
+      const { auth } = await import('@/integrations/sqlite/client');
+      const { data: authData, error: authError } = await auth.signUp({
+        email: teamForm.email.toLowerCase().trim(),
+        password: defaultPassword,
+        options: {
+          data: {
+            full_name: teamForm.full_name.trim()
+          }
+        }
+      });
+
+      if (authError) throw authError;
+
+      // Add phone if provided
+      if (teamForm.phone && authData?.user) {
+        await db
+          .from('profiles')
+          .update({ phone: teamForm.phone.trim() })
+          .eq('user_id', authData.user.user_id)
+          .execute();
+      }
+
+      // Create user role
+      if (authData?.user) {
+        const { error: roleError } = await db
+          .from('user_roles')
+          .insert({
+            user_id: authData.user.user_id,
+            role: teamForm.role
+          })
+          .execute();
+
+        if (roleError) {
+          console.error('Role creation error:', roleError);
+          // Don't fail the whole operation if role creation fails
+        }
+      }
+
+      toast.success(
+        `Team member added successfully! Email: ${teamForm.email}\nTemporary Password: ${defaultPassword}\n\nPlease share these credentials with the new team member.`,
+        { duration: 10000 }
+      );
+
       setTeamDialogOpen(false);
       setTeamForm({ full_name: '', email: '', phone: '', role: 'staff' });
       fetchMembers();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to send invitation');
+      console.error('Error adding team member:', error);
+      toast.error(error.message || 'Failed to add team member');
     } finally {
       setSavingTeam(false);
     }
@@ -759,7 +800,7 @@ export default function AdminSettings() {
               </Table>
             </CardContent>
           </Card>
-          
+
           {/* Data Integrity Panel - Partner only */}
           <DataIntegrityPanel />
         </TabsContent>
@@ -1021,8 +1062,8 @@ export default function AdminSettings() {
                     placeholder="Enter new password (min 6 characters)"
                   />
                 </div>
-                <Button 
-                  onClick={handleAdminPasswordReset} 
+                <Button
+                  onClick={handleAdminPasswordReset}
                   disabled={isResetting || !resetEmail || !resetPassword}
                   className="w-full"
                 >
@@ -1041,7 +1082,7 @@ export default function AdminSettings() {
               </div>
               <div className="mt-6 p-4 rounded-lg border bg-muted/50">
                 <p className="text-sm text-muted-foreground">
-                  <strong>Note:</strong> The user will be able to log in immediately with the new password. 
+                  <strong>Note:</strong> The user will be able to log in immediately with the new password.
                   For security, advise them to change their password after logging in.
                 </p>
               </div>

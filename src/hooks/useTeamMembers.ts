@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 const db = getSQLiteClient();
 
-type AppRole = 'partner' | 'manager' | 'senior' | 'staff';
+type AppRole = 'partner' | 'manager' | 'senior' | 'staff' | 'admin' | 'user';
 
 interface TeamMember {
   user_id: string;
@@ -20,7 +20,7 @@ export function useTeamMembers(engagementId?: string) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canManageRoles = currentUserRole === 'partner' || currentUserRole === 'manager';
+  const canManageRoles = currentUserRole === 'partner' || currentUserRole === 'manager' || currentUserRole === 'admin';
 
   const fetchMembers = async () => {
     try {
@@ -73,11 +73,12 @@ export function useTeamMembers(engagementId?: string) {
 
       // Sort by role hierarchy
       const roleOrder: Record<AppRole, number> = {
-        partner: 1,
-        manager: 2,
-        senior: 3,
-        staff: 4,
-        viewer: 5,
+        admin: 1,
+        partner: 2,
+        manager: 3,
+        senior: 4,
+        staff: 5,
+        user: 6,
       };
 
       membersData.sort((a, b) => roleOrder[a.role] - roleOrder[b.role]);

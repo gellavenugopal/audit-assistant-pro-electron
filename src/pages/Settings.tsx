@@ -7,40 +7,52 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Building2, Users, Shield, Bell, Crown, UserCog, Mail, Loader2, CheckCircle2, Save } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Building2, Users, Shield, Bell, Crown, UserCog, Mail, Loader2, CheckCircle2, Save, Plus } from 'lucide-react';
 import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { useFirmSettings } from '@/hooks/useFirmSettings';
 import { useAuth } from '@/contexts/AuthContext';
 import EmailVerificationStatus from '@/components/auth/EmailVerificationStatus';
-import { auth as sqliteAuth } from '@/integrations/sqlite/client';
+import { auth as sqliteAuth, getSQLiteClient } from '@/integrations/sqlite/client';
 import { toast } from 'sonner';
 
-type AppRole = 'partner' | 'manager' | 'senior' | 'staff' | 'viewer';
+const db = getSQLiteClient();
+
+type AppRole = 'partner' | 'manager' | 'senior' | 'staff' | 'viewer' | 'admin' | 'user';
 
 const roleLabels: Record<AppRole, string> = {
+  admin: 'Admin',
   partner: 'Partner',
   manager: 'Manager',
   senior: 'Senior',
   staff: 'Staff',
   viewer: 'Viewer',
+  user: 'User',
 };
 
 const roleColors: Record<AppRole, string> = {
+  admin: 'bg-red-500/20 text-red-600',
   partner: 'bg-amber-500/20 text-amber-600',
   manager: 'bg-blue-500/20 text-blue-600',
   senior: 'bg-purple-500/20 text-purple-600',
   staff: 'bg-green-500/20 text-green-600',
   viewer: 'bg-muted text-muted-foreground',
+  user: 'bg-gray-500/20 text-gray-600',
 };
 
 export default function Settings() {
   const { user, role } = useAuth();
-  const { members, loading, canManageRoles, updateRole } = useTeamMembers();
+  const { members, loading, canManageRoles, updateRole, refetch: refetchMembers } = useTeamMembers();
   const { firmSettings, loading: firmLoading, saveFirmSettings } = useFirmSettings();
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [resetEmail, setResetEmail] = useState('');
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [savingFirm, setSavingFirm] = useState(false);
+  
+  // Team member dialog state
+  const [teamDialogOpen, setTeamDialogOpen] = useState(false);
+  const [teamForm, setTeamForm] = useState({ full_name: '', email: '', phone: '', role: 'staff' });
+  const [savingTeam, setSavingTeam] = useState(false);
 
   // Firm form state
   const [firmForm, setFirmForm] = useState({
@@ -71,6 +83,81 @@ export default function Settings() {
   const handleRoleChange = async (userId: string, newRole: AppRole) => {
     await updateRole(userId, newRole);
     setEditingUser(null);
+  };
+
+  const handleSaveTeamMember = async () => {
+    if (!teamForm.full_name.trim() || !teamForm.email.trim()) {
+      toast.error('Name and email are required');
+      return;
+    }
+
+    setSavingTeam(true);
+    try {
+      // Check if email already exists
+      const { data: existingUser } = await db
+        .from('profiles')
+        .select('email')
+        .eq('email', teamForm.email.toLowerCase().trim())
+        .execute();
+
+      if (existingUser && existingUser.length > 0) {
+        toast.error('A user with this email already exists');
+        return;
+      }
+
+      // Create user with default password
+      const defaultPassword = 'Welcome@123';
+      
+      const { data: authData, error: authError } = await sqliteAuth.signUp({
+        email: teamForm.email.toLowerCase().trim(),
+        password: defaultPassword,
+        options: {
+          data: {
+            full_name: teamForm.full_name.trim()
+          }
+        }
+      });
+
+      if (authError) throw authError;
+
+      // Add phone if provided
+      if (teamForm.phone && authData?.user) {
+        await db
+          .from('profiles')
+          .update({ phone: teamForm.phone.trim() })
+          .eq('user_id', authData.user.user_id)
+          .execute();
+      }
+
+      // Create user role
+      if (authData?.user) {
+        const { error: roleError } = await db
+          .from('user_roles')
+          .insert({
+            user_id: authData.user.user_id,
+            role: teamForm.role
+          })
+          .execute();
+
+        if (roleError) {
+          console.error('Role creation error:', roleError);
+        }
+      }
+
+      toast.success(
+        `Team member added successfully!\nEmail: ${teamForm.email}\nPassword: ${defaultPassword}\n\nShare these credentials with the new member.`,
+        { duration: 10000 }
+      );
+      
+      setTeamDialogOpen(false);
+      setTeamForm({ full_name: '', email: '', phone: '', role: 'staff' });
+      refetchMembers();
+    } catch (error: any) {
+      console.error('Error adding team member:', error);
+      toast.error(error.message || 'Failed to add team member');
+    } finally {
+      setSavingTeam(false);
+    }
   };
 
   const handleAdminPasswordReset = async (e: React.FormEvent) => {
@@ -224,9 +311,82 @@ export default function Settings() {
                   </span>
                 )}
               </div>
-              <span className="text-sm text-muted-foreground">
-                {members.length} member{members.length !== 1 ? 's' : ''}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">
+                  {members.length} member{members.length !== 1 ? 's' : ''}
+                </span>
+                {canManageRoles && (
+                  <Dialog open={teamDialogOpen} onOpenChange={setTeamDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button size="sm" onClick={() => setTeamForm({ full_name: '', email: '', phone: '', role: 'staff' })}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Member
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Add Team Member</DialogTitle>
+                        <DialogDescription>Create a new team member account with temporary password</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label>Full Name *</Label>
+                          <Input
+                            value={teamForm.full_name}
+                            onChange={(e) => setTeamForm(f => ({ ...f, full_name: e.target.value }))}
+                            placeholder="John Doe"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Email *</Label>
+                          <Input
+                            type="email"
+                            value={teamForm.email}
+                            onChange={(e) => setTeamForm(f => ({ ...f, email: e.target.value }))}
+                            placeholder="john@example.com"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Phone</Label>
+                          <Input
+                            type="tel"
+                            value={teamForm.phone}
+                            onChange={(e) => setTeamForm(f => ({ ...f, phone: e.target.value }))}
+                            placeholder="+91 98765 43210"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Role *</Label>
+                          <Select value={teamForm.role} onValueChange={(value) => setTeamForm(f => ({ ...f, role: value }))}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(Object.keys(roleLabels) as AppRole[]).map((role) => (
+                                <SelectItem key={role} value={role}>
+                                  {roleLabels[role]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
+                          <p className="text-xs text-amber-800 dark:text-amber-200">
+                            Default password "Welcome@123" will be assigned. Share credentials securely with the new member.
+                          </p>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setTeamDialogOpen(false)}>Cancel</Button>
+                        <Button onClick={handleSaveTeamMember} disabled={savingTeam}>
+                          {savingTeam && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                          Create Account
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                )}
+              </div>
             </div>
 
             {loading ? (
