@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { getSQLiteClient, auth as sqliteAuth } from '@/integrations/sqlite/client';
 
+const db = getSQLiteClient();
+
 interface Profile {
   id: string;
   user_id: string;
@@ -33,31 +35,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUserData = async (userId: string) => {
     try {
-      const db = getSQLiteClient();
-      
+      console.log('📊 Fetching user data for:', userId);
+
       // Fetch profile
-      const { data: profileData } = await db
+      const { data: profileData, error: profileError } = await db
         .from('profiles')
         .select('*')
         .eq('user_id', userId)
-        .single();
-      
-      if (profileData) {
+        .single()
+        .execute();
+
+      if (profileError) {
+        console.error('❌ Error fetching profile:', profileError);
+      } else if (profileData) {
+        console.log('✅ Profile loaded:', profileData.full_name);
         setProfile(profileData);
       }
 
       // Fetch role
-      const { data: roleData } = await db
+      const { data: roleData, error: roleError } = await db
         .from('user_roles')
         .select('role')
         .eq('user_id', userId)
-        .single();
-      
-      if (roleData) {
+        .single()
+        .execute();
+
+      if (roleError) {
+        console.error('❌ Error fetching role:', roleError);
+      } else if (roleData) {
+        console.log('✅ Role loaded:', roleData.role);
         setRole(roleData.role);
       }
     } catch (error) {
-      console.error('Error fetching user data:', error);
+      console.error('❌ Error fetching user data:', error);
     }
   };
 
@@ -72,14 +82,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('🔓 Clearing any existing session on startup...');
         await sqliteAuth.signOut();
         console.log('✅ Session cleared');
-        
+
         // Set up auth state listener AFTER signOut completes
         const { data: { subscription: sub } } = sqliteAuth.onAuthStateChange(
           (event, session) => {
             console.log('🔐 Auth state changed:', event, !!session);
-            setSession(session);
+            setSession(session as any);
             setUser(session?.user ?? null);
-            
+
             // Defer data fetching to avoid deadlock
             if (session?.user) {
               setTimeout(() => {
@@ -89,23 +99,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setProfile(null);
               setRole(null);
             }
-            
+
             setLoading(false);
           }
         );
-        
+
         subscription = sub;
 
         // Check for existing session (should be null after signOut)
         const { data: { session }, error } = await sqliteAuth.getSession();
         console.log('📦 Initial session check:', !!session, error);
-        setSession(session);
+        setSession(session as any);
         setUser(session?.user ?? null);
-        
+
         if (session?.user) {
           fetchUserData(session.user.id);
         }
-        
+
         setLoading(false);
       } catch (error) {
         console.error('❌ Failed to initialize auth:', error);
@@ -123,25 +133,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       password,
     });
-    
+
     // Update state immediately on successful login
     if (!error && data.user && data.session) {
       console.log('✅ Login successful, updating auth state...');
       setUser(data.user);
       setSession(data.session);
-      
+
       // Fetch user data
       await fetchUserData(data.user.id);
-      
+
       // Log successful login
-      const db = getSQLiteClient();
       setTimeout(async () => {
         const { data: profileData } = await db
           .from('profiles')
           .select('full_name')
           .eq('user_id', data.user.id)
-          .single();
-        
+          .single()
+          .execute();
+
         if (profileData) {
           await db.from('activity_logs').insert({
             user_id: data.user.id,
@@ -154,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }, 0);
     }
-    
+
     return { error };
   };
 
@@ -168,17 +178,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       },
     });
-    
+
     // Update state immediately on successful signup and auto-login
     if (!error && data.user && data.session) {
       console.log('✅ Signup successful, updating auth state...');
       setUser(data.user);
       setSession(data.session);
-      
+
       // Fetch user data
       await fetchUserData(data.user.id);
     }
-    
+
     return { error };
   };
 

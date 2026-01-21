@@ -874,24 +874,27 @@ export function LettersPage({ engagementId }: LettersPageProps) {
 
                 <div className="space-y-2">
                   <Label>Partner / Proprietor Name *</Label>
-                  <Select value={partnerName} onValueChange={setPartnerName}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select partner" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(partners || []).map(partner => (
-                        <SelectItem key={partner.id} value={partner.name}>
-                          {partner.name} {partner.membership_number && `(${partner.membership_number})`}
-                        </SelectItem>
-                      ))}
-                      {(!partners || partners.length === 0) && (
-                        <SelectItem value="" disabled>
-                          No partners found - Add in Admin Settings
-                        </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">From Admin Settings G�� Partners</p>
+                  {partners && partners.length > 0 ? (
+                    <Select value={partnerName || undefined} onValueChange={setPartnerName}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select partner" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {partners.map(partner => (
+                          <SelectItem key={partner.id} value={partner.name || ''}>
+                            {partner.name} {partner.membership_number && `(${partner.membership_number})`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="p-3 border border-dashed rounded-md bg-muted/50">
+                      <p className="text-sm text-muted-foreground text-center">
+                        No partners found - Add partners in Admin Settings
+                      </p>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">From Admin Settings → Partners</p>
                 </div>
 
                 <div className="space-y-2">

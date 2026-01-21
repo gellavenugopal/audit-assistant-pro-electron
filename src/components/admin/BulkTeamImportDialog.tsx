@@ -61,7 +61,8 @@ export function BulkTeamImportDialog({ onSuccess }: BulkTeamImportDialogProps) {
         .from('profiles')
         .select('full_name')
         .eq('user_id', user?.id)
-        .single();
+        .single()
+        .execute();
       if (profile?.full_name) {
         inviterName = profile.full_name;
       }
@@ -98,7 +99,7 @@ export function BulkTeamImportDialog({ onSuccess }: BulkTeamImportDialogProps) {
     }
 
     setImporting(false);
-    
+
     if (successCount > 0) {
       toast.success(`Successfully sent ${successCount} invitation(s)`);
       onSuccess();
@@ -157,7 +158,7 @@ export function BulkTeamImportDialog({ onSuccess }: BulkTeamImportDialogProps) {
           <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10">
             <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5" />
             <p className="text-xs text-muted-foreground">
-              Valid roles: <span className="font-medium">partner, manager, senior, staff, viewer</span>. 
+              Valid roles: <span className="font-medium">partner, manager, senior, staff, viewer</span>.
               Invalid roles will default to "staff".
             </p>
           </div>

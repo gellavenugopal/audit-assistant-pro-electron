@@ -23,8 +23,8 @@
     "test:bulk-update": "ts-node tests/bulkUpdateHelper.test.ts && ts-node tests/bulkUpdateDialog.integration.test.ts"
   },
   "build": {
-    "appId": "com.audit-assistant-pro.app",
-    "productName": "Audit Assistant Pro",
+    "appId": "com.icai-vera.app",
+    "productName": "ICAI VERA",
     "directories": {
       "output": "electron-dist"
     },
@@ -64,7 +64,7 @@
       "allowElevation": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "Audit Assistant Pro",
+      "shortcutName": "ICAI VERA",
       "license": "LICENSE.txt",
       "installerIcon": "public/favicon.ico",
       "uninstallerIcon": "public/favicon.ico",

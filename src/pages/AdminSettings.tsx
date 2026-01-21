@@ -165,7 +165,8 @@ export default function AdminSettings() {
       const { data, error } = await db
         .from('financial_years')
         .select('*')
-        .order('year_code', { ascending: false });
+        .order('year_code', { ascending: false })
+        .execute();
 
       if (error) throw error;
       setFinancialYears(data || []);
@@ -190,7 +191,8 @@ export default function AdminSettings() {
           year_code: fyForm.year_code,
           display_name: fyForm.display_name,
           created_by: user?.id,
-        });
+        })
+        .execute();
 
       if (error) throw error;
       toast.success('Financial year added');
@@ -209,7 +211,8 @@ export default function AdminSettings() {
       const { error } = await db
         .from('financial_years')
         .update({ is_active: !isActive })
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       toast.success(`Financial year ${isActive ? 'disabled' : 'enabled'}`);
@@ -240,7 +243,8 @@ export default function AdminSettings() {
         .from('firm_settings')
         .select('*')
         .limit(1)
-        .single();
+        .single()
+        .execute();
 
       if (error && error.code !== 'PGRST116') throw error;
       if (data) {
@@ -280,7 +284,8 @@ export default function AdminSettings() {
             firm_registration_no: firmSettings.firm_registration_no || null,
             address: firmSettings.address || null,
           })
-          .eq('id', firmSettings.id);
+          .eq('id', firmSettings.id)
+          .execute();
         if (error) throw error;
       } else {
         const { data, error } = await db
@@ -292,14 +297,16 @@ export default function AdminSettings() {
             no_of_partners: firmSettings.no_of_partners,
             firm_registration_no: firmSettings.firm_registration_no || null,
             address: firmSettings.address || null,
-            created_by: user?.id,
+            created_by: user?.id || 'system',
           })
           .select()
-          .single();
+          .single()
+          .execute();
         if (error) throw error;
         if (data) setFirmSettings(prev => ({ ...prev, id: data.id }));
       }
       toast.success('Firm settings saved');
+      await fetchFirmSettings(); // Refresh to get updated data
     } catch (error: any) {
       toast.error(error.message || 'Failed to save firm settings');
     } finally {
@@ -314,7 +321,8 @@ export default function AdminSettings() {
       const { data, error } = await db
         .from('clients')
         .select('*')
-        .order('name');
+        .order('name')
+        .execute();
 
       if (error) throw error;
       setClients(data || []);
@@ -328,17 +336,19 @@ export default function AdminSettings() {
 
   const handleDeleteClient = async (id: string, clientName: string) => {
     // Check if client has engagements
-    const { count, error: countError } = await db
+    const { data: engagements, error: countError } = await db
       .from('engagements')
-      .select('*', { count: 'exact', head: true })
-      .eq('client_id', id);
+      .select('*')
+      .eq('client_id', id)
+      .execute();
 
     if (countError) {
       toast.error('Failed to check engagements');
       return;
     }
 
-    if (count && count > 0) {
+    const count = engagements?.length || 0;
+    if (count > 0) {
       toast.error(`Cannot delete "${clientName}". This client has ${count} engagement(s). Consider deactivating instead.`);
       return;
     }
@@ -371,7 +381,8 @@ export default function AdminSettings() {
       const { error } = await db
         .from('clients')
         .update({ status: newStatus })
-        .eq('id', client.id);
+        .eq('id', client.id)
+        .execute();
 
       if (error) throw error;
       toast.success(`Client ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
@@ -501,7 +512,8 @@ export default function AdminSettings() {
       const { error } = await db
         .from('user_roles')
         .update({ role: newRole as typeof ROLES[number] })
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .execute();
 
       if (error) throw error;
       toast.success('Role updated');

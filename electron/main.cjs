@@ -409,7 +409,7 @@ function registerIpcHandlers() {
     }
 
     // Extract table name outside try-catch so it's available in error handler
-    const { table, action, columns, filters, data, orderBy } = payload || {};
+    const { table, action, columns, filters, data, orderBy, limit } = payload || {};
 
     try {
       if (!table || !action) {
@@ -438,8 +438,14 @@ function registerIpcHandlers() {
         orderSql = ` ORDER BY ${orderBy.column} ${direction}`;
       }
 
+      // Build LIMIT clause
+      let limitSql = '';
+      if (limit && typeof limit === 'number' && limit > 0) {
+        limitSql = ` LIMIT ${limit}`;
+      }
+
       if (action === 'select') {
-        const sql = `SELECT ${colList} FROM ${table}${whereSql}${orderSql}`;
+        const sql = `SELECT ${colList} FROM ${table}${whereSql}${orderSql}${limitSql}`;
         const stmt = db.prepare(sql);
         const rows = stmt.all(...params);
         return { data: rows, error: null };
@@ -1424,7 +1430,7 @@ function createWindow() {
       webSecurity: true,
     },
     icon: path.join(__dirname, '../public/favicon.ico'),
-    title: 'Audit Assistant Pro',
+    title: 'ICAI VERA',
     show: false,
   });
 

@@ -45,45 +45,90 @@ function createIPCClient(electronAPI: any): DatabaseManager {
   return {
     from: (table: string) => {
       // Helper to build query chain
-      const buildSelectChain = (columns?: string, filters: any[] = [], orderBy?: { column: string; ascending: boolean }) => ({
-        eq: (column: string, value: any) => buildSelectChain(columns, [...filters, { column, value }], orderBy),
+      const buildSelectChain = (columns?: string, filters: any[] = [], orderBy?: { column: string; ascending: boolean }, limit?: number) => ({
+        eq: (column: string, value: any) => buildSelectChain(columns, [...filters, { column, value }], orderBy, limit),
         order: (column: string, options?: { ascending?: boolean }) => 
-          buildSelectChain(columns, filters, { column, ascending: options?.ascending ?? true }),
+          buildSelectChain(columns, filters, { column, ascending: options?.ascending ?? true }, limit),
+        limit: (count: number) => buildSelectChain(columns, filters, orderBy, count),
         execute: async () => {
           const result = await electronAPI.sqliteQuery?.({
             table,
             action: 'select',
             columns,
             filters,
-            orderBy
+            orderBy,
+            limit
           });
           return { data: result?.data || [], error: result?.error || null };
         },
-        single: async () => {
-          const result = await electronAPI.sqliteQuery?.({
-            table,
-            action: 'select',
-            columns,
-            filters,
-            orderBy
-          });
-          const data = result?.data?.[0] || null;
-          return { data, error: result?.error || null };
-        }
+        single: () => ({
+          execute: async () => {
+            const result = await electronAPI.sqliteQuery?.({
+              table,
+              action: 'select',
+              columns,
+              filters,
+              orderBy,
+              limit
+            });
+            const data = result?.data?.[0] || null;
+            return { data, error: result?.error || null };
+          }
+        })
       });
 
       return {
         select: (columns?: string) => buildSelectChain(columns),
-        insert: (data: any) => ({
-          execute: async () => {
-            const result = await electronAPI.sqliteQuery?.({
-              table,
-              action: 'insert',
-              data
-            });
-            return { data: result?.data || null, error: result?.error || null };
-          }
-        }),
+        insert: (data: any) => {
+          const insertChain = {
+            select: (columns?: string) => ({
+              single: () => ({
+                execute: async () => {
+                  const result = await electronAPI.sqliteQuery?.({
+                    table,
+                    action: 'insert',
+                    data,
+                    returnData: true
+                  });
+                  // If result.data is an array, return first item, otherwise return the data
+                  const insertedData = Array.isArray(result?.data) ? result?.data[0] : result?.data;
+                  return { data: insertedData || null, error: result?.error || null };
+                }
+              }),
+              execute: async () => {
+                const result = await electronAPI.sqliteQuery?.({
+                  table,
+                  action: 'insert',
+                  data,
+                  returnData: true
+                });
+                return { data: result?.data || null, error: result?.error || null };
+              }
+            }),
+            single: () => ({
+              execute: async () => {
+                const result = await electronAPI.sqliteQuery?.({
+                  table,
+                  action: 'insert',
+                  data,
+                  returnData: true
+                });
+                const insertedData = Array.isArray(result?.data) ? result?.data[0] : result?.data;
+                return { data: insertedData || null, error: result?.error || null };
+              }
+            }),
+            execute: async () => {
+              const result = await electronAPI.sqliteQuery?.({
+                table,
+                action: 'insert',
+                data,
+                returnData: true
+              });
+              return { data: result?.data || null, error: result?.error || null };
+            }
+          };
+          return insertChain;
+        },
         update: (data: any) => ({
           eq: (column: string, value: any) => ({
             execute: async () => {

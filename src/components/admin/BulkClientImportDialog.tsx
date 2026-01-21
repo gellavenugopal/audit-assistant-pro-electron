@@ -67,7 +67,7 @@ export function BulkClientImportDialog({ onSuccess }: BulkClientImportDialogProp
           state: client.state,
           pin: client.pin,
           created_by: user?.id,
-        });
+        }).execute();
 
         if (error) {
           errorCount++;
@@ -80,7 +80,7 @@ export function BulkClientImportDialog({ onSuccess }: BulkClientImportDialogProp
     }
 
     setImporting(false);
-    
+
     if (successCount > 0) {
       toast.success(`Successfully imported ${successCount} client(s)`);
       onSuccess();

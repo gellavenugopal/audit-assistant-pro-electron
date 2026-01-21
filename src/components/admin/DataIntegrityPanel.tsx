@@ -243,11 +243,12 @@ export function DataIntegrityPanel() {
       const selectedClient = activeClients.find(c => c.id === selectedClientId);
       const { error } = await db
         .from('engagements')
-        .eq('id', reassignTarget.id)
         .update({ 
           client_id: selectedClientId,
           client_name: selectedClient?.name || reassignTarget.client_name
-        });
+        })
+        .eq('id', reassignTarget.id)
+        .execute();
 
       if (error) throw error;
       toast.success('Engagement reassigned successfully');
@@ -284,20 +285,22 @@ export function DataIntegrityPanel() {
         .insert({
           name: newClientName.trim(),
           industry: newClientIndustry.trim() || 'General',
-          created_by: user?.id,
+          created_by: user?.id || 'system',
           status: 'active'
-        });
+        })
+        .execute();
 
       if (createError) throw createError;
 
       // Link engagement to new client
       const { error: updateError } = await db
         .from('engagements')
-        .eq('id', createClientTarget.id)
         .update({ 
           client_id: newClient.id,
           client_name: newClient.name
-        });
+        })
+        .eq('id', createClientTarget.id)
+        .execute();
 
       if (updateError) throw updateError;
 
@@ -322,8 +325,9 @@ export function DataIntegrityPanel() {
     try {
       const { error } = await db
         .from('engagements')
+        .update({ status: 'archived' })
         .eq('id', archiveTarget.id)
-        .update({ status: 'archived' });
+        .execute();
 
       if (error) throw error;
       toast.success('Engagement archived successfully');
@@ -358,8 +362,9 @@ export function DataIntegrityPanel() {
     try {
       const { error } = await db
         .from('engagements')
+        .delete()
         .eq('id', deleteTarget.id)
-        .delete();
+        .execute();
 
       if (error) throw error;
       toast.success('Engagement deleted permanently');
@@ -382,12 +387,20 @@ export function DataIntegrityPanel() {
     
     setBulkArchiving(true);
     try {
-      const { error } = await db
-        .from('engagements')
-        .in('id', Array.from(selectedIds))
-        .update({ status: 'archived' });
-
-      if (error) throw error;
+      // Update each engagement individually (SQLite client doesn't support .in())
+      const updates = Array.from(selectedIds).map(id =>
+        db
+          .from('engagements')
+          .update({ status: 'archived' })
+          .eq('id', id)
+          .execute()
+      );
+      
+      const results = await Promise.all(updates);
+      const errors = results.filter(r => r.error);
+      
+      if (errors.length > 0) throw new Error(`Failed to archive ${errors.length} engagement(s)`);
+      
       toast.success(`${selectedIds.size} engagement(s) archived`);
       handleScan();
     } catch (error: any) {
@@ -404,15 +417,23 @@ export function DataIntegrityPanel() {
     setReassigning(true);
     try {
       const selectedClient = activeClients.find(c => c.id === selectedClientId);
-      const { error } = await db
-        .from('engagements')
-        .in('id', Array.from(selectedIds))
-        .update({ 
-          client_id: selectedClientId,
-          client_name: selectedClient?.name || ''
-        });
-
-      if (error) throw error;
+      
+      // Update each engagement individually (SQLite client doesn't support .in())
+      const updates = Array.from(selectedIds).map(id =>
+        db
+          .from('engagements')
+          .update({ 
+            client_id: selectedClientId,
+            client_name: selectedClient?.name || ''
+          })
+          .eq('id', id)
+          .execute()
+      );
+      
+      const results = await Promise.all(updates);
+      const errors = results.filter(r => r.error);
+      
+      if (errors.length > 0) throw new Error(`Failed to reassign ${errors.length} engagement(s)`);
       toast.success(`${selectedIds.size} engagement(s) reassigned`);
       setBulkReassignOpen(false);
       setSelectedClientId('');

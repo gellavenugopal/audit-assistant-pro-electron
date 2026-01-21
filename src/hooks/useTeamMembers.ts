@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 const db = getSQLiteClient();
 
-type AppRole = 'partner' | 'manager' | 'senior' | 'staff' | 'admin' | 'user';
+type AppRole = 'partner' | 'manager' | 'senior' | 'staff' | 'viewer' | 'admin' | 'user';
 
 interface TeamMember {
   user_id: string;
@@ -78,7 +78,8 @@ export function useTeamMembers(engagementId?: string) {
         manager: 3,
         senior: 4,
         staff: 5,
-        user: 6,
+        viewer: 6,
+        user: 7,
       };
 
       membersData.sort((a, b) => roleOrder[a.role] - roleOrder[b.role]);

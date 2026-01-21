@@ -48,7 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
 CREATE TABLE IF NOT EXISTS user_roles (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     user_id TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'partner', 'manager', 'senior', 'staff', 'user')),
+    role TEXT NOT NULL CHECK (role IN ('admin', 'partner', 'manager', 'senior', 'staff', 'viewer', 'user')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES profiles(user_id) ON DELETE CASCADE,

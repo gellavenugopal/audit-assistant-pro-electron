@@ -43,12 +43,12 @@ const roleColors: Record<AppRole, string> = {
 export default function Settings() {
   const { user, role } = useAuth();
   const { members, loading, canManageRoles, updateRole, refetch: refetchMembers } = useTeamMembers();
-  const { firmSettings, loading: firmLoading, saveFirmSettings } = useFirmSettings();
+  const { firmSettings, loading: firmLoading, saveFirmSettings, refetch: refetchFirmSettings } = useFirmSettings();
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [resetEmail, setResetEmail] = useState('');
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [savingFirm, setSavingFirm] = useState(false);
-  
+
   // Team member dialog state
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [teamForm, setTeamForm] = useState({ full_name: '', email: '', phone: '', role: 'staff' });
@@ -60,6 +60,8 @@ export default function Settings() {
     firm_registration_no: '',
     constitution: '',
     no_of_partners: 0,
+    icai_unique_sl_no: '',
+    address: '',
   });
 
   // Load firm settings into form
@@ -70,14 +72,33 @@ export default function Settings() {
         firm_registration_no: firmSettings.firm_registration_no || '',
         constitution: firmSettings.constitution || '',
         no_of_partners: firmSettings.no_of_partners || 0,
+        icai_unique_sl_no: firmSettings.icai_unique_sl_no || '',
+        address: firmSettings.address || '',
+      });
+    } else if (!firmLoading) {
+      // Reset form if no settings exist and loading is complete
+      setFirmForm({
+        firm_name: '',
+        firm_registration_no: '',
+        constitution: '',
+        no_of_partners: 0,
+        icai_unique_sl_no: '',
+        address: '',
       });
     }
-  }, [firmSettings]);
+  }, [firmSettings, firmLoading]);
 
   const handleSaveFirmSettings = async () => {
     setSavingFirm(true);
-    await saveFirmSettings(firmForm);
-    setSavingFirm(false);
+    try {
+      await saveFirmSettings(firmForm);
+      // Refetch to ensure we have the latest data
+      await refetchFirmSettings();
+    } catch (error) {
+      console.error('Error saving firm settings:', error);
+    } finally {
+      setSavingFirm(false);
+    }
   };
 
   const handleRoleChange = async (userId: string, newRole: AppRole) => {
@@ -107,7 +128,7 @@ export default function Settings() {
 
       // Create user with default password
       const defaultPassword = 'Welcome@123';
-      
+
       const { data: authData, error: authError } = await sqliteAuth.signUp({
         email: teamForm.email.toLowerCase().trim(),
         password: defaultPassword,
@@ -148,7 +169,7 @@ export default function Settings() {
         `Team member added successfully!\nEmail: ${teamForm.email}\nPassword: ${defaultPassword}\n\nShare these credentials with the new member.`,
         { duration: 10000 }
       );
-      
+
       setTeamDialogOpen(false);
       setTeamForm({ full_name: '', email: '', phone: '', role: 'staff' });
       refetchMembers();
@@ -184,7 +205,7 @@ export default function Settings() {
     }
   };
 
-  const isAdmin = role === 'partner' || role === 'manager';
+  const isAdmin = role === 'partner' || role === 'manager' || role === 'admin';
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -227,7 +248,7 @@ export default function Settings() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <Label>Firm Name *</Label>
-                    <Input 
+                    <Input
                       value={firmForm.firm_name}
                       onChange={(e) => setFirmForm(prev => ({ ...prev, firm_name: e.target.value }))}
                       placeholder="Enter firm name"
@@ -235,7 +256,7 @@ export default function Settings() {
                   </div>
                   <div className="space-y-2">
                     <Label>Firm Registration Number (FRN)</Label>
-                    <Input 
+                    <Input
                       value={firmForm.firm_registration_no}
                       onChange={(e) => setFirmForm(prev => ({ ...prev, firm_registration_no: e.target.value }))}
                       placeholder="E.g., 123456N"
@@ -243,8 +264,8 @@ export default function Settings() {
                   </div>
                   <div className="space-y-2">
                     <Label>Constitution</Label>
-                    <Select 
-                      value={firmForm.constitution} 
+                    <Select
+                      value={firmForm.constitution}
                       onValueChange={(v) => setFirmForm(prev => ({ ...prev, constitution: v }))}
                     >
                       <SelectTrigger>
@@ -259,7 +280,7 @@ export default function Settings() {
                   </div>
                   <div className="space-y-2">
                     <Label>Number of Partners</Label>
-                    <Input 
+                    <Input
                       type="number"
                       value={firmForm.no_of_partners}
                       onChange={(e) => setFirmForm(prev => ({ ...prev, no_of_partners: parseInt(e.target.value) || 0 }))}

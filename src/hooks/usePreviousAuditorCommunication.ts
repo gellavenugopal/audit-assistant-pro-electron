@@ -27,7 +27,8 @@ export function usePreviousAuditorCommunication(engagementId?: string | null) {
         .select('*')
         .eq('engagement_id', engagementId)
         .eq('section_name', SECTION_NAME)
-        .single();
+        .single()
+        .execute();
 
       if (error) throw error;
       setDocument(data || null);
@@ -63,7 +64,8 @@ export function usePreviousAuditorCommunication(engagementId?: string | null) {
           .select('*')
           .eq('engagement_id', engagementId)
           .eq('section_name', SECTION_NAME)
-          .single();
+          .single()
+          .execute();
 
         let data, error;
         if (existing.data) {
