@@ -80,12 +80,15 @@ interface RiskItem {
   score: number;
 }
 
-const sanitizeNumericInput = (value: string) => {
+const sanitizeNumericInput = (value: string, options?: { allowTrailingDot?: boolean }) => {
   const cleaned = value.replace(/,/g, '');
+  const hasTrailingDot = options?.allowTrailingDot && cleaned.endsWith('.');
   const parts = cleaned.split('.');
   const intPart = parts[0].replace(/\D/g, '');
   const fracPart = parts.length > 1 ? parts.slice(1).join('').replace(/\D/g, '') : '';
-  return fracPart ? `${intPart}.${fracPart}` : intPart;
+  if (fracPart) return `${intPart}.${fracPart}`;
+  if (hasTrailingDot) return `${intPart}.`;
+  return intPart;
 };
 
 const formatIndianNumber = (value: string) => {
@@ -101,8 +104,12 @@ const formatIndianNumber = (value: string) => {
 
 const parseNumber = (value: string) => {
   const cleaned = sanitizeNumericInput(value);
-  return Number(cleaned || 0);
+  const parsed = Number(cleaned || 0);
+  return Number.isNaN(parsed) ? 0 : parsed;
 };
+
+const sanitizeNumericLoose = (value: string) => sanitizeNumericInput(value, { allowTrailingDot: true });
+const sanitizeNumericStrict = (value: string) => sanitizeNumericInput(value);
 
 export default function Materiality() {
   // Engagement Context
@@ -908,7 +915,8 @@ export default function Materiality() {
                   <Input
                     inputMode="decimal"
                     value={profitBeforeTax}
-                    onChange={(e) => setProfitBeforeTax(formatIndianNumber(e.target.value))}
+                    onChange={(e) => setProfitBeforeTax(sanitizeNumericLoose(e.target.value))}
+                    onBlur={(e) => setProfitBeforeTax(formatIndianNumber(e.target.value))}
                   />
                   <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(profitBeforeTax))}</p>
                 </div>
@@ -917,7 +925,8 @@ export default function Materiality() {
                   <Input
                     value={revenue}
                     inputMode="decimal"
-                    onChange={(e) => setRevenue(formatIndianNumber(e.target.value))}
+                    onChange={(e) => setRevenue(sanitizeNumericLoose(e.target.value))}
+                    onBlur={(e) => setRevenue(formatIndianNumber(e.target.value))}
                   />
                   <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(revenue))}</p>
                 </div>
@@ -926,7 +935,8 @@ export default function Materiality() {
                   <Input
                     value={totalAssets}
                     inputMode="decimal"
-                    onChange={(e) => setTotalAssets(formatIndianNumber(e.target.value))}
+                    onChange={(e) => setTotalAssets(sanitizeNumericLoose(e.target.value))}
+                    onBlur={(e) => setTotalAssets(formatIndianNumber(e.target.value))}
                   />
                   <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(totalAssets))}</p>
                 </div>
@@ -935,7 +945,8 @@ export default function Materiality() {
                   <Input
                     value={netWorth}
                     inputMode="decimal"
-                    onChange={(e) => setNetWorth(formatIndianNumber(e.target.value))}
+                    onChange={(e) => setNetWorth(sanitizeNumericLoose(e.target.value))}
+                    onBlur={(e) => setNetWorth(formatIndianNumber(e.target.value))}
                   />
                   <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(netWorth))}</p>
                 </div>
@@ -952,7 +963,8 @@ export default function Materiality() {
                   <Input
                     value={othersAmount}
                     inputMode="decimal"
-                    onChange={(e) => setOthersAmount(formatIndianNumber(e.target.value))}
+                    onChange={(e) => setOthersAmount(sanitizeNumericLoose(e.target.value))}
+                    onBlur={(e) => setOthersAmount(formatIndianNumber(e.target.value))}
                   />
                   <p className="text-xs text-muted-foreground">{formatCurrency(parseNumber(othersAmount))}</p>
                 </div>
@@ -1025,7 +1037,8 @@ export default function Materiality() {
                   <Input
                     value={percentage}
                     inputMode="decimal"
-                    onChange={(e) => setPercentage(formatIndianNumber(e.target.value))}
+                    onChange={(e) => setPercentage(sanitizeNumericLoose(e.target.value))}
+                    onBlur={(e) => setPercentage(sanitizeNumericStrict(e.target.value))}
                   />
                 </div>
                 <Button className="w-full" onClick={calculateOM}>
@@ -1048,7 +1061,9 @@ export default function Materiality() {
                   <Input
                     value={pmPercentage}
                     inputMode="decimal"
-                    onChange={(e) => setPmPercentage(formatIndianNumber(e.target.value))}
+                    placeholder="e.g., 75"
+                    onChange={(e) => setPmPercentage(sanitizeNumericLoose(e.target.value))}
+                    onBlur={(e) => setPmPercentage(sanitizeNumericStrict(e.target.value))}
                   />
                 </div>
                 <Button className="w-full" onClick={calculatePM}>
@@ -1071,7 +1086,9 @@ export default function Materiality() {
                   <Input
                     value={ctPercentage}
                     inputMode="decimal"
-                    onChange={(e) => setCtPercentage(formatIndianNumber(e.target.value))}
+                    placeholder="e.g., 5"
+                    onChange={(e) => setCtPercentage(sanitizeNumericLoose(e.target.value))}
+                    onBlur={(e) => setCtPercentage(sanitizeNumericStrict(e.target.value))}
                   />
                 </div>
                 <Button className="w-full" onClick={calculateCT}>
