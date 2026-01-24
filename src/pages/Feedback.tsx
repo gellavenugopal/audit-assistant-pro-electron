@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import posthog from 'posthog-js';
 
 const FEEDBACK_TYPES = [
   'Bug / Defect',
@@ -53,6 +54,31 @@ type FeedbackDraft = {
 
 export default function Feedback() {
   const { profile } = useAuth();
+
+  /* -------------------- PostHog init -------------------- */
+  useEffect(() => {
+    if ((posthog as any).__loaded) return;
+
+    posthog.init('phc_XmITZs1Kmi1WDfoqOoECoWXeCOISBpSogfNwYZY2ZMZ', {
+      api_host: 'https://app.posthog.com',
+      autocapture: false,
+      capture_pageview: false,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!profile?.email) return;
+
+    posthog.identify(profile.email, {
+      name: profile.full_name,
+      firm_id: (profile as any)?.firm_id,
+      firm_name: (profile as any)?.firm_name,
+    });
+
+    posthog.capture('feedback_form_opened');
+  }, [profile]);
+
+
   const [feedbackType, setFeedbackType] = useState('');
   const [moduleSearch, setModuleSearch] = useState('');
   const [moduleArea, setModuleArea] = useState('');
@@ -177,6 +203,19 @@ export default function Feedback() {
       justification,
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+
+    posthog.capture('feedback_draft_saved', {
+      feedbackType,
+      moduleArea,
+      title,
+      description,
+      impact,
+      severity: isBug ? severity : null,
+      reproducibility: isBug ? reproducibility : null,
+      suggestion: (isImprovement || isNewFeature) ? suggestion : null,
+      justification,
+    });
+
     toast.success('Draft saved locally.');
   };
 
@@ -232,6 +271,28 @@ export default function Feedback() {
     };
 
     console.log('Feedback payload:', payload);
+
+    posthog.capture('feedback_submitted', {
+      feedbackType,
+      moduleArea,
+      title,
+      description,
+      impact,
+      severity: isBug ? severity : null,
+      reproducibility: isBug ? reproducibility : null,
+      steps: isBug ? steps : null,
+      expected: isBug ? expected : null,
+      actual: isBug ? actual : null,
+      suggestion: (isImprovement || isNewFeature) ? suggestion : null,
+      justification,
+      attachmentCount: files.length,
+      attachments: files.map((file) => ({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      })),
+    });
+
     toast.success('Feedback submitted (pending backend).');
   };
 
