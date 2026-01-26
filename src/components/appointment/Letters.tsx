@@ -31,6 +31,8 @@ interface LettersPageProps {
   engagementId: string;
 }
 
+const SHOW_DUPLICATE_APPOINTMENT_FIELDS = false;
+
 export function LettersPage({ engagementId }: LettersPageProps) {
   const { currentEngagement } = useEngagement();
   const { client } = useClient(currentEngagement?.client_id || null);
@@ -766,26 +768,30 @@ export function LettersPage({ engagementId }: LettersPageProps) {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Appointment Letter Date</Label>
-                      <Input
-                        type="date"
-                        value={appointmentLetterDate}
-                        onChange={(e) => setAppointmentLetterDate(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Appointment / Reappointment</Label>
-                      <Select value={appointmentType} onValueChange={setAppointmentType}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="appointment">Appointment</SelectItem>
-                          <SelectItem value="reappointment">Reappointment</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {SHOW_DUPLICATE_APPOINTMENT_FIELDS && (
+                      <>
+                        <div className="space-y-2">
+                          <Label>Appointment Letter Date</Label>
+                          <Input
+                            type="date"
+                            value={appointmentLetterDate}
+                            onChange={(e) => setAppointmentLetterDate(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Appointment / Reappointment</Label>
+                          <Select value={appointmentType} onValueChange={setAppointmentType}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="appointment">Appointment</SelectItem>
+                              <SelectItem value="reappointment">Reappointment</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 

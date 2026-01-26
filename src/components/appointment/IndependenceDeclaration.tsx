@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { EvidenceFile, useEvidenceFiles } from '@/hooks/useEvidenceFiles';
+import { useFirmSettings } from '@/hooks/useFirmSettings';
 import { Eye, FileDown, ShieldCheck, UploadCloud } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -24,39 +25,38 @@ type IndependenceFormState = {
   clientName: string;
   financialYear: string;
   engagementPeriod: string;
-  engagementId: string;
   declarationDate: string;
   place: string;
 };
 
 const AUDIT_POINTS = [
-  'No securities or interest in the audit client or related entities.',
-  'No immediate family holding prohibited interests.',
-  'No relatives exceeding prescribed limits.',
-  'No prohibited loans or guarantees.',
-  'No excess guarantees or securities.',
-  'No relatives in significant influence positions.',
-  'No trustee/executor role in prohibited trusts.',
-  'No beneficiary interest in prohibited trusts.',
-  'No non-commercial banking or insurance relationships.',
-  'No close personal relationships impairing independence.',
-  'No non-token gifts or favours accepted.',
-  'No prohibited prior employment.',
-  'Undertake to report any independence issue immediately.',
+  'I do not hold any security or interest in the audit client, its holding, subsidiary or associate companies.',
+  'My immediate family members do not hold any security or interest in the audit client or its related entities.',
+  'My relatives (other than immediate family) do not hold any security or interest exceeding the prescribed limits.',
+  'Neither I nor my immediate family members have any prohibited loans or guarantees with the audit client or its related entities.',
+  'I or my relatives have not provided any guarantee or security in excess of prescribed limits.',
+  'None of my relatives are directors, key managerial personnel or employees of the audit client in a position of significant influence.',
+  'Neither I nor my immediate family members act as trustee or executor of any trust having prohibited financial interest in the audit client.',
+  'I or my immediate family members are not beneficiaries of any trust or estate having financial interest in the audit client.',
+  'I do not maintain any bank deposit, brokerage or insurance relationship with the audit client other than on normal commercial terms.',
+  'I do not have any close personal relationship with directors or senior management of the audit client.',
+  'I have not accepted and shall not accept any gifts or favours other than of a token nature.',
+  'I was not employed by the audit client or its related entities during the audit engagement period.',
+  'I undertake to immediately inform the firm if any independence issue arises during the engagement.',
 ];
 
 const ASSURANCE_POINTS = [
-  'No direct or material indirect financial interest in the client.',
-  'No trustee/executor role in prohibited trusts.',
-  'No beneficiary interest in prohibited trusts.',
-  'No prohibited loans with the client.',
-  'No prohibited banking or brokerage relationships.',
-  'No close personal relationships impairing independence.',
-  'No immediate family in significant influence positions.',
-  'No close family member in significant influence.',
-  'No prior employment during prohibited period.',
-  'No non-token gifts or favours accepted.',
-  'Undertake to report any independence issue immediately.',
+  'I or my immediate family members do not have any direct or material indirect financial interest in the assurance client.',
+  'I or my immediate family members have not acted as trustee or executor of any trust having prohibited financial interest.',
+  'I or my immediate family members are not beneficiaries of any trust or estate having financial interest in the client.',
+  'I or my immediate family members do not have any loans with the client other than those permitted under normal commercial terms.',
+  'I or my immediate family members do not maintain bank accounts, brokerage accounts or similar relationships except in the ordinary course of business.',
+  'I do not have any close personal relationship with directors or officers of the client that may impair independence.',
+  'None of my immediate family members are directors, officers or employees in positions of significant influence.',
+  'No close family member holds a position of significant influence in the client.',
+  'I was not employed by the client during the engagement period or one year prior thereto.',
+  'I have not accepted and shall not accept any gifts or favours other than of a token nature.',
+  'I undertake to immediately inform the firm if any independence issue arises during the engagement.',
 ];
 
 const buildEngagementPeriod = (financialYear?: string) => {
@@ -77,23 +77,23 @@ const buildEngagementPeriod = (financialYear?: string) => {
 
 export function IndependenceDeclaration() {
   const { currentEngagement } = useEngagement();
+  const { firmSettings } = useFirmSettings();
   const { files, uploadFile, downloadFile, getFileUrl } = useEvidenceFiles(currentEngagement?.id);
   const signedInputRef = useRef<HTMLInputElement>(null);
   const [showPreview, setShowPreview] = useState(false);
 
   const defaultState = useMemo<IndependenceFormState>(() => ({
     declarationType: 'audit',
-    firmName: '',
+    firmName: firmSettings?.firm_name || '',
     declarantName: '',
     membershipNo: '',
     designation: '',
     clientName: currentEngagement?.client_name || '',
     financialYear: currentEngagement?.financial_year || '',
     engagementPeriod: buildEngagementPeriod(currentEngagement?.financial_year),
-    engagementId: currentEngagement?.id || '',
     declarationDate: '',
     place: '',
-  }), [currentEngagement?.client_name, currentEngagement?.financial_year, currentEngagement?.id]);
+  }), [currentEngagement?.client_name, currentEngagement?.financial_year, currentEngagement?.id, firmSettings?.firm_name]);
 
   const [formState, setFormState] = useState<IndependenceFormState>(defaultState);
 
@@ -120,6 +120,14 @@ export function IndependenceDeclaration() {
     if (!storageKey) return;
     localStorage.setItem(storageKey, JSON.stringify(formState));
   }, [formState, storageKey]);
+
+  useEffect(() => {
+    if (!firmSettings?.firm_name) return;
+    setFormState((prev) => {
+      if (prev.firmName?.trim()) return prev;
+      return { ...prev, firmName: firmSettings.firm_name || '' };
+    });
+  }, [firmSettings?.firm_name]);
 
   const signedFiles = files.filter(
     (file) => file.file_type === 'independence_confirmation'
@@ -264,7 +272,6 @@ export function IndependenceDeclaration() {
             new Paragraph(`Name: ${formState.declarantName || '____________________'}`),
             new Paragraph(`Membership No.: ${formState.membershipNo || '____________________'}`),
             new Paragraph(`Designation: ${formState.designation || '____________________'}`),
-            new Paragraph(`Engagement ID: ${formState.engagementId || '____________________'}`),
             new Paragraph(''),
             new Paragraph(`Signature: ${formState.declarantName || '____________________'}`),
             new Paragraph(`Date: ${formState.declarationDate || '____________________'}`),
@@ -333,7 +340,6 @@ export function IndependenceDeclaration() {
     currentY = writeWrappedText(`Name: ${formState.declarantName || '____________________'}`, currentY);
     currentY = writeWrappedText(`Membership No.: ${formState.membershipNo || '____________________'}`, currentY);
     currentY = writeWrappedText(`Designation: ${formState.designation || '____________________'}`, currentY);
-    currentY = writeWrappedText(`Engagement ID: ${formState.engagementId || '____________________'}`, currentY);
     currentY += 6;
     currentY = writeWrappedText(`Signature: ${formState.declarantName || '____________________'}`, currentY);
     currentY = writeWrappedText(`Date: ${formState.declarationDate || '____________________'}`, currentY);
@@ -357,7 +363,7 @@ export function IndependenceDeclaration() {
       </div>
       <p>{buildIntroText()}</p>
       <p>{getComplianceText()}</p>
-      <ol className="list-decimal pl-5 space-y-1">
+      <ol className="list-decimal list-inside space-y-1">
         {getPoints().map((point) => (
           <li key={point}>{point}</li>
         ))}
@@ -368,7 +374,6 @@ export function IndependenceDeclaration() {
         <p>Name: {formState.declarantName || '____________________'}</p>
         <p>Membership No.: {formState.membershipNo || '____________________'}</p>
         <p>Designation: {formState.designation || '____________________'}</p>
-        <p>Engagement ID: {formState.engagementId || '____________________'}</p>
         <p>Signature: {formState.declarantName || '____________________'}</p>
         <p>Date: {formState.declarationDate || '____________________'}</p>
         <p>Place: {formState.place || '____________________'}</p>
@@ -496,13 +501,6 @@ export function IndependenceDeclaration() {
             <Input
               value={formState.designation}
               onChange={(e) => setFormState((prev) => ({ ...prev, designation: e.target.value }))}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Engagement ID</Label>
-            <Input
-              value={formState.engagementId}
-              onChange={(e) => setFormState((prev) => ({ ...prev, engagementId: e.target.value }))}
             />
           </div>
           {formState.declarationType === 'audit' ? (
