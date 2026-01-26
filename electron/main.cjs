@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
+const { initializeAutoUpdater } = require('./auto-updater.cjs');
 
 function safeLog(...args) {
   try {
@@ -997,6 +998,10 @@ app.whenReady().then(() => {
   setAppMenu();
   registerIpcHandlers();
   createWindow();
+
+  // Initialize auto-updater with GitHub provider
+  console.log('[AUTO-UPDATER] Initializing from main.cjs...');
+  initializeAutoUpdater();
 
   app.on('activate', () => {
     // On macOS it's common to re-create a window in the app when the

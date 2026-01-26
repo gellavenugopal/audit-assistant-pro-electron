@@ -1,0 +1,92 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      # Match tags like v1.0.0, v1.0.0-beta.1, v1.0.0-rc.1
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build for Windows and macOS
+        os: [windows-latest, macos-latest]
+    
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      # Cache dependencies to speed up builds
+      - name: Cache node modules
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Vite app
+        run: npm run build
+
+      # Build Electron app and create installers
+      # electron-builder automatically:
+      # - Creates the installer (NSIS on Windows, DMG on macOS)
+      # - Uploads to GitHub Releases (via GH_TOKEN)
+      # - Creates a GitHub release if it doesn't exist
+      - name: Build Electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run electron:build
+
+  create-release:
+    # Wait for all builds to complete
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # Create GitHub Release with release notes
+      # electron-builder may have already created it,
+      # but we ensure it exists with proper metadata
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the tag version
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          
+          # Check if it's a pre-release (contains -beta, -rc, -alpha)
+          if [[ $TAG_NAME =~ -[a-zA-Z] ]]; then
+            IS_PRERELEASE="--prerelease"
+          else
+            IS_PRERELEASE=""
+          fi
+          
+          # Create release if it doesn't exist
+          # Release notes can be extracted from CHANGELOG.md or commit messages
+          gh release create "$TAG_NAME" \
+            --title "Audit Assistant Pro $(echo $TAG_NAME | sed 's/^v//')" \
+            $IS_PRERELEASE \
+            --notes "See assets for installer and changelog" \
+            2>/dev/null || true
+
+      - name: Verify Release Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "Release: $TAG_NAME"
+          gh release view "$TAG_NAME" --json assets

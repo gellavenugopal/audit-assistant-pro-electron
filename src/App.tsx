@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { EngagementProvider } from "@/contexts/EngagementContext";
 import { TallyProvider } from "@/contexts/TallyContext";
 import { ExportedFileDialogProvider } from "@/contexts/ExportedFileDialogContext";
+import { AppUpdaterManager } from "@/components/AppUpdaterManager";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ProtectedEngagementRoute } from "@/components/auth/ProtectedEngagementRoute";
 import { ProtectedAdminRoute } from "@/components/auth/ProtectedAdminRoute";
@@ -46,6 +47,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ExportedFileDialogProvider>
       <TooltipProvider>
+        <AppUpdaterManager />
         <Toaster />
         <Sonner />
         <HashRouter>

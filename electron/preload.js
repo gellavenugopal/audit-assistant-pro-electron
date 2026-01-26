@@ -38,8 +38,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDownloadsPath: () => ipcRenderer.invoke('app:getDownloadsPath'),
     openPath: (targetPath) => ipcRenderer.invoke('app:openPath', targetPath),
   },
+
+  // Auto-updater methods
+  updater: {
+    checkForUpdates: () => ipcRenderer.invoke('updater:checkForUpdates'),
+    getCurrentVersion: () => ipcRenderer.invoke('updater:getCurrentVersion'),
+    restartForUpdate: () => ipcRenderer.invoke('updater:restartForUpdate'),
+    onUpdateEvent: (channel, listener) => ipcRenderer.on(channel, listener),
+    removeUpdateListener: (channel, listener) => ipcRenderer.removeListener(channel, listener),
+  },
 });
 
 // Log when preload script is loaded
-console.log('Preload script loaded with GSTZen IPC handlers');
+console.log('Preload script loaded with GSTZen IPC handlers and Auto-Updater');
 
