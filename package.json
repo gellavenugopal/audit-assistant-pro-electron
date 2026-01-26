@@ -6,6 +6,10 @@
   "main": "electron/main.cjs",
   "author": "Audit Assistant Pro",
   "description": "ICAI Audit Tool - Desktop Application",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gellavenugopal/audit-assistant-pro-electron"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -32,6 +36,11 @@
       "electron/**/*",
       "public/**/*"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "gellavenugopal",
+      "repo": "audit-assistant-pro-electron"
+    },
     "win": {
       "target": "nsis",
       "icon": "public/favicon.ico"
@@ -81,6 +90,8 @@
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
     "docx": "^9.5.1",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.7.3",
     "embla-carousel-react": "^8.6.0",
     "exceljs": "^4.4.0",
     "input-otp": "^1.4.2",
