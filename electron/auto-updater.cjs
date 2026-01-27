@@ -147,18 +147,6 @@ function setupUpdateAvailableHandler() {
       releaseName: info.releaseName,
       releaseDate: info.releaseDate,
     });
-
-    // Show dialog that download is starting
-    console.log('[AUTO-UPDATER] Showing update available dialog...');
-    dialog.showMessageBox({
-      type: 'info',
-      title: '📥 Update Available',
-      message: `Version ${info.version} is available!`,
-      detail: 'The update will be downloaded automatically in the background.\n\nYou will be notified when it\'s ready to install.',
-      buttons: ['OK'],
-    }).then(() => {
-      console.log('[AUTO-UPDATER] User acknowledged, download starting...');
-    });
   });
 }
 
@@ -179,46 +167,11 @@ function setupUpdateDownloadedHandler() {
     console.log('[AUTO-UPDATER] Version:', info.version);
     log.info(`[AUTO-UPDATER] Update downloaded: ${info.version}`);
 
-    // Notify renderer that update is ready
+    // Notify renderer that update is ready; renderer is responsible
+    // for prompting the user and calling restart when appropriate.
     notifyRenderer('update:downloaded', {
       version: info.version,
     });
-
-    // Prompt user to restart
-    // Use interactive dialog so user can save work first
-    const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-    
-    console.log('[AUTO-UPDATER] Showing restart dialog...');
-    
-    dialog
-      .showMessageBox(mainWindow || {}, {
-        type: 'info',
-        title: '✅ Update Ready to Install',
-        message: `Audit Assistant Pro ${info.version} has been downloaded successfully!`,
-        detail: 'Would you like to restart the application now to install the update?',
-        buttons: ['Restart Now', 'Restart Later'],
-        defaultId: 0, // Default to "Restart Now" to get update installed
-        cancelId: 1,
-      })
-      .then((result) => {
-        console.log('[AUTO-UPDATER] User chose:', result.response === 0 ? 'Restart Now' : 'Restart Later');
-        if (result.response === 0) {
-          // User clicked "Restart Now"
-          log.info('[AUTO-UPDATER] User chose to restart for update');
-          console.log('[AUTO-UPDATER] Calling quitAndInstall()...');
-          autoUpdater.quitAndInstall();
-        } else {
-          // User clicked "Restart Later"
-          log.info('[AUTO-UPDATER] User postponed restart');
-          notifyRenderer('update:deferred', {
-            version: info.version,
-          });
-        }
-      })
-      .catch((error) => {
-        console.error('[AUTO-UPDATER] Dialog error:', error);
-        log.error('[AUTO-UPDATER] Dialog error:', error);
-      });
   });
 }
 
@@ -382,54 +335,6 @@ function initializeAutoUpdater() {
     console.log('[AUTO-UPDATER] Starting initial update check...');
     autoUpdater.checkForUpdatesAndNotify();
 
-    // Fallback: Monitor for pending updates (checks every 5 seconds)
-    // This catches updates that downloaded but didn't trigger the event
-    let lastInstallerSize = 0;
-    const pendingCheckInterval = setInterval(() => {
-      try {
-        const path = require('path');
-        const fs = require('fs');
-        const userData = app.getPath('userData');
-        const updaterPath = path.join(userData, '..', 'audit-assistant-pro-updater');
-        const installerPath = path.join(updaterPath, 'installer.exe');
-        
-        if (fs.existsSync(installerPath)) {
-          const stats = fs.statSync(installerPath);
-          const currentSize = stats.size;
-          
-          // If installer size is stable (hasn't changed for 2 checks), download is complete
-          if (currentSize > 100000000 && currentSize === lastInstallerSize) {
-            // Download is complete! Show prompt
-            console.log('[AUTO-UPDATER] *** FALLBACK: Detected completed download ***');
-            console.log('[AUTO-UPDATER] Installer size:', Math.round(currentSize / 1024 / 1024), 'MB');
-            
-            const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-            dialog.showMessageBox(mainWindow || {}, {
-              type: 'info',
-              title: '✅ Update Ready to Install',
-              message: 'Audit Assistant Pro update has been downloaded successfully!',
-              detail: 'Would you like to restart the application now to install the update?',
-              buttons: ['Restart Now', 'Restart Later'],
-              defaultId: 0,
-              cancelId: 1,
-            }).then((result) => {
-              if (result.response === 0) {
-                console.log('[AUTO-UPDATER] User chose to restart (fallback)');
-                autoUpdater.quitAndInstall();
-              }
-            });
-            
-            // Clear this interval after showing dialog
-            clearInterval(pendingCheckInterval);
-          } else {
-            lastInstallerSize = currentSize;
-          }
-        }
-      } catch (error) {
-        // Silently ignore errors in fallback check
-      }
-    }, 5000); // Check every 5 seconds
-
     // Optional: Schedule periodic checks (every 60 minutes)
     const updateInterval = setInterval(() => {
       log.debug('[AUTO-UPDATER] Periodic update check (60 min interval)');
@@ -439,7 +344,6 @@ function initializeAutoUpdater() {
     // Clean up intervals on app quit
     app.once('before-quit', () => {
       clearInterval(updateInterval);
-      clearInterval(pendingCheckInterval);
     });
 
     console.log('[AUTO-UPDATER] *** AUTO-UPDATER INITIALIZED SUCCESSFULLY ***');
@@ -455,3 +359,4 @@ module.exports = {
   initializeAutoUpdater,
   isBetaChannel,
 };
+

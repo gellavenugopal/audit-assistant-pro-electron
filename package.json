@@ -1,7 +1,7 @@
 {
   "name": "audit-assistant-pro",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.9.0",
   "type": "module",
   "main": "electron/main.cjs",
   "author": "Audit Assistant Pro",
@@ -28,6 +28,7 @@
   "build": {
     "appId": "com.audit-assistant-pro.app",
     "productName": "Audit Assistant Pro",
+    "artifactName": "Audit-Assistant-Pro-${version}.${ext}",
     "directories": {
       "output": "electron-dist"
     },
@@ -47,7 +48,7 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "public/favicon.ico"
+      "icon": "public/icon-512.png"
     },
     "linux": {
       "target": "AppImage",

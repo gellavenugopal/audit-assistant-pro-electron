@@ -33,6 +33,7 @@ export function AppUpdaterManager() {
     error,
     checkForUpdates,
     restartNow,
+    dismissUpdate,
   } = useAutoUpdater();
 
   // Optionally check for updates on a schedule
@@ -60,6 +61,7 @@ export function AppUpdaterManager() {
           releaseNotes={updateAvailable.releaseNotes}
           releaseName={updateAvailable.releaseName}
           onRestart={restartNow}
+          onDismiss={dismissUpdate}
         />
       )}
 
@@ -68,6 +70,7 @@ export function AppUpdaterManager() {
         <UpdateReadyNotification
           version={updateDownloaded.version}
           onRestart={restartNow}
+          onDismiss={dismissUpdate}
         />
       )}
 
@@ -241,3 +244,4 @@ export function UpdateSettingsPage() {
     </div>
   );
 }
+

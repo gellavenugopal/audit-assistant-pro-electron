@@ -83,6 +83,17 @@ export function useAutoUpdater() {
   }, [updater]);
 
   /**
+   * Dismiss current update notifications in UI (e.g. "Later" button)
+   * Does not affect the underlying downloaded update, only local state.
+   */
+  const dismissUpdate = useCallback(() => {
+    setUpdateAvailable(null);
+    setUpdateDownloaded(null);
+    setDownloadProgress(null);
+    setError(null);
+  }, []);
+
+  /**
    * Set up event listeners
    */
   useEffect(() => {
@@ -188,5 +199,6 @@ export function useAutoUpdater() {
     // Actions
     checkForUpdates,
     restartNow,
+    dismissUpdate,
   };
 }
