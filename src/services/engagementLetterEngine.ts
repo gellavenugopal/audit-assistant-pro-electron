@@ -83,15 +83,16 @@ export class EngagementLetterTemplateEngine {
    */
   static render(template: string, context: LetterContext, options: RenderOptions = {}): string {
     let result = template;
+    const renderState = { usedLetterDateHeader: false };
 
     // Step 1: Process conditionals (innermost first due to nesting)
     result = this.processConditionals(result, context);
 
     // Step 2: Substitute merge tags
-    result = this.substituteMergeTags(result, context, options);
+    result = this.substituteMergeTags(result, context, options, renderState);
 
     // Step 2b: Substitute bracket-style tags
-    result = this.substituteBracketTags(result, context, options);
+    result = this.substituteBracketTags(result, context, options, renderState);
 
     // Step 3: Clean up any remaining unprocessed tags
     result = this.cleanupUnprocessedTags(result);
@@ -191,9 +192,24 @@ export class EngagementLetterTemplateEngine {
   /**
    * Substitute merge tags: {{VARIABLE_NAME}} with context values
    */
-  private static substituteMergeTags(template: string, context: LetterContext, options: RenderOptions): string {
+  private static substituteMergeTags(
+    template: string,
+    context: LetterContext,
+    options: RenderOptions,
+    renderState: { usedLetterDateHeader: boolean }
+  ): string {
     const mergeTagRegex = /\{\{\s*([A-Za-z_0-9]+)\s*\}\}/g;
-    return template.replace(mergeTagRegex, (match, variable) => {
+    return template.replace(mergeTagRegex, (match, variable, offset, full) => {
+      const variableKey = variable.toLowerCase();
+      if (variableKey === 'letter_date' && !renderState.usedLetterDateHeader) {
+        renderState.usedLetterDateHeader = true;
+        const headerDate = String(context.partner_signature_date || '');
+        if (!headerDate.trim()) {
+          return this.getLetterDatePlaceholder(full, offset);
+        }
+        return this.maybeEscape(headerDate, options);
+      }
+
       const value = this.getContextValue(context, variable);
       if (value === undefined || value === null) {
         return ''; // Return empty if variable not found
@@ -202,10 +218,27 @@ export class EngagementLetterTemplateEngine {
     });
   }
 
-  private static substituteBracketTags(template: string, context: LetterContext, options: RenderOptions): string {
+  private static substituteBracketTags(
+    template: string,
+    context: LetterContext,
+    options: RenderOptions,
+    renderState: { usedLetterDateHeader: boolean }
+  ): string {
     const bracketTagRegex = /\[([^\[\]\r\n]+)\]/g;
     const addressParts = this.getAddressParts(context.registered_address);
-    return template.replace(bracketTagRegex, (match, label) => {
+    return template.replace(bracketTagRegex, (match, label, offset, full) => {
+      const normalizedLabel = this.normalizeBracketLabel(label);
+      if (
+        (normalizedLabel === 'date' || normalizedLabel === 'letter_date' || normalizedLabel === 'letter_dated') &&
+        !renderState.usedLetterDateHeader
+      ) {
+        renderState.usedLetterDateHeader = true;
+        const headerDate = String(context.partner_signature_date || '');
+        if (!headerDate.trim()) {
+          return this.getLetterDatePlaceholder(full, offset);
+        }
+        return this.maybeEscape(headerDate, options);
+      }
       const value = this.resolveBracketValue(label, context, addressParts);
       if (value === undefined || value === null) {
         return match;
@@ -233,6 +266,13 @@ export class EngagementLetterTemplateEngine {
 
   private static collapseDuplicateDates(template: string): string {
     return template.replace(/\b(\d{2}-\d{2}-\d{4})\b(?:\s+\1\b)+/g, '$1');
+  }
+
+  private static getLetterDatePlaceholder(template: string, offset: number): string {
+    const start = Math.max(0, offset - 24);
+    const prefix = template.slice(start, offset);
+    const hasDateLabel = /date\s*:\s*$/i.test(prefix);
+    return hasDateLabel ? '__________________' : 'date:__________________';
   }
 
   /**
@@ -265,6 +305,7 @@ export class EngagementLetterTemplateEngine {
     const financialYearStart = this.formatDateShort(financialYearStartRaw);
     const financialYearEnd = this.formatDateShort(financialYearEndRaw);
     const balanceSheetDate = this.formatDateShort(balanceSheetDateRaw);
+    const letterDate = appointmentLetterDate;
     const assessmentYear = period.assessment_year || this.computeAssessmentYear(period.financial_year) || '';
     const meetingNumber = this.toNumber(period.meeting_number);
 
@@ -310,7 +351,7 @@ export class EngagementLetterTemplateEngine {
       partner_mem_no: auditor.partner_mem_no,
       partner_pan: auditor.partner_pan,
       place: auditor.place,
-      letter_date: appointmentLetterDate,
+      letter_date: letterDate,
       partner_signature_date: this.formatDateShort(partnerSignatureDateRaw),
       partner_signature_date_long: this.formatDateLong(partnerSignatureDateRaw),
       partner_signature_date_short: this.formatDateShort(partnerSignatureDateRaw),
