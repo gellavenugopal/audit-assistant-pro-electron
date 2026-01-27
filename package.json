@@ -28,6 +28,7 @@
   "build": {
     "appId": "com.audit-assistant-pro.app",
     "productName": "Audit Assistant Pro",
+    "artifactName": "Audit-Assistant-Pro-${version}.${ext}",
     "directories": {
       "output": "electron-dist"
     },
@@ -47,7 +48,7 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "public/favicon.ico"
+      "icon": "public/icon-512.png"
     },
     "linux": {
       "target": "AppImage",
