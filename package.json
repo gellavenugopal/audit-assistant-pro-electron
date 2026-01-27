@@ -1,7 +1,7 @@
 {
   "name": "audit-assistant-pro",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.9.0",
   "type": "module",
   "main": "electron/main.cjs",
   "author": "Audit Assistant Pro",

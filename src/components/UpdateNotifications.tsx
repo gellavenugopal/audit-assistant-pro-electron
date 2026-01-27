@@ -157,11 +157,13 @@ export function UpdateDownloadingIndicator({
 interface UpdateReadyNotificationProps {
   version: string;
   onRestart: () => void;
+  onDismiss?: () => void;
 }
 
 export function UpdateReadyNotification({
   version,
   onRestart,
+  onDismiss,
 }: UpdateReadyNotificationProps) {
   return (
     <div className="fixed bottom-4 right-4 w-96 bg-white rounded-lg shadow-lg border-l-4 border-green-500 p-4">
@@ -190,6 +192,7 @@ export function UpdateReadyNotification({
             <Button
               size="sm"
               variant="outline"
+              onClick={onDismiss}
             >
               Later
             </Button>
@@ -287,3 +290,4 @@ export function VersionBadge({
     </div>
   );
 }
+

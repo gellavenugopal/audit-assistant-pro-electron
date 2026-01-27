@@ -1,4 +1,4 @@
-import { Bell, Search, User, ChevronDown, LogOut, Settings, Check, Trash2, MessageSquare, FileText, Briefcase, ArrowLeftRight, Keyboard } from 'lucide-react';
+import { Bell, Search, User, ChevronDown, LogOut, Settings, Check, Trash2, MessageSquare, FileText, Briefcase, ArrowLeftRight, Keyboard, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -20,12 +20,15 @@ import { useEngagement } from '@/contexts/EngagementContext';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '@/hooks/useNotifications';
 import { formatDistanceToNow } from 'date-fns';
+import { useAutoUpdater } from '@/hooks/useAutoUpdater';
+import { VersionBadge } from '@/components/UpdateNotifications';
 
 export function Header() {
   const { profile, role, signOut } = useAuth();
   const { currentEngagement, engagements, setCurrentEngagement, clearEngagement } = useEngagement();
   const navigate = useNavigate();
   const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification, clearAll } = useNotifications();
+  const { currentVersion, isBeta, checkForUpdates, isCheckingForUpdates } = useAutoUpdater();
 
   const handleSignOut = async () => {
     await signOut();
@@ -135,8 +138,27 @@ export function Header() {
         </div>
       </div>
 
-      {/* Right: Actions */}
-      <div className="flex items-center gap-2">
+      {/* Right: Version, Updates & Actions */}
+      <div className="flex items-center gap-3">
+        {/* Version badge */}
+        <VersionBadge version={currentVersion || '—'} isBeta={isBeta} />
+
+        {/* Manual update check button */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          onClick={checkForUpdates}
+          disabled={isCheckingForUpdates}
+          title="Check for updates"
+        >
+          <Download className="h-4 w-4" />
+          <span className="hidden sm:inline">
+            {isCheckingForUpdates ? 'Checking…' : 'Check for updates'}
+          </span>
+        </Button>
+
+        {/* Other header actions */}
         {/* Keyboard Shortcuts Button */}
         <Button 
           variant="ghost" 
