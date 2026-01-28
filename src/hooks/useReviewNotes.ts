@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { createNotification } from '@/hooks/useNotifications';
+
+const db = getSQLiteClient();
 
 export interface ReviewNote {
   id: string;
@@ -43,7 +45,7 @@ export function useReviewNotes(engagementId?: string) {
 
   const logActivity = async (action: string, entity: string, details: string, entityId?: string, logEngagementId?: string) => {
     if (!user || !profile) return;
-    await supabase.from('activity_logs').insert([{
+    await db.from('activity_logs').insert({
       user_id: user.id,
       user_name: profile.full_name,
       action,
@@ -51,7 +53,7 @@ export function useReviewNotes(engagementId?: string) {
       entity_id: entityId || null,
       engagement_id: logEngagementId || null,
       details,
-    }]);
+    }).execute();
   };
 
   const logAuditTrail = async (
@@ -63,7 +65,7 @@ export function useReviewNotes(engagementId?: string) {
     reason?: string
   ) => {
     if (!user) return;
-    await supabase.from('audit_trail').insert([{
+    await db.from('audit_trail').insert({
       entity_type: entityType,
       entity_id: entityId,
       action,
@@ -71,24 +73,21 @@ export function useReviewNotes(engagementId?: string) {
       new_value: newValue || null,
       reason: reason || null,
       performed_by: user.id,
-    }]);
+    }).execute();
   };
 
   const fetchNotes = async () => {
     try {
-      let query = supabase
+      let query = db
         .from('review_notes')
-        .select(`
-          *,
-          engagement:engagements(name, client_name)
-        `)
+        .select('*')
         .order('created_at', { ascending: false });
 
       if (engagementId) {
         query = query.eq('engagement_id', engagementId);
       }
 
-      const { data, error } = await query;
+      const { data, error } = await query.execute();
       if (error) throw error;
       setNotes((data || []) as ReviewNote[]);
     } catch (error) {
@@ -109,7 +108,7 @@ export function useReviewNotes(engagementId?: string) {
     if (!user || !profile) return null;
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('review_notes')
         .insert({ 
           ...note, 
@@ -117,12 +116,16 @@ export function useReviewNotes(engagementId?: string) {
           status: 'open',
           priority: note.priority || 'medium'
         })
-        .select()
-        .single();
+        .execute();
 
       if (error) throw error;
       
-      await logActivity('Created', 'Review Note', `Raised review note: ${note.title}`, data.id, note.engagement_id);
+      const newNote = Array.isArray(data) ? data[0] : data;
+      if (!newNote) {
+        throw new Error('Failed to create review note');
+      }
+      
+      await logActivity('Created', 'Review Note', `Raised review note: ${note.title}`, newNote.id, note.engagement_id);
       
       // Send notification to assigned user
       if (note.assigned_to && note.assigned_to !== user.id) {
@@ -137,7 +140,7 @@ export function useReviewNotes(engagementId?: string) {
       
       toast.success('Review note raised successfully');
       await fetchNotes();
-      return data;
+      return newNote;
     } catch (error: any) {
       console.error('Error creating review note:', error);
       toast.error(error.message || 'Failed to create review note');
@@ -147,10 +150,11 @@ export function useReviewNotes(engagementId?: string) {
 
   const updateNote = async (id: string, updates: Partial<ReviewNote>) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('review_notes')
         .update(updates)
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       
@@ -215,10 +219,11 @@ export function useReviewNotes(engagementId?: string) {
   const deleteNote = async (id: string) => {
     const note = notes.find(n => n.id === id);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('review_notes')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       
@@ -237,10 +242,11 @@ export function useReviewNotes(engagementId?: string) {
     if (!note) return;
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('review_notes')
         .update({ approval_stage: 'prepared' })
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
 
@@ -265,10 +271,11 @@ export function useReviewNotes(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('review_notes')
         .update({ approval_stage: 'reviewed' })
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
 
@@ -293,10 +300,11 @@ export function useReviewNotes(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('review_notes')
         .update({ approval_stage: 'approved' })
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
 
@@ -326,14 +334,15 @@ export function useReviewNotes(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('review_notes')
         .update({ 
-          locked: false, 
+          locked: 0, 
           unlock_reason: reason,
           approval_stage: 'reviewed'
         })
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
 
@@ -351,16 +360,10 @@ export function useReviewNotes(engagementId?: string) {
   useEffect(() => {
     fetchNotes();
 
-    const channel = supabase
-      .channel('review-notes-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'review_notes' }, () => {
-        fetchNotes();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Real-time subscriptions not available in SQLite
+    // Use polling if real-time updates are needed
+    // const interval = setInterval(fetchNotes, 30000);
+    // return () => clearInterval(interval);
   }, [engagementId]);
 
   return {

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface FirmSettings {
   id: string;
@@ -22,53 +24,98 @@ export function useFirmSettings() {
   const { user } = useAuth();
 
   const fetchFirmSettings = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('firm_settings')
         .select('*')
         .limit(1)
-        .maybeSingle();
+        .single()
+        .execute();
 
-      if (error) throw error;
-      setFirmSettings(data);
-    } catch (error) {
+      if (error) {
+        // If no data found, that's okay - settings might not exist yet
+        if (error.message && error.message.includes('No rows')) {
+          setFirmSettings(null);
+          setLoading(false);
+          return;
+        }
+        throw error;
+      }
+      
+      // Set data even if it's null (means no settings exist yet)
+      setFirmSettings(data || null);
+    } catch (error: any) {
       console.error('Error fetching firm settings:', error);
+      // Don't show error toast for "no data" scenarios
+      if (error?.message && !error.message.includes('No rows')) {
+        console.warn('Failed to fetch firm settings:', error.message);
+      }
+      setFirmSettings(null);
     } finally {
       setLoading(false);
     }
   };
 
   const saveFirmSettings = async (data: Partial<FirmSettings>) => {
-    if (!user) return null;
+    if (!user) {
+      toast.error('You must be logged in to save firm settings');
+      return null;
+    }
 
     try {
-      if (firmSettings) {
+      if (firmSettings && firmSettings.id) {
         // Update existing
-        const { data: updated, error } = await supabase
+        const { data: updated, error } = await db
           .from('firm_settings')
-          .update(data)
+          .update({
+            firm_name: data.firm_name || firmSettings.firm_name,
+            firm_registration_no: data.firm_registration_no ?? firmSettings.firm_registration_no,
+            constitution: data.constitution ?? firmSettings.constitution,
+            no_of_partners: data.no_of_partners ?? firmSettings.no_of_partners,
+            icai_unique_sl_no: data.icai_unique_sl_no ?? firmSettings.icai_unique_sl_no,
+            address: data.address ?? firmSettings.address,
+          })
           .eq('id', firmSettings.id)
-          .select()
-          .single();
+          .execute();
 
         if (error) throw error;
-        setFirmSettings(updated);
+        
+        // Fetch updated record
+        const { data: refreshed, error: fetchError } = await db
+          .from('firm_settings')
+          .select('*')
+          .eq('id', firmSettings.id)
+          .single()
+          .execute();
+
+        if (fetchError) throw fetchError;
+        if (refreshed) {
+          setFirmSettings(refreshed);
+        }
         toast.success('Firm settings saved');
-        return updated;
+        return refreshed;
       } else {
         // Create new
-        const { data: created, error } = await supabase
+        const { data: created, error } = await db
           .from('firm_settings')
           .insert({
-            ...data,
             firm_name: data.firm_name || 'My Firm',
+            firm_registration_no: data.firm_registration_no || null,
+            constitution: data.constitution || null,
+            no_of_partners: data.no_of_partners || null,
+            icai_unique_sl_no: data.icai_unique_sl_no || null,
+            address: data.address || null,
             created_by: user.id,
           })
           .select()
-          .single();
+          .single()
+          .execute();
 
         if (error) throw error;
-        setFirmSettings(created);
+        if (created) {
+          setFirmSettings(created);
+        }
         toast.success('Firm settings created');
         return created;
       }

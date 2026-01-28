@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,7 +30,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { 
+import {
   UserCheck,
   Plus,
   Pencil,
@@ -79,12 +81,12 @@ interface ComplianceForm {
 
 export function PartnersTabContent() {
   const { user, profile } = useAuth();
-  
+
   // Data states
   const [partnerUsers, setPartnerUsers] = useState<PartnerUser[]>([]);
   const [partnerRecords, setPartnerRecords] = useState<PartnerRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Dialog states
   const [complianceDialogOpen, setComplianceDialogOpen] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState<LinkedPartner | null>(null);
@@ -97,7 +99,7 @@ export function PartnersTabContent() {
   });
   const [saving, setSaving] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
-  
+
   // Unlinked records section
   const [unlinkedOpen, setUnlinkedOpen] = useState(false);
   const [inviting, setInviting] = useState<string | null>(null);
@@ -110,32 +112,38 @@ export function PartnersTabContent() {
     setLoading(true);
     try {
       // Fetch partner users (profiles + user_roles where role='partner')
-      const { data: rolesData, error: rolesError } = await supabase
+      const { data: rolesData, error: rolesError } = await db
         .from('user_roles')
         .select('user_id')
-        .eq('role', 'partner');
+        .eq('role', 'partner')
+        .execute();
 
       if (rolesError) throw rolesError;
-      
+
       const partnerUserIds = rolesData?.map(r => r.user_id) || [];
-      
+
       if (partnerUserIds.length > 0) {
-        const { data: profilesData, error: profilesError } = await supabase
+        // Fetch all profiles and filter in JavaScript (SQLite client doesn't support .in())
+        const { data: allProfilesData, error: profilesError } = await db
           .from('profiles')
           .select('user_id, full_name, email, is_active')
-          .in('user_id', partnerUserIds);
+          .execute();
 
         if (profilesError) throw profilesError;
+
+        // Filter to only the profiles we need
+        const profilesData = (allProfilesData || []).filter(p => partnerUserIds.includes(p.user_id));
         setPartnerUsers(profilesData || []);
       } else {
         setPartnerUsers([]);
       }
 
       // Fetch partner records
-      const { data: partnersData, error: partnersError } = await supabase
+      const { data: partnersData, error: partnersError } = await db
         .from('partners')
         .select('*')
-        .order('name');
+        .order('name', { ascending: true })
+        .execute();
 
       if (partnersError) throw partnersError;
       setPartnerRecords(partnersData || []);
@@ -155,16 +163,16 @@ export function PartnersTabContent() {
       if (record) {
         return { ...pu, complianceRecord: record, matchType: 'user_id' as const };
       }
-      
+
       // Then try by email match
-      record = partnerRecords.find(pr => 
-        pr.user_id === null && 
+      record = partnerRecords.find(pr =>
+        pr.user_id === null &&
         pr.email?.toLowerCase() === pu.email.toLowerCase()
       );
       if (record) {
         return { ...pu, complianceRecord: record, matchType: 'email' as const };
       }
-      
+
       return { ...pu, complianceRecord: null, matchType: 'none' as const };
     });
   }, [partnerUsers, partnerRecords]);
@@ -203,7 +211,7 @@ export function PartnersTabContent() {
 
   const handleSaveCompliance = async () => {
     if (!selectedPartner) return;
-    
+
     if (!complianceForm.membership_number.trim()) {
       toast.error('Membership number is required');
       return;
@@ -225,16 +233,17 @@ export function PartnersTabContent() {
 
       if (selectedPartner.complianceRecord) {
         // Update existing record
-        const { error } = await supabase
+        const { error } = await db
           .from('partners')
           .update(complianceData)
-          .eq('id', selectedPartner.complianceRecord.id);
+          .eq('id', selectedPartner.complianceRecord.id)
+          .execute();
 
         if (error) throw error;
         toast.success('Compliance details updated');
       } else {
         // Create new record linked to user
-        const { error } = await supabase
+        const { error } = await db
           .from('partners')
           .insert({
             ...complianceData,
@@ -242,7 +251,8 @@ export function PartnersTabContent() {
             name: selectedPartner.full_name,
             email: selectedPartner.email,
             created_by: user?.id,
-          });
+          })
+          .execute();
 
         if (error) throw error;
         toast.success('Compliance record created');
@@ -260,13 +270,14 @@ export function PartnersTabContent() {
 
   const handleLinkRecord = async (partner: LinkedPartner) => {
     if (!partner.complianceRecord || partner.matchType !== 'email') return;
-    
+
     setLinking(partner.complianceRecord.id);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('partners')
         .update({ user_id: partner.user_id })
-        .eq('id', partner.complianceRecord.id);
+        .eq('id', partner.complianceRecord.id)
+        .execute();
 
       if (error) throw error;
       toast.success('Record linked to user');
@@ -280,13 +291,14 @@ export function PartnersTabContent() {
 
   const handleUnlinkRecord = async (recordId: string) => {
     if (!confirm('Are you sure you want to unlink this compliance record from the user?')) return;
-    
+
     setLinking(recordId);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('partners')
         .update({ user_id: null })
-        .eq('id', recordId);
+        .eq('id', recordId)
+        .execute();
 
       if (error) throw error;
       toast.success('Record unlinked');
@@ -303,19 +315,22 @@ export function PartnersTabContent() {
       toast.error('No email address for this partner');
       return;
     }
-    
+
     setInviting(record.id);
     try {
-      const { error } = await supabase.functions.invoke('send-invite', {
-        body: {
-          email: record.email,
-          role: 'partner',
-          full_name: record.name,
-          phone: record.phone || undefined,
-          inviterName: profile?.full_name || 'Admin',
-          appUrl: window.location.origin,
-        },
-      });
+      // Edge functions not available in SQLite
+      toast.warning('Email invitation feature not yet implemented in SQLite.');
+      const error = new Error('Email invitations require edge functions');
+      // const { error } = await db.functions.invoke('send-invite', {
+      //   body: {
+      //     email: record.email,
+      //     role: 'partner',
+      //     full_name: record.name,
+      //     phone: record.phone || undefined,
+      //     inviterName: profile?.full_name || 'Admin',
+      //     appUrl: window.location.origin,
+      //   },
+      // });
 
       if (error) throw error;
       toast.success(`Invitation sent to ${record.email}`);
@@ -377,7 +392,7 @@ export function PartnersTabContent() {
               linkedPartners.map(partner => {
                 const cr = partner.complianceRecord;
                 const cleanPhone = cr?.phone?.replace(/[\s\-\(\)]/g, '').replace(/^\+/, '');
-                
+
                 return (
                   <TableRow key={partner.user_id}>
                     <TableCell className="font-medium">{partner.full_name}</TableCell>
@@ -402,7 +417,7 @@ export function PartnersTabContent() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {cr?.date_of_joining 
+                      {cr?.date_of_joining
                         ? format(new Date(cr.date_of_joining), 'dd MMM yyyy')
                         : <span className="text-muted-foreground text-sm">Not set</span>
                       }
@@ -430,7 +445,7 @@ export function PartnersTabContent() {
                         >
                           {cr ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                         </Button>
-                        
+
                         {/* Show link button if email match found but not linked */}
                         {partner.matchType === 'email' && cr && (
                           <Button
@@ -448,7 +463,7 @@ export function PartnersTabContent() {
                             )}
                           </Button>
                         )}
-                        
+
                         {/* Show unlink button if linked by user_id */}
                         {partner.matchType === 'user_id' && cr && (
                           <Button
@@ -510,7 +525,7 @@ export function PartnersTabContent() {
                           <TableCell className="text-muted-foreground">{record.email || '—'}</TableCell>
                           <TableCell>{record.membership_number}</TableCell>
                           <TableCell>
-                            {record.date_of_joining 
+                            {record.date_of_joining
                               ? format(new Date(record.date_of_joining), 'dd MMM yyyy')
                               : '—'
                             }

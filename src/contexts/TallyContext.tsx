@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+// Edge functions not available in SQLite - Tally Bridge needs alternative implementation
+// import { supabase } from "@/integrations/supabase/client";
 
 // Helper function to sanitize XML response from Tally
 // Tally sometimes returns illegal XML 1.0 characters (often as character references like "&#x4;")
@@ -156,18 +157,24 @@ export function TallyProvider({ children }: { children: ReactNode }) {
   }, [state.isConnected, state.sessionCode]);
 
   const checkSession = useCallback(async (sessionCode: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase.functions.invoke("tally-bridge", {
-        body: { action: "check-session", sessionCode },
-      });
-
-      if (error) throw error;
-      return data?.connected || false;
-    } catch (err) {
-      console.error("Error checking session:", err);
-      return false;
-    }
-  }, []);
+    // Edge functions not available in SQLite
+    toast({
+      title: "Not Available",
+      description: "Tally Bridge requires edge functions. Please use Supabase or implement alternative service.",
+      variant: "destructive",
+    });
+    return false;
+    // try {
+    //   const { data, error } = await supabase.functions.invoke("tally-bridge", {
+    //     body: { action: "check-session", sessionCode },
+    //   });
+    //   if (error) throw error;
+    //   return data?.connected || false;
+    // } catch (err) {
+    //   console.error("Error checking session:", err);
+    //   return false;
+    // }
+  }, [toast]);
 
   const checkAndRestoreSession = async (sessionCode: string, savedCompanyInfo: TallyCompanyInfo | null) => {
     const isActive = await checkSession(sessionCode);
@@ -185,55 +192,52 @@ export function TallyProvider({ children }: { children: ReactNode }) {
   };
 
   const sendTallyRequest = useCallback(async (sessionCode: string, xmlRequest: string): Promise<string | null> => {
-    try {
-      // 1) Create request (fast, should never time out)
-      const { data: createData, error: createError } = await supabase.functions.invoke("tally-bridge", {
-        body: { action: "send-request", sessionCode, xmlRequest },
-      });
+    // Edge functions not available in SQLite
+    toast({
+      title: "Not Available",
+      description: "Tally Bridge requires edge functions. Please use Supabase or implement alternative service.",
+      variant: "destructive",
+    });
+    throw new Error("Tally Bridge requires edge functions. Not available in SQLite.");
+    // try {
+    //   // 1) Create request (fast, should never time out)
+    //   const { data: createData, error: createError } = await supabase.functions.invoke("tally-bridge", {
+    //     body: { action: "send-request", sessionCode, xmlRequest },
+    //   });
+    //   if (createError) throw createError;
+    //   if (createData?.error) throw new Error(createData.error);
+    //   // Backward compatibility: old API returned { data: "...xml..." }
+    //   if (typeof createData?.data === "string") {
+    //     return createData.data;
+    //   }
+    //   const requestId = createData?.requestId as string | undefined;
+    //   if (!requestId) {
+    //     throw new Error("Failed to create request (missing requestId)");
+    //   }
+    //   // 2) Poll status from client (so edge function doesn't hit runtime timeout)
+    //   const timeoutMs = 600000; // 10 minutes
+    //   const pollEveryMs = 1000;
+    //   const start = Date.now();
+    //   while (Date.now() - start < timeoutMs) {
+    //     const { data: statusData, error: statusError } = await supabase.functions.invoke("tally-bridge", {
+    //       body: { action: "get-request-status", requestId },
+    //     });
+    //     if (statusError) throw statusError;
 
-      if (createError) throw createError;
-      if (createData?.error) throw new Error(createData.error);
-
-      // Backward compatibility: old API returned { data: "...xml..." }
-      if (typeof createData?.data === "string") {
-        return createData.data;
-      }
-
-      const requestId = createData?.requestId as string | undefined;
-      if (!requestId) {
-        throw new Error("Failed to create request (missing requestId)");
-      }
-
-      // 2) Poll status from client (so edge function doesn't hit runtime timeout)
-      // Month-wise fallback can take several minutes (multiple month snapshots), so keep this generous.
-      const timeoutMs = 600000; // 10 minutes
-      const pollEveryMs = 1000;
-      const start = Date.now();
-
-      while (Date.now() - start < timeoutMs) {
-        const { data: statusData, error: statusError } = await supabase.functions.invoke("tally-bridge", {
-          body: { action: "get-request-status", requestId },
-        });
-
-        if (statusError) throw statusError;
-
-        if (statusData?.status === "completed") {
-          return (statusData?.data as string) || null;
-        }
-
-        if (statusData?.status === "failed") {
-          throw new Error(statusData?.error || "Tally request failed");
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, pollEveryMs));
-      }
-
-      throw new Error("Request timeout - Tally is taking too long to respond");
-    } catch (err) {
-      console.error("Error sending Tally request:", err);
-      throw err;
-    }
-  }, []);
+    //     if (statusData?.status === "completed") {
+    //       return (statusData?.data as string) || null;
+    //     }
+    //     if (statusData?.status === "failed") {
+    //       throw new Error(statusData?.error || "Tally request failed");
+    //     }
+    //     await new Promise((resolve) => setTimeout(resolve, pollEveryMs));
+    //   }
+    //   throw new Error("Request timeout - Tally is taking too long to respond");
+    // } catch (err) {
+    //   console.error("Error sending Tally request:", err);
+    //   throw err;
+    // }
+  }, [toast]);
 
   const connectWithSession = useCallback(async (sessionCode: string) => {
     if (!sessionCode || sessionCode.length < 4) {

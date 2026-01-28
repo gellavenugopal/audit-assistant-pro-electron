@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import type { Database } from '@/integrations/supabase/types';
 
-type AppRole = Database['public']['Enums']['app_role'];
+const db = getSQLiteClient();
+
+type AppRole = 'partner' | 'manager' | 'senior' | 'staff' | 'viewer' | 'admin' | 'user';
 
 interface TeamMember {
   user_id: string;
@@ -19,17 +20,18 @@ export function useTeamMembers(engagementId?: string) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canManageRoles = currentUserRole === 'partner' || currentUserRole === 'manager';
+  const canManageRoles = currentUserRole === 'partner' || currentUserRole === 'manager' || currentUserRole === 'admin';
 
   const fetchMembers = async () => {
     try {
       let targetUserIds: string[] | null = null;
 
       if (engagementId) {
-        const { data: assignments, error: assignmentsError } = await supabase
+        const { data: assignments, error: assignmentsError } = await db
           .from('engagement_assignments')
           .select('user_id')
-          .eq('engagement_id', engagementId);
+          .eq('engagement_id', engagementId)
+          .execute();
 
         if (assignmentsError) throw assignmentsError;
 
@@ -42,23 +44,20 @@ export function useTeamMembers(engagementId?: string) {
         }
       }
 
-      const profilesQuery = supabase
-        .from('profiles')
-        .select('user_id, full_name, email, avatar_url');
-
-      const rolesQuery = supabase
-        .from('user_roles')
-        .select('user_id, role');
-
-      if (targetUserIds) {
-        profilesQuery.in('user_id', targetUserIds);
-        rolesQuery.in('user_id', targetUserIds);
-      }
-
-      const [{ data: profiles, error: profilesError }, { data: roles, error: rolesError }] = await Promise.all([
-        profilesQuery,
-        rolesQuery,
+      // Fetch all profiles and roles, filter in JavaScript if needed
+      const [{ data: allProfiles, error: profilesError }, { data: allRoles, error: rolesError }] = await Promise.all([
+        db.from('profiles').select('user_id, full_name, email, avatar_url').execute(),
+        db.from('user_roles').select('user_id, role').execute(),
       ]);
+      
+      // Filter by targetUserIds if specified
+      const profiles = targetUserIds 
+        ? (allProfiles || []).filter(p => targetUserIds.includes(p.user_id))
+        : allProfiles;
+      
+      const roles = targetUserIds
+        ? (allRoles || []).filter(r => targetUserIds.includes(r.user_id))
+        : allRoles;
 
       if (rolesError) throw rolesError;
       if (profilesError) throw profilesError;
@@ -74,11 +73,13 @@ export function useTeamMembers(engagementId?: string) {
 
       // Sort by role hierarchy
       const roleOrder: Record<AppRole, number> = {
-        partner: 1,
-        manager: 2,
-        senior: 3,
-        staff: 4,
-        viewer: 5,
+        admin: 1,
+        partner: 2,
+        manager: 3,
+        senior: 4,
+        staff: 5,
+        viewer: 6,
+        user: 7,
       };
 
       membersData.sort((a, b) => roleOrder[a.role] - roleOrder[b.role]);
@@ -105,10 +106,11 @@ export function useTeamMembers(engagementId?: string) {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('user_roles')
         .update({ role: newRole })
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .execute();
 
       if (error) throw error;
 

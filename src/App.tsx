@@ -1,9 +1,11 @@
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Routes, Route } from "react-router-dom";
+import { HashRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { EngagementProvider } from "@/contexts/EngagementContext";
 import { TallyProvider } from "@/contexts/TallyContext";
 import { ExportedFileDialogProvider } from "@/contexts/ExportedFileDialogContext";
@@ -43,6 +45,23 @@ import { EngagementLetterGenerator } from "@/components/appointment/EngagementLe
 
 const queryClient = new QueryClient();
 
+function AuthRedirector() {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Force auth route on app load if no user session
+    // This avoids restoring a previous route before login.
+    if (!loading && !user && location.pathname !== "/auth") {
+      console.log('🔄 AuthRedirector: No user detected, redirecting to /auth');
+      navigate("/auth", { replace: true });
+    }
+  }, [loading, user, location.pathname, navigate]);
+
+  return null;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ExportedFileDialogProvider>
@@ -52,6 +71,7 @@ const App = () => (
         <Sonner />
         <HashRouter>
           <AuthProvider>
+          <AuthRedirector />
           <EngagementProvider>
             <TallyProvider>
               <Routes>

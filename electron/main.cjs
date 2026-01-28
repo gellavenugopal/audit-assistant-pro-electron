@@ -1,6 +1,10 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const { initializeAutoUpdater } = require('./auto-updater.cjs');
+const crypto = require('crypto');
+const fs = require('fs');
+let Database;
+let bcrypt;
 
 function safeLog(...args) {
   try {
@@ -19,6 +23,242 @@ try {
 } catch (error) {
   console.warn('ODBC module not available - Tally integration will be disabled');
 }
+
+// SQLite is optional - only load if available
+let sqliteDb = null;
+function getSqliteDb() {
+  try {
+    if (!Database) {
+      try {
+        Database = require('better-sqlite3');
+        safeLog('✅ better-sqlite3 loaded successfully');
+      } catch (error) {
+        safeLog('❌ better-sqlite3 module not available:', error.message);
+        safeLog('   Error details:', error.stack);
+        safeLog('   This usually means the module needs to be rebuilt for Electron.');
+        safeLog('   Try running: npx electron-rebuild -f -w better-sqlite3');
+        return null;
+      }
+    }
+    if (!bcrypt) {
+      try {
+        bcrypt = require('bcrypt');
+        safeLog('✅ bcrypt loaded successfully');
+      } catch (error) {
+        safeLog('❌ bcrypt module not available:', error.message);
+        safeLog('   Error details:', error.stack);
+        safeLog('   This usually means the module needs to be rebuilt for Electron.');
+        safeLog('   Try running: npx electron-rebuild -f -w bcrypt');
+        return null;
+      }
+    }
+    if (!sqliteDb) {
+      try {
+        const userDataPath = app.getPath('userData');
+        const dbPath = path.join(userDataPath, 'audit_assistant.db');
+        sqliteDb = new Database(dbPath);
+
+        // Enable foreign keys and optimizations
+        sqliteDb.pragma('foreign_keys = ON');
+        sqliteDb.pragma('journal_mode = WAL');
+        sqliteDb.pragma('synchronous = NORMAL');
+
+        safeLog('✅ SQLite database opened at:', dbPath);
+        safeLog('🔧 Initializing database schema from schema files...');
+
+        // Always initialize full schema to ensure all tables exist
+        // This is idempotent (uses CREATE TABLE IF NOT EXISTS)
+        // DO NOT wrap in try-catch - we want this to fail loudly if there's a problem
+        initializeDatabaseSchema(sqliteDb);
+        safeLog('✅ All database tables initialized successfully!');
+
+      } catch (dbError) {
+        safeLog('❌ Failed to create SQLite database:', dbError.message);
+        safeLog('   Error details:', dbError.stack);
+
+        // Show error dialog to user
+        const { dialog } = require('electron');
+        if (app && app.isReady()) {
+          dialog.showErrorBox(
+            'Database Initialization Error',
+            `Failed to initialize database:\n\n${dbError.message}\n\nDetails: ${dbError.stack ? dbError.stack.substring(0, 500) : 'See console logs'}\n\nPlease check the console for full details and reinstall if the problem persists.`
+          );
+        }
+
+        throw dbError;
+      }
+    }
+
+    return sqliteDb;
+  } catch (error) {
+    safeLog('❌ Failed to initialize SQLite database:', error.message);
+    safeLog('   Full error:', error.stack);
+    return null;
+  }
+}
+
+/**
+ * Initialize database schema by reading and executing all schema files
+ * Uses ONLY the schema files from sqlite/schema/ directory
+ */
+function initializeDatabaseSchema(db) {
+  safeLog('   📦 Initializing database schema from SQL files...');
+
+  // Helper function to clean SQL statement - removes comments but keeps the SQL
+  const cleanStatement = (stmt) => {
+    return stmt
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => !line.startsWith('--'))  // Remove comment-only lines
+      .join('\n')
+      .trim();
+  };
+
+  // Determine schema directory location - try multiple paths
+  let schemaDir = null;
+  const possiblePaths = [];
+
+  if (app.isPackaged) {
+    // In production, try resources path first
+    possiblePaths.push(path.join(process.resourcesPath, 'sqlite', 'schema'));
+    possiblePaths.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'sqlite', 'schema'));
+    possiblePaths.push(path.join(__dirname, '..', 'sqlite', 'schema'));
+    safeLog('   📦 Running as packaged app');
+    safeLog('   resourcesPath:', process.resourcesPath);
+  } else {
+    // In development
+    possiblePaths.push(path.join(__dirname, '..', 'sqlite', 'schema'));
+    possiblePaths.push(path.join(process.cwd(), 'sqlite', 'schema'));
+    safeLog('   🔧 Running in development mode');
+  }
+
+  // Find first existing schema directory
+  for (const p of possiblePaths) {
+    safeLog(`   Checking path: ${p}`);
+    if (fs.existsSync(p)) {
+      schemaDir = p;
+      safeLog(`   ✓ Found schema directory at: ${p}`);
+      break;
+    }
+  }
+
+  if (!schemaDir) {
+    const errorMsg = `Schema directory not found! Tried paths:\n${possiblePaths.join('\n')}`;
+    safeLog(`   ❌ ${errorMsg}`);
+    throw new Error(errorMsg);
+  }
+
+  const schemaFiles = [
+    '01_core_tables.sql',
+    '02_audit_workflow_tables.sql',
+    '03_audit_program_tables.sql',
+    '04_audit_report_tables.sql',
+    '05_trial_balance_tables.sql',
+    '06_going_concern_tables.sql',
+    '07_rule_engine_tables.sql',
+    '08_template_system_tables.sql'
+  ];
+
+  safeLog(`   Executing ${schemaFiles.length} schema files...`);
+
+  let totalSuccess = 0;
+  let totalSkip = 0;
+  let totalErrors = 0;
+
+  schemaFiles.forEach((file, index) => {
+    const filePath = path.join(schemaDir, file);
+
+    if (!fs.existsSync(filePath)) {
+      safeLog(`   ❌ Schema file not found: ${filePath}`);
+      throw new Error(`Missing required schema file: ${file}`);
+    }
+
+    const sql = fs.readFileSync(filePath, 'utf8');
+
+    if (!sql || sql.trim().length === 0) {
+      safeLog(`   ⚠️  Schema file is empty: ${file}`);
+      return;
+    }
+
+    // Split SQL into individual statements and execute each separately
+    const statements = sql
+      .split(';')
+      .map(stmt => cleanStatement(stmt))
+      .filter(stmt => stmt.length > 0);
+
+    let successCount = 0;
+    let skipCount = 0;
+    let errorCount = 0;
+
+    for (const statement of statements) {
+      try {
+        db.exec(statement + ';');
+        successCount++;
+      } catch (error) {
+        // "already exists" errors are OK - table/index/trigger already there
+        if (error.message && error.message.includes('already exists')) {
+          skipCount++;
+        } else {
+          // Real error - log it but continue with other statements
+          errorCount++;
+          safeLog(`      ⚠️  Error in ${file}: ${error.message}`);
+          // Log statement preview for debugging
+          const preview = statement.substring(0, 100).replace(/\n/g, ' ');
+          safeLog(`         Statement: ${preview}...`);
+        }
+      }
+    }
+
+    totalSuccess += successCount;
+    totalSkip += skipCount;
+    totalErrors += errorCount;
+
+    if (errorCount > 0) {
+      safeLog(`   ${index + 1}. ⚠️  ${file} - ${successCount} ok, ${skipCount} existed, ${errorCount} errors`);
+    } else {
+      safeLog(`   ${index + 1}. ✓ ${file} - ${successCount} ok, ${skipCount} existed`);
+    }
+  });
+
+  safeLog(`   📊 Total: ${totalSuccess} statements executed, ${totalSkip} already existed, ${totalErrors} errors`);
+
+  // Verify tables created
+  const tableCount = db.prepare(
+    "SELECT COUNT(*) as count FROM sqlite_master WHERE type='table'"
+  ).get();
+
+  safeLog(`✅ Database schema initialized! (${tableCount.count} tables)`);
+
+  // Verify specific important tables exist
+  const importantTables = [
+    'clients',
+    'engagements',
+    'profiles',
+    'user_roles',
+    'financial_years',
+    'audit_programs_new',
+    'risks',
+    'evidence_files'
+  ];
+  const missingTables = [];
+  for (const tableName of importantTables) {
+    const exists = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+    ).get(tableName);
+    if (!exists) {
+      missingTables.push(tableName);
+      safeLog(`   ❌ Missing table: ${tableName}`);
+    }
+  }
+
+  if (missingTables.length > 0) {
+    throw new Error(`Critical tables missing after initialization: ${missingTables.join(', ')}`);
+  }
+
+  safeLog(`✅ Verified all ${importantTables.length} critical tables exist`);
+}
+
+let currentUserId = null;
 
 const isDev = process.env.NODE_ENV === 'development' || (app && !app.isPackaged);
 
@@ -46,6 +286,233 @@ function setAppMenu() {
 
 function registerIpcHandlers() {
   const { ipcMain } = require('electron');
+
+  // --- SQLite AUTH & QUERY HANDLERS ---
+  ipcMain.handle('sqlite-auth', async (event, payload) => {
+    const db = getSqliteDb();
+    if (!db) {
+      return { data: null, error: { message: 'SQLite not available. Please ensure better-sqlite3 and bcrypt are installed.' } };
+    }
+
+    const { action, email, password, fullName } = payload || {};
+
+    try {
+      if (action === 'signup') {
+        if (!email || !password) {
+          return { data: null, error: { message: 'Email and password are required.' } };
+        }
+
+        const existing = db.prepare('SELECT id FROM profiles WHERE email = ?').get(email);
+        if (existing) {
+          return { data: null, error: { message: 'This email is already registered.' } };
+        }
+
+        const id = crypto.randomBytes(16).toString('hex');
+        const user_id = id;
+        const name = fullName || email.split('@')[0];
+        const passwordHash = bcrypt.hashSync(password, 10);
+
+        const insertProfile = db.prepare(`
+          INSERT INTO profiles (id, user_id, full_name, email, password_hash, is_active)
+          VALUES (?, ?, ?, ?, ?, 1)
+        `);
+        insertProfile.run(id, user_id, name, email, passwordHash);
+
+        const countRow = db.prepare('SELECT COUNT(*) as count FROM user_roles').get();
+        const isFirstUser = !countRow || countRow.count === 0;
+        const role = isFirstUser ? 'admin' : 'staff';
+
+        const insertRole = db.prepare(`
+          INSERT INTO user_roles (id, user_id, role)
+          VALUES (?, ?, ?)
+        `);
+        insertRole.run(crypto.randomBytes(16).toString('hex'), user_id, role);
+
+        currentUserId = user_id;
+
+        return {
+          data: {
+            id,
+            user_id,
+            email,
+            full_name: name,
+            role,
+          },
+          error: null,
+        };
+      }
+
+      if (action === 'login') {
+        if (!email || !password) {
+          return { data: null, error: { message: 'Email and password are required.' } };
+        }
+
+        const row = db.prepare('SELECT * FROM profiles WHERE email = ? AND is_active = 1').get(email);
+        if (!row || !row.password_hash) {
+          return { data: null, error: { message: 'Invalid login credentials' } };
+        }
+
+        const ok = bcrypt.compareSync(password, row.password_hash);
+        if (!ok) {
+          return { data: null, error: { message: 'Invalid login credentials' } };
+        }
+
+        currentUserId = row.user_id;
+
+        return {
+          data: {
+            id: row.id,
+            user_id: row.user_id,
+            email: row.email,
+            full_name: row.full_name,
+          },
+          error: null,
+        };
+      }
+
+      if (action === 'logout') {
+        currentUserId = null;
+        return { data: null, error: null };
+      }
+
+      return { data: null, error: { message: 'Unknown auth action' } };
+    } catch (error) {
+      console.error('SQLite auth error:', error);
+      return { data: null, error: { message: error.message || 'SQLite auth failed' } };
+    }
+  });
+
+  ipcMain.handle('sqlite-get-current-user', async () => {
+    const db = getSqliteDb();
+    if (!db || !currentUserId) {
+      return null;
+    }
+    try {
+      const row = db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(currentUserId);
+      if (!row) return null;
+      return {
+        id: row.id,
+        user_id: row.user_id,
+        email: row.email,
+        full_name: row.full_name,
+      };
+    } catch (error) {
+      console.error('SQLite getCurrentUser error:', error);
+      return null;
+    }
+  });
+
+  ipcMain.handle('sqlite-query', async (event, payload) => {
+    const db = getSqliteDb();
+    if (!db) {
+      safeLog('❌ sqlite-query called but database is not available');
+      return { data: null, error: { message: 'SQLite not available. Please ensure better-sqlite3 and bcrypt are installed and rebuilt for Electron. Run: npx electron-rebuild -f -w better-sqlite3,bcrypt' } };
+    }
+
+    // Extract table name outside try-catch so it's available in error handler
+    const { table, action, columns, filters, data, orderBy, limit } = payload || {};
+
+    try {
+      if (!table || !action) {
+        return { data: null, error: { message: 'Table and action are required.' } };
+      }
+
+      const colList = columns && typeof columns === 'string' ? columns : '*';
+      const whereClauses = [];
+      const params = [];
+
+      if (Array.isArray(filters)) {
+        for (const f of filters) {
+          if (f && f.column) {
+            whereClauses.push(`${f.column} = ?`);
+            params.push(f.value);
+          }
+        }
+      }
+
+      const whereSql = whereClauses.length ? ` WHERE ${whereClauses.join(' AND ')}` : '';
+
+      // Build ORDER BY clause
+      let orderSql = '';
+      if (orderBy && orderBy.column) {
+        const direction = orderBy.ascending ? 'ASC' : 'DESC';
+        orderSql = ` ORDER BY ${orderBy.column} ${direction}`;
+      }
+
+      // Build LIMIT clause
+      let limitSql = '';
+      if (limit && typeof limit === 'number' && limit > 0) {
+        limitSql = ` LIMIT ${limit}`;
+      }
+
+      if (action === 'select') {
+        const sql = `SELECT ${colList} FROM ${table}${whereSql}${orderSql}${limitSql}`;
+        const stmt = db.prepare(sql);
+        const rows = stmt.all(...params);
+        return { data: rows, error: null };
+      }
+
+      if (action === 'insert') {
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          return { data: null, error: { message: 'No data to insert.' } };
+        }
+        const rows = Array.isArray(data) ? data : [data];
+        const inserted = [];
+        for (const row of rows) {
+          const cleanRow = { ...row };
+          // ONLY set created_by='system' if the field exists in the row but is empty
+          // Don't add created_by to tables that don't have this column (like activity_logs)
+          if ('created_by' in cleanRow && !cleanRow.created_by) {
+            cleanRow.created_by = 'system';
+          }
+
+          const keys = Object.keys(cleanRow);
+          const placeholders = keys.map(() => '?').join(', ');
+          const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
+          const stmt = db.prepare(sql);
+          const result = stmt.run(...keys.map((k) => cleanRow[k]));
+
+          // Fetch the inserted row to get the auto-generated ID
+          const insertedRow = db.prepare(`SELECT * FROM ${table} WHERE rowid = ?`).get(result.lastInsertRowid);
+          inserted.push(insertedRow || cleanRow);
+        }
+        return { data: inserted, error: null };
+      }
+
+      if (action === 'update') {
+        if (!data) {
+          return { data: null, error: { message: 'No data to update.' } };
+        }
+        const keys = Object.keys(data);
+        const setSql = keys.map((k) => `${k} = ?`).join(', ');
+        const sql = `UPDATE ${table} SET ${setSql}${whereSql}`;
+        const stmt = db.prepare(sql);
+        stmt.run(...keys.map((k) => data[k]), ...params);
+        return { data: null, error: null };
+      }
+
+      if (action === 'delete') {
+        const sql = `DELETE FROM ${table}${whereSql}`;
+        const stmt = db.prepare(sql);
+        stmt.run(...params);
+        return { data: null, error: null };
+      }
+
+      return { data: null, error: { message: 'Unknown query action' } };
+    } catch (error) {
+      console.error('SQLite query error:', error);
+
+      // Better error reporting for missing tables
+      if (error.message && error.message.includes('no such table')) {
+        const tableName = table || 'unknown';
+        safeLog(`❌ Table not found: ${tableName}`);
+        safeLog('   This should have been created on startup. Check schema initialization logs.');
+        return { data: null, error: { message: `Table ${tableName} does not exist. The database schema may not have initialized correctly. Please restart the application.` } };
+      }
+
+      return { data: null, error: { message: error.message || 'SQLite query failed' } };
+    }
+  });
 
   // Check if ODBC connection is already active (without creating new connection)
   ipcMain.handle('odbc-check-connection', async () => {
@@ -135,12 +602,12 @@ function registerIpcHandlers() {
       if (!odbcConnection) {
         return { success: false, error: 'Not connected to Tally ODBC' };
       }
-      
+
       // Note: Tally ODBC doesn't directly support date filtering in SELECT queries
       // The balances returned are as of the current Tally date setting
       // To get period-specific balances, Tally's date should be set before querying
       // For now, we fetch all ledgers - the balances reflect Tally's current date context
-      
+
       // Convert dates to Tally format (DD-MMM-YYYY) for potential future use
       const formatDateForTally = (dateStr) => {
         if (!dateStr) return null;
@@ -151,11 +618,11 @@ function registerIpcHandlers() {
         const year = d.getFullYear();
         return `${day}-${month}-${year}`;
       };
-      
+
       const toDateFormatted = formatDateForTally(toDate);
       safeLog(`Trial Balance: Fetching for period ${fromDate} to ${toDate} (Tally date: ${toDateFormatted})`);
       safeLog('Note: Ensure Tally is set to the correct date before fetching. ODBC returns balances as of Tally\'s current date.');
-      
+
       // First, get company name
       let companyName = '';
       try {
@@ -226,9 +693,9 @@ function registerIpcHandlers() {
           const primaryGroup = (row['$_PrimaryGroup'] || '').toLowerCase();
           const accountHead = (row['$Name'] || '').toLowerCase();
           // Exclude Stock-in-Hand ledgers - we'll add correct Opening Stock separately
-          if (primaryGroup === 'stock-in-hand' || 
-              accountHead.includes('stock-in-hand') ||
-              accountHead === 'stock in hand') {
+          if (primaryGroup === 'stock-in-hand' ||
+            accountHead.includes('stock-in-hand') ||
+            accountHead === 'stock in hand') {
             safeLog(`Trial Balance: Excluding ledger "${row['$Name']}" (Stock-in-Hand) - will add corrected stock entry`);
             return false;
           }
@@ -239,17 +706,17 @@ function registerIpcHandlers() {
           const primaryGroup = row['$_PrimaryGroup'] || '';
           const openingBalance = parseNumeric(row['$OpeningBalance']);
           let closingBalance = parseNumeric(row['$ClosingBalance']);
-          
+
           // For Profit & Loss A/c, use opening balance as closing balance
           // because Tally's TB shows P&L without current year's profit/loss
           // This prevents "Net Profit" from appearing in closing balance
-          if (accountHead.toLowerCase() === 'profit & loss a/c' || 
-              accountHead.toLowerCase() === 'profit and loss a/c' ||
-              accountHead.toLowerCase() === 'profit & loss account' ||
-              accountHead.toLowerCase() === 'profit and loss account') {
+          if (accountHead.toLowerCase() === 'profit & loss a/c' ||
+            accountHead.toLowerCase() === 'profit and loss a/c' ||
+            accountHead.toLowerCase() === 'profit & loss account' ||
+            accountHead.toLowerCase() === 'profit and loss account') {
             closingBalance = openingBalance;
           }
-          
+
           return {
             accountHead,
             openingBalance,
@@ -286,9 +753,9 @@ function registerIpcHandlers() {
 
       safeLog(`Trial Balance: Processed ${processedData.length} ledgers (including stock if applicable)`);
 
-      return { 
-        success: true, 
-        data: processedData, 
+      return {
+        success: true,
+        data: processedData,
         companyName,
         stockInfo: {
           itemCount: stockItems.length,
@@ -803,7 +1270,7 @@ function registerIpcHandlers() {
 
       // Filter in JavaScript to handle different GSTIN formats and registration types
       // Tally ODBC field names can vary. We normalize/validate before deciding "missing".
-      
+
       // Check if a registration type should require GSTIN (only "Regular" registration)
       const isRegularRegistration = (regType) => {
         if (!regType) return false;
@@ -823,23 +1290,23 @@ function registerIpcHandlers() {
         if (!s) return false;
         const low = s.toLowerCase();
         // Reject obvious placeholders/empty values
-        if (low === 'null' || low === 'na' || low === 'n/a' || low === 'nil' || 
-            s === '0' || s === '-' || s === '--' || low === 'not available' ||
-            low === 'not applicable') return false;
-        
+        if (low === 'null' || low === 'na' || low === 'n/a' || low === 'nil' ||
+          s === '0' || s === '-' || s === '--' || low === 'not available' ||
+          low === 'not applicable') return false;
+
         // Accept any 15-character alphanumeric string as valid GSTIN
         // This is more lenient to avoid showing ledgers where GSTIN is actually entered
         const upper = s.toUpperCase().replace(/\s/g, '');
         if (upper.length === 15 && /^[A-Z0-9]{15}$/.test(upper)) {
           return true;
         }
-        
+
         // Also accept if it looks like a partial/old format GSTIN (at least has some content)
         // If user has entered something meaningful (more than 5 chars, alphanumeric), consider it fed
         if (upper.length >= 10 && /^[A-Z0-9]+$/.test(upper)) {
           return true;
         }
-        
+
         return false;
       };
 
@@ -964,7 +1431,7 @@ function createWindow() {
       webSecurity: true,
     },
     icon: path.join(__dirname, '../public/favicon.ico'),
-    title: 'Audit Assistant Pro',
+    title: 'ICAI VERA',
     show: false,
   });
 

@@ -49,7 +49,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ApprovalBadge } from '@/components/audit/ApprovalBadge';
 import { ApprovalActions } from '@/components/audit/ApprovalActions';
 import { UnlockDialog } from '@/components/audit/UnlockDialog';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 const getFileIcon = (mimeType: string | null) => {
   if (!mimeType) return File;
@@ -111,7 +113,7 @@ export default function EvidenceVault() {
       }
 
       try {
-        const { data: programs, error: programError } = await supabase
+        const { data: programs, error: programError } = await db
           .from('audit_programs_new')
           .select('id')
           .eq('engagement_id', currentEngagement.id);
@@ -124,7 +126,7 @@ export default function EvidenceVault() {
           return;
         }
 
-        const { data: attachments, error: attachmentError } = await supabase
+        const { data: attachments, error: attachmentError } = await db
           .from('audit_program_attachments')
           .select('file_path,audit_program_id')
           .in('audit_program_id', programIds);
