@@ -278,7 +278,25 @@ function setAppMenu() {
     { label: '&Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: '&View', submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
     { label: '&Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
-    { label: '&Help', submenu: [{ role: 'about' }] },
+    {
+      label: '&Help',
+      submenu: [
+        {
+          label: 'About ICAI VERA',
+          click: () => {
+            const { dialog } = require('electron');
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'About ICAI VERA',
+              message: 'ICAI VERA',
+              detail: `Version: ${app.getVersion()}\nProfessional Audit Tool`,
+              buttons: ['OK'],
+              icon: path.join(__dirname, '../build/icon.png'),
+            });
+          }
+        }
+      ]
+    },
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -1430,7 +1448,7 @@ function createWindow() {
       contextIsolation: true,
       webSecurity: true,
     },
-    icon: path.join(__dirname, '../public/favicon.ico'),
+    icon: path.join(__dirname, '../build/icon.png'),
     title: 'ICAI VERA',
     show: false,
   });
@@ -1460,6 +1478,19 @@ app.whenReady().then(() => {
   } catch (error) {
     safeLog('Unable to set cache path:', error && error.message ? error.message : error);
   }
+
+  // Set App User Model ID for Windows
+  app.setAppUserModelId('com.icai-vera.app');
+
+  app.setAboutPanelOptions({
+    applicationName: 'ICAI VERA',
+    applicationVersion: app.getVersion(),
+    version: app.getVersion(),
+    copyright: 'Copyright © 2026 ICAI VERA',
+    authors: ['ICAI VERA'],
+    website: 'https://github.com/gellavenugopal/audit-assistant-pro-electron',
+    iconPath: path.join(__dirname, '../build/icon.png'),
+  });
 
   safeLog('Electron app ready - IPC handlers should be registered');
   setAppMenu();

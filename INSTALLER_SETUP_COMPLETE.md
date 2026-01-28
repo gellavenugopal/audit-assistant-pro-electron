@@ -1,6 +1,6 @@
 # ✅ Installer Setup Complete!
 
-I've configured a professional Windows installer for **Audit Assistant Pro** with all the features you requested.
+I've configured a professional Windows installer for **ICAI VERA** with all the features you requested.
 
 ---
 
@@ -178,7 +178,7 @@ electron-dist/
 2. **Database auto-initialization**:
    ```
    ✅ SQLite database opened at:
-      C:\Users\<username>\AppData\Roaming\audit-assistant-pro\audit_assistant.db
+      C:\Users\<username>\AppData\Roaming\icai-vera\audit_assistant.db
    
    ✅ better-sqlite3 loaded successfully
    ✅ bcrypt loaded successfully
@@ -206,7 +206,7 @@ electron-dist/
 
 ```
 Windows 10/11:
-C:\Users\<username>\AppData\Roaming\audit-assistant-pro\audit_assistant.db
+C:\Users\<username>\AppData\Roaming\icai-vera\audit_assistant.db
 ```
 
 **Persistent**: Data survives app updates!

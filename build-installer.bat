@@ -1,9 +1,9 @@
 @echo off
-REM Build Audit Assistant Pro Windows Installer
+REM Build ICAI VERA Windows Installer
 REM This script automates the complete build process
 
 echo ==========================================
-echo  Audit Assistant Pro - Installer Builder
+echo  ICAI VERA - Installer Builder
 echo ==========================================
 echo.
 
@@ -63,7 +63,7 @@ echo          BUILD COMPLETE!
 echo ==========================================
 echo.
 echo Your installer is ready at:
-echo electron-dist\Audit Assistant Pro Setup 1.0.0.exe
+echo electron-dist\ICAI VERA Setup 1.0.0.exe
 echo.
 echo You can now:
 echo 1. Test the installer locally

@@ -171,8 +171,8 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
         },
-        icon: path.join(__dirname, '../public/favicon.ico'),
-        title: 'Audit Assistant Pro',
+        icon: path.join(__dirname, '../build/icon.png'),
+        title: 'ICAI VERA',
         show: false,
     });
 
@@ -191,7 +191,7 @@ function createWindow() {
     } else {
         // In production, load the built files
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
-    }    
+    }
 }
 
 // Auto-updater event handlers are now managed in auto-updater.js
@@ -203,7 +203,7 @@ app.whenReady().then(() => {
     setupGstzenHandlers();
     setupAppHandlers();
     createWindow();
-    
+
     // Initialize auto-updater with GitHub provider
     // - Checks for updates on app ready
     // - Sets up all event handlers and IPC communication
@@ -217,7 +217,7 @@ app.whenReady().then(() => {
             createWindow();
         }
     });
-    
+
 });
 
 // Quit when all windows are closed, except on macOS.
