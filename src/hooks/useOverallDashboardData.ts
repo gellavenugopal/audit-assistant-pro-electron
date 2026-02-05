@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 type ActivityLog = {
   id: string;
@@ -139,25 +141,30 @@ export function useOverallDashboardData() {
         reviewNotesRes,
         activityRes,
       ] = await Promise.all([
-        supabase
+        db
           .from('engagements')
           .select('id, name, client_name, status, end_date')
           .order('updated_at', { ascending: false })
-          .order('created_at', { ascending: false }),
-        supabase
+          .order('created_at', { ascending: false })
+          .execute(),
+        db
           .from('risks')
-          .select('engagement_id, combined_risk, status'),
-        supabase
+          .select('engagement_id, combined_risk, status')
+          .execute(),
+        db
           .from('evidence_files')
-          .select('file_size'),
-        supabase
+          .select('file_size')
+          .execute(),
+        db
           .from('review_notes')
-          .select('status, priority'),
-        supabase
+          .select('status, priority')
+          .execute(),
+        db
           .from('activity_logs')
           .select('id, user_name, action, entity, details, created_at')
           .order('created_at', { ascending: false })
-          .limit(10),
+          .limit(10)
+          .execute(),
       ]);
 
       const engagements = engagementsRes.data || [];
@@ -252,18 +259,10 @@ export function useOverallDashboardData() {
   useEffect(() => {
     fetchData();
 
-    const channel = supabase
-      .channel('overall-dashboard')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagements' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'risks' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'review_notes' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'evidence_files' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, fetchData)
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Real-time subscriptions not available in SQLite
+    // Use polling if real-time updates are needed
+    // const interval = setInterval(fetchData, 30000);
+    // return () => clearInterval(interval);
   }, []);
 
   return { data, loading, refetch: fetchData };

@@ -1,11 +1,11 @@
 {
-  "name": "audit-assistant-pro",
+  "name": "icai-vera",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.9.1",
   "type": "module",
   "main": "electron/main.cjs",
-  "author": "Audit Assistant Pro",
-  "description": "ICAI Audit Tool - Desktop Application",
+  "author": "ICAI VERA",
+  "description": "ICAI VERA - Professional Audit Tool",
   "repository": {
     "type": "git",
     "url": "https://github.com/gellavenugopal/audit-assistant-pro-electron"
@@ -16,6 +16,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
+    "postinstall": "electron-rebuild -f -w better-sqlite3,bcrypt",
     "electron": "node electron/run-electron.cjs .",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:8080 && cross-env NODE_ENV=development VITE_DEV_SERVER_URL=http://localhost:8080 node electron/run-electron.cjs .\"",
     "electron:build": "npm run build && electron-builder",
@@ -26,33 +27,72 @@
     "test:bulk-update": "ts-node tests/bulkUpdateHelper.test.ts && ts-node tests/bulkUpdateDialog.integration.test.ts"
   },
   "build": {
-    "appId": "com.audit-assistant-pro.app",
-    "productName": "Audit Assistant Pro",
-    "artifactName": "Audit-Assistant-Pro-${version}.${ext}",
+    "appId": "com.icai-vera.app",
+    "productName": "ICAI VERA",
+    "executableName": "ICAI-VERA",
+    "artifactName": "ICAI-VERA-${version}.${ext}",
+    "icon": "build/icon.png",
     "directories": {
       "output": "electron-dist"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "public/**/*"
+      "sqlite/**/*",
+      "public/**/*",
+      "build/**/*"
     ],
     "publish": {
       "provider": "github",
       "owner": "gellavenugopal",
       "repo": "audit-assistant-pro-electron"
     },
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bcrypt/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "sqlite/schema",
+        "to": "sqlite/schema"
+      }
+    ],
+    "forceCodeSigning": false,
     "win": {
-      "target": "nsis",
-      "icon": "public/favicon.ico"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "verifyUpdateCodeSignature": false,
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "ICAI VERA",
+      "license": "LICENSE.txt",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "menuCategory": true,
+      "include": "installer.nsh"
     },
     "mac": {
       "target": "dmg",
-      "icon": "public/icon-512.png"
+      "icon": "build/icon.png",
+      "category": "public.app-category.business"
     },
     "linux": {
       "target": "AppImage",
-      "icon": "public/favicon.ico"
+      "icon": "build/icon.png",
+      "category": "Office"
     }
   },
   "dependencies": {
@@ -86,6 +126,8 @@
     "@radix-ui/react-tooltip": "^1.2.7",
     "@supabase/supabase-js": "^2.89.0",
     "@tanstack/react-query": "^5.83.0",
+    "bcrypt": "^5.1.1",
+    "better-sqlite3": "^12.6.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -124,10 +166,12 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.2",
     "@eslint/js": "^9.32.0",
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/react": "^16.3.1",
     "@testing-library/user-event": "^14.6.1",
+    "@types/bcrypt": "^5.0.2",
     "@types/node": "^22.16.5",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
@@ -135,7 +179,7 @@
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^39.2.7",
+    "electron": "^40.0.0",
     "electron-builder": "^26.0.12",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",

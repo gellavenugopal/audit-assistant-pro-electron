@@ -136,7 +136,7 @@ export function AppWithUpdater() {
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold">Audit Assistant Pro</h1>
+            <h1 className="text-2xl font-bold">ICAI VERA</h1>
             {/* Version badge in header */}
             <VersionBadgeDisplay />
           </div>
@@ -164,11 +164,11 @@ export function AppWithUpdater() {
  * - Manual update check
  */
 export function UpdateSettingsPage() {
-  const { 
-    currentVersion, 
-    isBeta, 
-    checkForUpdates, 
-    isCheckingForUpdates 
+  const {
+    currentVersion,
+    isBeta,
+    checkForUpdates,
+    isCheckingForUpdates
   } = useAutoUpdater();
 
   return (
@@ -176,7 +176,7 @@ export function UpdateSettingsPage() {
       <div>
         <h2 className="text-lg font-semibold">Updates</h2>
         <p className="text-gray-600 mt-1">
-          Manage how and when Audit Assistant Pro is updated
+          Manage how and when ICAI VERA is updated
         </p>
       </div>
 
@@ -212,7 +212,7 @@ export function UpdateSettingsPage() {
       {/* Auto-update options (future enhancements) */}
       <div className="bg-gray-50 rounded-lg p-4">
         <h3 className="font-medium mb-4">Update Options</h3>
-        
+
         <label className="flex items-center gap-3 mb-4">
           <input type="checkbox" defaultChecked className="rounded" />
           <span className="text-sm">

@@ -9,9 +9,9 @@ interface ProtectedAdminRouteProps {
   allowedRoles?: string[];
 }
 
-export function ProtectedAdminRoute({ 
-  children, 
-  allowedRoles = ['partner', 'manager'] 
+export function ProtectedAdminRoute({
+  children,
+  allowedRoles = ['partner', 'manager', 'admin']
 }: ProtectedAdminRouteProps) {
   const { user, role, loading } = useAuth();
 

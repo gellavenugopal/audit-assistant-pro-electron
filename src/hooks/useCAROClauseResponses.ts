@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface CAROClauseResponse {
   id: string;
@@ -42,10 +44,11 @@ export function useCAROClauseResponses(engagementId: string | undefined) {
     }
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('caro_clause_responses')
         .select('*')
-        .eq('engagement_id', engagementId);
+        .eq('engagement_id', engagementId)
+        .execute();
 
       if (error) throw error;
       setResponses(data || []);
@@ -63,32 +66,43 @@ export function useCAROClauseResponses(engagementId: string | undefined) {
 
     try {
       if (existingResponse) {
-        const { data: updated, error } = await supabase
+        const { error } = await db
           .from('caro_clause_responses')
           .update({
             ...data,
             version_number: existingResponse.version_number + 1,
           })
           .eq('id', existingResponse.id)
-          .select()
-          .single();
+          .execute();
 
         if (error) throw error;
-        setResponses(prev => prev.map(r => r.id === updated.id ? updated : r));
+        
+        // Fetch updated record
+        const { data: updated } = await db
+          .from('caro_clause_responses')
+          .select('*')
+          .eq('id', existingResponse.id)
+          .single();
+        
+        if (updated) {
+          setResponses(prev => prev.map(r => r.id === updated.id ? updated : r));
+        }
         return updated;
       } else {
-        const { data: created, error } = await supabase
+        const { data: insertedData, error } = await db
           .from('caro_clause_responses')
           .insert({
             engagement_id: engagementId,
             clause_id: clauseId,
             ...data,
           })
-          .select()
-          .single();
+          .execute();
 
         if (error) throw error;
-        setResponses(prev => [...prev, created]);
+        const created = Array.isArray(insertedData) ? insertedData[0] : insertedData;
+        if (created) {
+          setResponses(prev => [...prev, created]);
+        }
         return created;
       }
     } catch (error: any) {

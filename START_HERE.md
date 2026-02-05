@@ -172,7 +172,7 @@ ENABLE_BETA_UPDATES=true npm run electron:dev
 import { VersionBadgeDisplay } from '@/components/AppUpdaterManager';
 
 <header>
-  <h1>Audit Assistant Pro</h1>
+  <h1>ICAI VERA</h1>
   <VersionBadgeDisplay />  {/* Shows v1.0.0 or v1.0.0-beta */}
 </header>
 ```
@@ -328,7 +328,7 @@ A: App continues running. No crash. Logs failure. User can manually retry.
 A: Yes! HTTPS only, signature verification, context isolation, no exposed IPC.
 
 **Q: Where are update logs?**
-A: Windows: `%APPDATA%\Audit Assistant Pro\logs\electron-log.log`
+A: Windows: `%APPDATA%\icai-vera\logs\electron-log.log`
 
 **Q: Can users disable updates?**
 A: Not by default, but you can add a setting for it (see examples).

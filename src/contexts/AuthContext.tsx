@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient, auth as sqliteAuth } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 interface Profile {
   id: string;
@@ -33,126 +35,168 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUserData = async (userId: string) => {
     try {
+      console.log('📊 Fetching user data for:', userId);
+
       // Fetch profile
-      const { data: profileData } = await supabase
+      const { data: profileData, error: profileError } = await db
         .from('profiles')
         .select('*')
         .eq('user_id', userId)
-        .maybeSingle();
-      
-      if (profileData) {
+        .single()
+        .execute();
+
+      if (profileError) {
+        console.error('❌ Error fetching profile:', profileError);
+      } else if (profileData) {
+        console.log('✅ Profile loaded:', profileData.full_name);
         setProfile(profileData);
       }
 
       // Fetch role
-      const { data: roleData } = await supabase
+      const { data: roleData, error: roleError } = await db
         .from('user_roles')
         .select('role')
         .eq('user_id', userId)
-        .maybeSingle();
-      
-      if (roleData) {
+        .single()
+        .execute();
+
+      if (roleError) {
+        console.error('❌ Error fetching role:', roleError);
+      } else if (roleData) {
+        console.log('✅ Role loaded:', roleData.role);
         setRole(roleData.role);
       }
     } catch (error) {
-      console.error('Error fetching user data:', error);
+      console.error('❌ Error fetching user data:', error);
     }
   };
 
   useEffect(() => {
     console.log('🚀 AuthContext: Initializing...');
-    
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        console.log('🔐 Auth state changed:', event, !!session);
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        // Defer data fetching to avoid deadlock
-        if (session?.user) {
-          setTimeout(() => {
-            fetchUserData(session.user.id);
-          }, 0);
-        } else {
-          setProfile(null);
-          setRole(null);
-        }
-        
-        setLoading(false);
-      }
-    );
+    let subscription: any = null;
 
-    // THEN check for existing session
-    supabase.auth.getSession()
-      .then(({ data: { session }, error }) => {
+    const initAuth = async () => {
+      try {
+        // Always start in signed-out state so login/signup shows on app load.
+        // This disables any implicit session restoration.
+        console.log('🔓 Clearing any existing session on startup...');
+        await sqliteAuth.signOut();
+        console.log('✅ Session cleared');
+
+        // Set up auth state listener AFTER signOut completes
+        const { data: { subscription: sub } } = sqliteAuth.onAuthStateChange(
+          (event, session) => {
+            console.log('🔐 Auth state changed:', event, !!session);
+            setSession(session as any);
+            setUser(session?.user ?? null);
+
+            // Defer data fetching to avoid deadlock
+            if (session?.user) {
+              setTimeout(() => {
+                fetchUserData(session.user.id);
+              }, 0);
+            } else {
+              setProfile(null);
+              setRole(null);
+            }
+
+            setLoading(false);
+          }
+        );
+
+        subscription = sub;
+
+        // Check for existing session (should be null after signOut)
+        const { data: { session }, error } = await sqliteAuth.getSession();
         console.log('📦 Initial session check:', !!session, error);
-        setSession(session);
+        setSession(session as any);
         setUser(session?.user ?? null);
-        
+
         if (session?.user) {
           fetchUserData(session.user.id);
         }
-        
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error('❌ Failed to get session:', error);
-        setLoading(false);
-      });
 
-    return () => subscription.unsubscribe();
+        setLoading(false);
+      } catch (error) {
+        console.error('❌ Failed to initialize auth:', error);
+        setLoading(false);
+      }
+    };
+
+    initAuth();
+
+    return () => subscription?.unsubscribe();
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await sqliteAuth.signInWithPassword({
       email,
       password,
     });
-    
-    // Log successful login
-    if (!error && data.user) {
+
+    // Update state immediately on successful login
+    if (!error && data.user && data.session) {
+      console.log('✅ Login successful, updating auth state...');
+      setUser(data.user);
+      setSession(data.session);
+
+      // Fetch user data
+      await fetchUserData(data.user.id);
+
+      // Log successful login
       setTimeout(async () => {
-        const { data: profileData } = await supabase
+        const { data: profileData } = await db
           .from('profiles')
           .select('full_name')
           .eq('user_id', data.user.id)
-          .maybeSingle();
-        
+          .single()
+          .execute();
+
         if (profileData) {
-          await supabase.from('activity_logs').insert([{
+          await db.from('activity_logs').insert({
             user_id: data.user.id,
             user_name: profileData.full_name,
             action: 'Signed In',
             entity: 'Auth',
             engagement_id: null,
             details: `User logged in`,
-          }]);
+          }).execute();
         }
       }, 0);
     }
-    
+
     return { error };
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const redirectUrl = `${window.location.origin}/`;
-    
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await sqliteAuth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: redirectUrl,
         data: {
           full_name: fullName,
         },
       },
     });
+
+    // Update state immediately on successful signup and auto-login
+    if (!error && data.user && data.session) {
+      console.log('✅ Signup successful, updating auth state...');
+      setUser(data.user);
+      setSession(data.session);
+
+      // Fetch user data
+      await fetchUserData(data.user.id);
+    }
+
     return { error };
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    console.log('🔓 Signing out...');
+    await sqliteAuth.signOut();
+    setUser(null);
+    setSession(null);
     setProfile(null);
     setRole(null);
   };
