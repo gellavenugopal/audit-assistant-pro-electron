@@ -198,7 +198,8 @@ function SetupPanel({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between gap-3">
+        {/* Tax Audit Setup heading and badges hidden as per user request */}
+        {/* <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base">Tax Audit Setup</CardTitle>
           <div className="flex items-center gap-2">
             <Badge variant="outline">Form {draft.form_type} + 3CD</Badge>
@@ -209,14 +210,24 @@ function SetupPanel({
               {saving ? 'Saving...' : 'Save Setup'}
             </Button>
           </div>
+        </div> */}
+        <div className="flex items-center justify-end gap-2">
+          <Badge variant="outline">Form {draft.form_type} + 3CD</Badge>
+          <Badge variant={draft.applicability_result === 'Not applicable' ? 'secondary' : 'default'}>
+            {draft.applicability_result || 'Not assessed'}
+          </Badge>
+          <Button size="sm" onClick={save} disabled={saving}>
+            {saving ? 'Saving...' : 'Save Setup'}
+          </Button>
         </div>
-        {setupSourceLinks.length > 0 && (
+        {/* Source links removed as per user request - Client and Engagement buttons hidden */}
+        {/* {setupSourceLinks.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1">
             {setupSourceLinks.map((link, index) => (
               <SourceLinkChip key={`${link.label}-${index}`} link={link} />
             ))}
           </div>
-        )}
+        )} */}
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-4">
