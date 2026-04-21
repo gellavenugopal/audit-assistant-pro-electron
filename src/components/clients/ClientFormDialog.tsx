@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -144,27 +146,32 @@ export function ClientFormDialog({
       };
 
       if (isEditing && form.id) {
-        const { error } = await supabase
+        const { error } = await db
           .from('clients')
+          .eq('id', form.id)
           .update(clientData)
-          .eq('id', form.id);
+          .execute();
 
         if (error) throw error;
         if (client?.name && client.name !== clientData.name) {
-          const { error: engagementError } = await supabase
+          const { error: engagementError } = await db
             .from('engagements')
+            .eq('client_id', form.id)
             .update({ client_name: clientData.name })
-            .eq('client_id', form.id);
+            .execute();
           if (engagementError) {
             console.warn('Failed to sync engagement client name', engagementError);
           }
         }
         toast.success('Client updated');
       } else {
-        const { error } = await supabase.from('clients').insert({
-          ...clientData,
-          created_by: user?.id,
-        });
+        const { error } = await db
+          .from('clients')
+          .insert({
+            ...clientData,
+            created_by: user?.id,
+          })
+          .execute();
 
         if (error) throw error;
         toast.success('Client created');

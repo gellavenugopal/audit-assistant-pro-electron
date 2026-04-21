@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface Engagement {
   id: string;
@@ -33,7 +35,7 @@ export function useEngagements() {
 
   const logActivity = async (action: string, entity: string, details: string, entityId?: string, logEngagementId?: string) => {
     if (!user || !profile) return;
-    await supabase.from('activity_logs').insert([{
+    await db.from('activity_logs').insert({
       user_id: user.id,
       user_name: profile.full_name,
       action,
@@ -41,19 +43,16 @@ export function useEngagements() {
       entity_id: entityId || null,
       engagement_id: logEngagementId || null,
       details,
-    }]);
+    }).execute();
   };
 
   const fetchEngagements = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('engagements')
-        .select(`
-          *,
-          partner:profiles!engagements_partner_id_fkey(full_name),
-          manager:profiles!engagements_manager_id_fkey(full_name)
-        `)
-        .order('created_at', { ascending: false });
+        .select('*')
+        .order('created_at', { ascending: false })
+        .execute();
 
       if (error) throw error;
       setEngagements(data || []);
@@ -69,20 +68,26 @@ export function useEngagements() {
     if (!user) return null;
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('engagements')
         .insert({ ...engagement, created_by: user.id })
-        .select()
-        .single();
+        .execute();
 
       if (error) throw error;
       
+      // Get the first inserted record
+      const newEngagement = Array.isArray(data) ? data[0] : data;
+      
+      if (!newEngagement) {
+        throw new Error('Failed to create engagement (no data returned)');
+      }
+      
       // Log activity
-      await logActivity('Created', 'Engagement', `Created engagement: ${engagement.name}`, data.id, data.id);
+      await logActivity('Created', 'Engagement', `Created engagement: ${engagement.name}`, newEngagement.id, newEngagement.id);
       
       toast.success('Engagement created successfully');
       await fetchEngagements();
-      return data;
+      return newEngagement;
     } catch (error: any) {
       console.error('Error creating engagement:', error);
       toast.error(error.message || 'Failed to create engagement');
@@ -92,10 +97,11 @@ export function useEngagements() {
 
   const updateEngagement = async (id: string, updates: Partial<Engagement>) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('engagements')
         .update(updates)
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       
@@ -113,10 +119,11 @@ export function useEngagements() {
   const deleteEngagement = async (id: string) => {
     const engagement = engagements.find(e => e.id === id);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('engagements')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       
@@ -134,17 +141,10 @@ export function useEngagements() {
   useEffect(() => {
     fetchEngagements();
 
-    // Subscribe to realtime changes
-    const channel = supabase
-      .channel('engagements-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagements' }, () => {
-        fetchEngagements();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Note: Real-time subscriptions not available in SQLite
+    // Use polling if real-time updates are needed
+    // const interval = setInterval(fetchEngagements, 30000); // Poll every 30s
+    // return () => clearInterval(interval);
   }, []);
 
   return {

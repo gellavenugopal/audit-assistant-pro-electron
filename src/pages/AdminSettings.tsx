@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
 import { Button } from '@/components/ui/button';
@@ -35,11 +37,11 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EngagementLetterTemplateManager } from '@/components/admin/EngagementLetterTemplateManager';
-import { 
-  Settings, 
-  Building2, 
-  Users, 
-  UserCog, 
+import {
+  Settings,
+  Building2,
+  Users,
+  UserCog,
   Plus,
   Pencil,
   Trash2,
@@ -100,7 +102,7 @@ export default function AdminSettings() {
   const { user } = useAuth();
   const { refreshEngagements } = useEngagement();
   const [activeTab, setActiveTab] = useState('firm');
-  
+
   // Clients state
   const [clients, setClients] = useState<Client[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
@@ -160,10 +162,11 @@ export default function AdminSettings() {
   const fetchFinancialYears = async () => {
     setLoadingFinancialYears(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('financial_years')
         .select('*')
-        .order('year_code', { ascending: false });
+        .order('year_code', { ascending: false })
+        .execute();
 
       if (error) throw error;
       setFinancialYears(data || []);
@@ -182,13 +185,14 @@ export default function AdminSettings() {
 
     setSavingFy(true);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('financial_years')
         .insert({
           year_code: fyForm.year_code,
           display_name: fyForm.display_name,
           created_by: user?.id,
-        });
+        })
+        .execute();
 
       if (error) throw error;
       toast.success('Financial year added');
@@ -204,10 +208,11 @@ export default function AdminSettings() {
 
   const handleToggleFinancialYear = async (id: string, isActive: boolean) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('financial_years')
         .update({ is_active: !isActive })
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       toast.success(`Financial year ${isActive ? 'disabled' : 'enabled'}`);
@@ -219,9 +224,9 @@ export default function AdminSettings() {
 
   const handleDeleteFinancialYear = async (id: string) => {
     if (!confirm('Are you sure you want to delete this financial year?')) return;
-    
+
     try {
-      const { error } = await supabase.from('financial_years').delete().eq('id', id);
+      const { error } = await db.from('financial_years').delete().eq('id', id).execute();
       if (error) throw error;
       toast.success('Financial year deleted');
       fetchFinancialYears();
@@ -234,11 +239,12 @@ export default function AdminSettings() {
   const fetchFirmSettings = async () => {
     setLoadingFirm(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('firm_settings')
         .select('*')
         .limit(1)
-        .single();
+        .single()
+        .execute();
 
       if (error && error.code !== 'PGRST116') throw error;
       if (data) {
@@ -268,7 +274,7 @@ export default function AdminSettings() {
     setSavingFirm(true);
     try {
       if (firmSettings.id) {
-        const { error } = await supabase
+        const { error } = await db
           .from('firm_settings')
           .update({
             firm_name: firmSettings.firm_name,
@@ -278,10 +284,11 @@ export default function AdminSettings() {
             firm_registration_no: firmSettings.firm_registration_no || null,
             address: firmSettings.address || null,
           })
-          .eq('id', firmSettings.id);
+          .eq('id', firmSettings.id)
+          .execute();
         if (error) throw error;
       } else {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('firm_settings')
           .insert({
             firm_name: firmSettings.firm_name,
@@ -290,14 +297,16 @@ export default function AdminSettings() {
             no_of_partners: firmSettings.no_of_partners,
             firm_registration_no: firmSettings.firm_registration_no || null,
             address: firmSettings.address || null,
-            created_by: user?.id,
+            created_by: user?.id || 'system',
           })
           .select()
-          .single();
+          .single()
+          .execute();
         if (error) throw error;
         if (data) setFirmSettings(prev => ({ ...prev, id: data.id }));
       }
       toast.success('Firm settings saved');
+      await fetchFirmSettings(); // Refresh to get updated data
     } catch (error: any) {
       toast.error(error.message || 'Failed to save firm settings');
     } finally {
@@ -309,10 +318,11 @@ export default function AdminSettings() {
   const fetchClients = async () => {
     setLoadingClients(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('clients')
         .select('*')
-        .order('name');
+        .order('name')
+        .execute();
 
       if (error) throw error;
       setClients(data || []);
@@ -326,25 +336,27 @@ export default function AdminSettings() {
 
   const handleDeleteClient = async (id: string, clientName: string) => {
     // Check if client has engagements
-    const { count, error: countError } = await supabase
+    const { data: engagements, error: countError } = await db
       .from('engagements')
-      .select('*', { count: 'exact', head: true })
-      .eq('client_id', id);
+      .select('*')
+      .eq('client_id', id)
+      .execute();
 
     if (countError) {
       toast.error('Failed to check engagements');
       return;
     }
 
-    if (count && count > 0) {
+    const count = engagements?.length || 0;
+    if (count > 0) {
       toast.error(`Cannot delete "${clientName}". This client has ${count} engagement(s). Consider deactivating instead.`);
       return;
     }
 
     if (!confirm('Are you sure you want to delete this client?')) return;
-    
+
     try {
-      const { error } = await supabase.from('clients').delete().eq('id', id);
+      const { error } = await db.from('clients').delete().eq('id', id).execute();
       if (error) {
         // Handle FK violation specifically
         if (error.code === '23503' || error.message?.includes('violates foreign key constraint')) {
@@ -364,12 +376,13 @@ export default function AdminSettings() {
   const handleToggleClientStatus = async (client: Client) => {
     const newStatus = client.status === 'active' ? 'inactive' : 'active';
     setTogglingClientStatus(client.id);
-    
+
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('clients')
         .update({ status: newStatus })
-        .eq('id', client.id);
+        .eq('id', client.id)
+        .execute();
 
       if (error) throw error;
       toast.success(`Client ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
@@ -385,15 +398,17 @@ export default function AdminSettings() {
   const fetchMembers = async () => {
     setLoadingMembers(true);
     try {
-      const { data: profiles, error: profilesError } = await supabase
+      const { data: profiles, error: profilesError } = await db
         .from('profiles')
-        .select('user_id, full_name, email, phone');
+        .select('user_id, full_name, email, phone')
+        .execute();
 
       if (profilesError) throw profilesError;
 
-      const { data: roles, error: rolesError } = await supabase
+      const { data: roles, error: rolesError } = await db
         .from('user_roles')
-        .select('user_id, role');
+        .select('user_id, role')
+        .execute();
 
       if (rolesError) throw rolesError;
 
@@ -419,33 +434,74 @@ export default function AdminSettings() {
 
     setSavingTeam(true);
     try {
-      // Get current user's name for inviter
-      const { data: profile } = await supabase
+      // Check if email already exists
+      const { data: existingUser } = await db
         .from('profiles')
-        .select('full_name')
-        .eq('user_id', user?.id)
-        .single();
+        .select('email')
+        .eq('email', teamForm.email.toLowerCase().trim())
+        .execute();
 
-      const response = await supabase.functions.invoke('send-invite', {
-        body: {
-          email: teamForm.email,
-          role: teamForm.role,
-          full_name: teamForm.full_name,
-          phone: teamForm.phone || null,
-          inviterName: profile?.full_name || 'Admin',
-          appUrl: window.location.origin,
+      if (existingUser && existingUser.length > 0) {
+        toast.error('A user with this email already exists');
+        return;
+      }
+
+      // Generate a random user_id (UUID-like)
+      const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+
+      // Create profile with a default temporary password (user can change later)
+      const defaultPassword = 'Welcome@123'; // Default password for new users
+
+      // Use the auth signup to create the user properly
+      const { auth } = await import('@/integrations/sqlite/client');
+      const { data: authData, error: authError } = await auth.signUp({
+        email: teamForm.email.toLowerCase().trim(),
+        password: defaultPassword,
+        options: {
+          data: {
+            full_name: teamForm.full_name.trim()
+          }
         }
       });
 
-      if (response.error) throw response.error;
-      if (response.data?.error) throw new Error(response.data.error);
+      if (authError) throw authError;
 
-      toast.success(`Invitation sent to ${teamForm.email}`);
+      // Add phone if provided
+      if (teamForm.phone && authData?.user) {
+        await db
+          .from('profiles')
+          .update({ phone: teamForm.phone.trim() })
+          .eq('user_id', authData.user.user_id)
+          .execute();
+      }
+
+      // Create user role
+      if (authData?.user) {
+        const { error: roleError } = await db
+          .from('user_roles')
+          .insert({
+            user_id: authData.user.user_id,
+            role: teamForm.role
+          })
+          .execute();
+
+        if (roleError) {
+          console.error('Role creation error:', roleError);
+          // Don't fail the whole operation if role creation fails
+        }
+      }
+
+      toast.success(
+        `Team member added successfully! Email: ${teamForm.email}\nTemporary Password: ${defaultPassword}\n\nPlease share these credentials with the new team member.`,
+        { duration: 10000 }
+      );
+
       setTeamDialogOpen(false);
       setTeamForm({ full_name: '', email: '', phone: '', role: 'staff' });
       fetchMembers();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to send invitation');
+      console.error('Error adding team member:', error);
+      toast.error(error.message || 'Failed to add team member');
     } finally {
       setSavingTeam(false);
     }
@@ -453,10 +509,11 @@ export default function AdminSettings() {
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('user_roles')
         .update({ role: newRole as typeof ROLES[number] })
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .execute();
 
       if (error) throw error;
       toast.success('Role updated');
@@ -480,14 +537,16 @@ export default function AdminSettings() {
 
     setIsResetting(true);
     try {
-      const response = await supabase.functions.invoke('admin-reset-password', {
-        body: { email: resetEmail, password: resetPassword }
-      });
+      // Edge functions not available in SQLite
+      toast.warning('Admin password reset feature not yet implemented in SQLite.');
+      // const response = await db.functions.invoke('admin-reset-password', {
+      //   body: { email: resetEmail, password: resetPassword }
+      // });
 
-      if (response.error) throw response.error;
-      if (response.data?.error) throw new Error(response.data.error);
+      // if (response.error) throw response.error;
+      // if (response.data?.error) throw new Error(response.data.error);
 
-      toast.success(`Password reset successfully for ${resetEmail}`);
+      // toast.success(`Password reset successfully for ${resetEmail}`);
       setResetEmail('');
       setResetPassword('');
     } catch (error: any) {
@@ -753,7 +812,7 @@ export default function AdminSettings() {
               </Table>
             </CardContent>
           </Card>
-          
+
           {/* Data Integrity Panel - Partner only */}
           <DataIntegrityPanel />
         </TabsContent>
@@ -1015,8 +1074,8 @@ export default function AdminSettings() {
                     placeholder="Enter new password (min 6 characters)"
                   />
                 </div>
-                <Button 
-                  onClick={handleAdminPasswordReset} 
+                <Button
+                  onClick={handleAdminPasswordReset}
                   disabled={isResetting || !resetEmail || !resetPassword}
                   className="w-full"
                 >
@@ -1035,7 +1094,7 @@ export default function AdminSettings() {
               </div>
               <div className="mt-6 p-4 rounded-lg border bg-muted/50">
                 <p className="text-sm text-muted-foreground">
-                  <strong>Note:</strong> The user will be able to log in immediately with the new password. 
+                  <strong>Note:</strong> The user will be able to log in immediately with the new password.
                   For security, advise them to change their password after logging in.
                 </p>
               </div>

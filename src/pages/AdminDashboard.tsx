@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -135,13 +137,13 @@ export default function AdminDashboard() {
     if (!currentUser) return;
 
     try {
-      const { data: profile } = await supabase
+      const { data: profile } = await db
         .from('profiles')
         .select('full_name')
         .eq('user_id', currentUser.id)
         .single();
 
-      await supabase.from('activity_logs').insert({
+      await db.from('activity_logs').insert({
         user_id: currentUser.id,
         user_name: profile?.full_name || currentUser.email || 'Unknown',
         action,
@@ -165,7 +167,7 @@ export default function AdminDashboard() {
     filterDateTo?: Date
   ) => {
     try {
-      let query = supabase
+      let query = db
         .from('activity_logs')
         .select('*')
         .in('entity', ['user', 'invitation'])
@@ -192,7 +194,7 @@ export default function AdminDashboard() {
         query = query.lte('created_at', endOfDay.toISOString());
       }
 
-      const { data, error } = await query;
+      const { data, error } = await query.execute();
 
       if (!error && data) {
         setRecentAdminLogs(data);
@@ -235,15 +237,17 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       // Fetch users with roles and is_active status
-      const { data: profiles, error: profilesError } = await supabase
+      const { data: profiles, error: profilesError } = await db
         .from('profiles')
-        .select('user_id, full_name, email, created_at, is_active');
+        .select('user_id, full_name, email, created_at, is_active')
+        .execute();
 
       if (profilesError) throw profilesError;
 
-      const { data: roles, error: rolesError } = await supabase
+      const { data: roles, error: rolesError } = await db
         .from('user_roles')
-        .select('user_id, role');
+        .select('user_id, role')
+        .execute();
 
       if (rolesError) throw rolesError;
 
@@ -262,10 +266,10 @@ export default function AdminDashboard() {
         { count: evidenceCount },
         { count: openNotesCount }
       ] = await Promise.all([
-        supabase.from('engagements').select('*', { count: 'exact', head: true }),
-        supabase.from('risks').select('*', { count: 'exact', head: true }),
-        supabase.from('evidence_files').select('*', { count: 'exact', head: true }),
-        supabase.from('review_notes').select('*', { count: 'exact', head: true }).eq('status', 'open')
+        db.from('engagements').select('*').execute().then(r => ({ count: r.data?.length || 0 })),
+        db.from('risks').select('*').execute().then(r => ({ count: r.data?.length || 0 })),
+        db.from('evidence_files').select('*').execute().then(r => ({ count: r.data?.length || 0 })),
+        db.from('review_notes').select('*').eq('status', 'open').execute().then(r => ({ count: r.data?.length || 0 }))
       ]);
 
       setStats({
@@ -294,10 +298,10 @@ export default function AdminDashboard() {
 
     setUpdatingRole(userId);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('user_roles')
-        .update({ role: newRole as 'partner' | 'manager' | 'senior' | 'staff' | 'viewer' })
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .update({ role: newRole as 'partner' | 'manager' | 'senior' | 'staff' | 'viewer' });
 
       if (error) throw error;
 
@@ -329,18 +333,18 @@ export default function AdminDashboard() {
     setIsDeleting(true);
     try {
       // Delete from user_roles first (due to potential FK constraints)
-      const { error: roleError } = await supabase
+      const { error: roleError } = await db
         .from('user_roles')
-        .delete()
-        .eq('user_id', deletingUser.user_id);
+        .eq('user_id', deletingUser.user_id)
+        .delete();
 
       if (roleError) throw roleError;
 
       // Delete from profiles
-      const { error: profileError } = await supabase
+      const { error: profileError } = await db
         .from('profiles')
-        .delete()
-        .eq('user_id', deletingUser.user_id);
+        .eq('user_id', deletingUser.user_id)
+        .delete();
 
       if (profileError) throw profileError;
 
@@ -378,10 +382,10 @@ export default function AdminDashboard() {
 
     setTogglingStatus(targetUser.user_id);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('profiles')
-        .update({ is_active: newStatus })
-        .eq('user_id', targetUser.user_id);
+        .eq('user_id', targetUser.user_id)
+        .update({ is_active: newStatus ? 1 : 0 });
 
       if (error) throw error;
 
@@ -422,7 +426,7 @@ export default function AdminDashboard() {
 
     setIsSendingInvite(true);
     try {
-      const { data: profile } = await supabase
+      const { data: profile } = await db
         .from('profiles')
         .select('full_name')
         .eq('user_id', currentUser?.id)
@@ -431,16 +435,19 @@ export default function AdminDashboard() {
       const inviterName = profile?.full_name || 'Admin';
       const appUrl = window.location.origin;
 
-      const { error } = await supabase.functions.invoke('send-invite', {
-        body: {
-          email: inviteEmail,
-          role: inviteRole,
-          inviterName,
-          appUrl,
-        },
-      });
+      // Edge functions not available in SQLite
+      // TODO: Implement email invitation service
+      toast.warning('Email invitation feature not yet implemented in SQLite. Please contact administrator.');
+      // const { error } = await supabase.functions.invoke('send-invite', {
+      //   body: {
+      //     email: inviteEmail,
+      //     role: inviteRole,
+      //     inviterName,
+      //     appUrl,
+      //   },
+      // });
 
-      if (error) throw error;
+      // if (error) throw error;
 
       // Log the invitation
       await logAdminActivity(
@@ -480,37 +487,41 @@ export default function AdminDashboard() {
           data = users;
           break;
         case 'engagements':
-          const { data: engagements } = await supabase
+          const { data: engagements } = await db
             .from('engagements')
             .select('id, name, client_name, financial_year, status')
             .order('created_at', { ascending: false })
-            .limit(25);
+            .limit(25)
+            .execute();
           data = engagements || [];
           break;
         case 'risks':
-          const { data: risks } = await supabase
+          const { data: risks } = await db
             .from('risks')
             .select('id, risk_area, description, combined_risk, status')
             .eq('status', 'open')
             .order('created_at', { ascending: false })
-            .limit(25);
+            .limit(25)
+            .execute();
           data = risks || [];
           break;
         case 'evidence':
-          const { data: evidence } = await supabase
+          const { data: evidence } = await db
             .from('evidence_files')
             .select('id, name, file_type, file_size, created_at')
             .order('created_at', { ascending: false })
-            .limit(25);
+            .limit(25)
+            .execute();
           data = evidence || [];
           break;
         case 'notes':
-          const { data: notes } = await supabase
+          const { data: notes } = await db
             .from('review_notes')
             .select('id, title, priority, status, created_at')
             .eq('status', 'open')
             .order('created_at', { ascending: false })
-            .limit(25);
+            .limit(25)
+            .execute();
           data = notes || [];
           break;
       }

@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 
 interface Engagement {
   id: string;
@@ -47,10 +49,11 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('engagements')
-        .select('id, name, client_id, client_name, financial_year, engagement_type, status, partner_id, materiality_amount, performance_materiality, client:clients(name)')
-        .order('created_at', { ascending: false });
+        .select('id, name, client_id, client_name, financial_year, engagement_type, status, partner_id, materiality_amount, performance_materiality')
+        .order('created_at', { ascending: false })
+        .execute();
 
       if (error) throw error;
       const resolved = (data as EngagementRow[] | null)?.map(({ client, ...item }) => ({

@@ -1,10 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import type { Tables } from '@/integrations/supabase/types';
 
-type ActivityLog = Tables<'activity_logs'>;
+const db = getSQLiteClient();
+
+type ActivityLog = {
+  id: string;
+  user_id: string;
+  user_name: string;
+  action: string;
+  entity: string;
+  entity_id: string | null;
+  engagement_id: string | null;
+  details: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
 
 interface LogActivityParams {
   action: string;
@@ -22,11 +34,12 @@ export function useActivityLogs() {
 
   const fetchLogs = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('activity_logs')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(500);
+        .limit(500)
+        .execute();
 
       if (error) throw error;
       setLogs(data || []);
@@ -46,7 +59,7 @@ export function useActivityLogs() {
       }
 
       try {
-        const { error } = await supabase.from('activity_logs').insert([{
+        const { error } = await db.from('activity_logs').insert({
           user_id: user.id,
           user_name: profile.full_name,
           action,
@@ -54,8 +67,8 @@ export function useActivityLogs() {
           entity_id: entityId || null,
           engagement_id: engagementId || null,
           details: details || null,
-          metadata: metadata as unknown as Record<string, never>,
-        }]);
+          metadata: JSON.stringify(metadata),
+        });
 
         if (error) throw error;
         return true;
@@ -70,25 +83,10 @@ export function useActivityLogs() {
   useEffect(() => {
     fetchLogs();
 
-    // Subscribe to realtime updates
-    const channel = supabase
-      .channel('activity-logs-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'activity_logs',
-        },
-        (payload) => {
-          setLogs((prev) => [payload.new as ActivityLog, ...prev]);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Real-time subscriptions not available in SQLite
+    // Use polling if real-time updates are needed
+    // const interval = setInterval(fetchLogs, 30000);
+    // return () => clearInterval(interval);
   }, []);
 
   // Stats calculations

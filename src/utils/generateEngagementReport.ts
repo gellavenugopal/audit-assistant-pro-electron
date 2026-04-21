@@ -1,7 +1,9 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 interface Engagement {
   id: string;
@@ -24,16 +26,18 @@ export async function generateEngagementReport(engagement: Engagement): Promise<
   
   // Fetch related data
   const [risksRes, reviewNotesRes] = await Promise.all([
-    supabase
+    db
       .from('risks')
       .select('*')
       .eq('engagement_id', engagement.id)
-      .order('risk_area'),
-    supabase
+      .order('risk_area', { ascending: true })
+      .execute(),
+    db
       .from('review_notes')
       .select('*')
       .eq('engagement_id', engagement.id)
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false })
+      .execute(),
   ]);
 
   const risks = risksRes.data || [];

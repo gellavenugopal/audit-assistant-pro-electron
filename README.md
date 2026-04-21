@@ -1,4 +1,4 @@
-# Audit Assistant Pro
+# ICAI VERA
 
 A comprehensive desktop application for chartered accountants built with Electron, React, and TypeScript. This professional audit tool helps manage audit engagements, trial balances, CARO compliance, and comprehensive audit reporting.
 

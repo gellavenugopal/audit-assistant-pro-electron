@@ -1,43 +1,25 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { auth as sqliteAuth } from '@/integrations/sqlite/client';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, AlertCircle, Loader2, Mail } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 export default function EmailVerificationStatus() {
   const { user } = useAuth();
-  const [isResending, setIsResending] = useState(false);
+  const [isResending] = useState(false);
 
   if (!user) return null;
 
-  const isVerified = user.email_confirmed_at !== null;
+  // Email verification is disabled in SQLite - always show as verified
+  const isVerified = true;
 
   const handleResendVerification = async () => {
-    if (!user.email) return;
-    
-    setIsResending(true);
-    const { error } = await supabase.auth.resend({
-      type: 'signup',
-      email: user.email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/`,
-      },
+    // Email verification is disabled in SQLite - users are automatically verified
+    toast({
+      title: 'Email Verification Disabled',
+      description: 'Email verification is not required. Your account is automatically verified.',
     });
-    setIsResending(false);
-
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-    } else {
-      toast({
-        title: 'Verification email sent',
-        description: 'Please check your inbox and click the verification link.',
-      });
-    }
   };
 
   return (

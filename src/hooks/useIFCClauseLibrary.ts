@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface IFCClause {
   id: string;
@@ -35,11 +37,12 @@ export function useIFCClauseLibrary() {
   const fetchClauses = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('ifc_clause_library')
         .select('*')
-        .eq('is_active', true)
-        .order('sort_order');
+        .eq('is_active', 1)
+        .order('sort_order', { ascending: true })
+        .execute();
 
       if (error) throw error;
       setClauses(data || []);

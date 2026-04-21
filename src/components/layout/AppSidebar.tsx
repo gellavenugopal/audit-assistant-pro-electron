@@ -68,7 +68,7 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const { role } = useAuth();
   const { currentEngagement } = useEngagement();
-  const isAdmin = role === 'partner' || role === 'manager';
+  const isAdmin = role === 'partner' || role === 'manager' || role === 'admin';
   const hasEngagement = !!currentEngagement;
 
   const handleLogoClick = () => {

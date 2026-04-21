@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const db = getSQLiteClient();
 
 export interface Notification {
   id: string;
@@ -24,12 +26,13 @@ export function useNotifications() {
     if (!user) return;
     
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('notifications')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(50)
+        .execute();
 
       if (error) throw error;
       setNotifications(data || []);
@@ -42,10 +45,10 @@ export function useNotifications() {
 
   const markAsRead = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('notifications')
-        .update({ is_read: true })
-        .eq('id', id);
+        .eq('id', id)
+        .update({ is_read: 1 });
 
       if (error) throw error;
       setNotifications(prev => 
@@ -60,11 +63,11 @@ export function useNotifications() {
     if (!user) return;
     
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('notifications')
-        .update({ is_read: true })
         .eq('user_id', user.id)
-        .eq('is_read', false);
+        .eq('is_read', 0)
+        .update({ is_read: 1 });
 
       if (error) throw error;
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
@@ -75,10 +78,10 @@ export function useNotifications() {
 
   const deleteNotification = async (id: string) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('notifications')
-        .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .delete();
 
       if (error) throw error;
       setNotifications(prev => prev.filter(n => n.id !== id));
@@ -91,10 +94,10 @@ export function useNotifications() {
     if (!user) return;
     
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('notifications')
-        .delete()
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .delete();
 
       if (error) throw error;
       setNotifications([]);
@@ -108,26 +111,10 @@ export function useNotifications() {
     
     fetchNotifications();
 
-    // Subscribe to realtime notifications
-    const channel = supabase
-      .channel('notifications-changes')
-      .on(
-        'postgres_changes',
-        { 
-          event: 'INSERT', 
-          schema: 'public', 
-          table: 'notifications',
-          filter: `user_id=eq.${user.id}`
-        },
-        (payload) => {
-          setNotifications(prev => [payload.new as Notification, ...prev]);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Real-time subscriptions not available in SQLite
+    // Use polling if real-time updates are needed
+    // const interval = setInterval(fetchNotifications, 30000);
+    // return () => clearInterval(interval);
   }, [user?.id]);
 
   return {
@@ -151,7 +138,7 @@ export async function createNotification(
   link?: string
 ) {
   try {
-    const { error } = await supabase
+    const { error } = await db
       .from('notifications')
       .insert({
         user_id: userId,

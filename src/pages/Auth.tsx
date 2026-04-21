@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { auth as sqliteAuth } from '@/integrations/sqlite/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -76,11 +76,10 @@ export default function Auth() {
         const type = hashParams.get('type');
         
         if (accessToken && type === 'recovery') {
-          // Set the session from the recovery tokens
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken || '',
-          });
+          // Password reset handled by SQLite auth
+          // Note: Password reset flow may need to be implemented differently for SQLite
+          // For now, we'll skip the token exchange
+          setError('Password reset via email link not yet supported in SQLite. Please contact administrator.');
           
           if (error) {
             setError('Password reset link has expired or is invalid. Please request a new one.');
@@ -178,9 +177,11 @@ export default function Auth() {
     }
 
     setIsSubmitting(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-      redirectTo: `${window.location.origin}/auth?reset=true`,
-    });
+    // Password reset via email not yet implemented in SQLite
+    const resetError = new Error('Password reset via email not yet supported. Please contact administrator.');
+    // const { error: resetError } = await sqliteAuth.resetPasswordForEmail(resetEmail, {
+    //   redirectTo: `${window.location.origin}/auth?reset=true`,
+    // });
     setIsSubmitting(false);
 
     if (resetError) {
@@ -206,8 +207,8 @@ export default function Auth() {
     }
 
     setIsSubmitting(true);
-    const { error: updateError } = await supabase.auth.updateUser({
-      password: newPassword,
+    const { error: updateError } = await sqliteAuth.updateUser({
+      data: { password: newPassword },
     });
     setIsSubmitting(false);
 
@@ -219,7 +220,7 @@ export default function Auth() {
       setConfirmNewPassword('');
       setShowUpdatePassword(false);
       // Sign out so user can log in with new password
-      await supabase.auth.signOut();
+      await sqliteAuth.signOut();
     }
   };
 

@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useEngagement } from "@/contexts/EngagementContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { getSQLiteClient } from "@/integrations/sqlite/client";
+
+const db = getSQLiteClient();
 
 const UNIT_MAP = {
   "Ones (\u20B9)": 1,
@@ -101,7 +103,7 @@ const ComplianceApplicability: React.FC = () => {
       if (!currentEngagement?.id) return;
       isHydratingRef.current = true;
       try {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('compliance_applicability')
           .select('*')
           .eq('engagement_id', currentEngagement.id)
@@ -155,7 +157,7 @@ const ComplianceApplicability: React.FC = () => {
           created_by: user?.id || null,
         };
 
-        const { error } = await supabase
+        const { error } = await db
           .from('compliance_applicability')
           .upsert(payload, { onConflict: 'engagement_id' });
 

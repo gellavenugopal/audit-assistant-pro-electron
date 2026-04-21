@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
+const { initializeAutoUpdater } = require('./auto-updater.cjs');
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -170,8 +171,8 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
         },
-        icon: path.join(__dirname, '../public/favicon.ico'),
-        title: 'Audit Assistant Pro',
+        icon: path.join(__dirname, '../build/icon.png'),
+        title: 'ICAI VERA',
         show: false,
     });
 
@@ -193,12 +194,21 @@ function createWindow() {
     }
 }
 
+// Auto-updater event handlers are now managed in auto-updater.js
+// They are initialized when app is ready
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 app.whenReady().then(() => {
     setupGstzenHandlers();
     setupAppHandlers();
     createWindow();
+
+    // Initialize auto-updater with GitHub provider
+    // - Checks for updates on app ready
+    // - Sets up all event handlers and IPC communication
+    // - Configures beta channel based on environment/version
+    initializeAutoUpdater();
 
     app.on('activate', () => {
         // On macOS it's common to re-create a window in the app when the
@@ -207,6 +217,7 @@ app.whenReady().then(() => {
             createWindow();
         }
     });
+
 });
 
 // Quit when all windows are closed, except on macOS.

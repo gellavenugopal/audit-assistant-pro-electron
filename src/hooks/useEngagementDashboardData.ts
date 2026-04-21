@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 type ActivityLog = {
   id: string;
@@ -186,42 +188,42 @@ export function useEngagementDashboardData(engagementId?: string) {
         tbHeadersRes,
         programsRes,
       ] = await Promise.all([
-        supabase
+        db
           .from('compliance_applicability')
           .select('id', { count: 'exact', head: true })
           .eq('engagement_id', engagementId),
-        supabase
+        db
           .from('materiality_risk_assessment')
           .select('id', { count: 'exact', head: true })
           .eq('engagement_id', engagementId),
-        supabase
+        db
           .from('risks')
           .select('combined_risk, status')
           .eq('engagement_id', engagementId),
-        supabase
+        db
           .from('evidence_files')
           .select('file_size, file_type')
           .eq('engagement_id', engagementId),
-        supabase
+        db
           .from('review_notes')
           .select('status, priority, created_at')
           .eq('engagement_id', engagementId),
-        supabase
+        db
           .from('audit_report_setup')
           .select('id, report_status, setup_completed')
           .eq('engagement_id', engagementId)
           .limit(1),
-        supabase
+        db
           .from('activity_logs')
           .select('id, user_name, action, entity, details, created_at')
           .eq('engagement_id', engagementId)
           .order('created_at', { ascending: false })
           .limit(10),
-        supabase
+        db
           .from('engagement_trial_balance_header')
           .select('id, period_type')
           .eq('engagement_id', engagementId),
-        supabase
+        db
           .from('audit_programs_new')
           .select('id')
           .eq('engagement_id', engagementId),
@@ -268,7 +270,7 @@ export function useEngagementDashboardData(engagementId?: string) {
 
       if (programs.length > 0) {
         const programIds = programs.map((program) => program.id);
-        const { data: sections } = await supabase
+        const { data: sections } = await db
           .from('audit_program_sections')
           .select('id')
           .in('audit_program_id', programIds);
@@ -276,7 +278,7 @@ export function useEngagementDashboardData(engagementId?: string) {
         const sectionIds = (sections || []).map((section) => section.id);
 
         if (sectionIds.length > 0) {
-          const { data: boxes } = await supabase
+          const { data: boxes } = await db
             .from('audit_program_boxes')
             .select('status')
             .in('section_id', sectionIds);
@@ -290,7 +292,7 @@ export function useEngagementDashboardData(engagementId?: string) {
       let financialReview = EMPTY_DATA.financialReview;
       if (tbHeaders.length > 0) {
         const headerIds = tbHeaders.map((header) => header.id);
-        const { data: lines } = await supabase
+        const { data: lines } = await db
           .from('engagement_trial_balance_lines')
           .select('id, tb_header_id')
           .in('tb_header_id', headerIds);
@@ -300,7 +302,7 @@ export function useEngagementDashboardData(engagementId?: string) {
 
         let classificationRows: { tb_line_id: string }[] = [];
         if (lineIds.length > 0) {
-          const { data: classifications } = await supabase
+          const { data: classifications } = await db
             .from('engagement_tb_classification')
             .select('tb_line_id')
             .in('tb_line_id', lineIds);
@@ -399,26 +401,10 @@ export function useEngagementDashboardData(engagementId?: string) {
 
     if (!engagementId) return undefined;
 
-    const channel = supabase
-      .channel(`engagement-dashboard-${engagementId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'compliance_applicability' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'materiality_risk_assessment' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'risks' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'evidence_files' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'review_notes' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_report_setup' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_trial_balance_header' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_trial_balance_lines' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_tb_classification' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_programs_new' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_program_sections' }, fetchData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_program_boxes' }, fetchData)
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Real-time subscriptions not available in SQLite
+    // Use polling if real-time updates are needed
+    // const interval = setInterval(fetchData, 30000);
+    // return () => clearInterval(interval);
   }, [engagementId]);
 
   return { data, loading, refetch: fetchData };

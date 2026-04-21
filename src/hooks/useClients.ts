@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 export interface Client {
   id: string;
@@ -18,11 +20,12 @@ export function useClients() {
   const fetchClients = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('clients')
         .select('id, name, industry, constitution, contact_person, contact_email, status')
         .eq('status', 'active')
-        .order('name');
+        .order('name', { ascending: true })
+        .execute();
 
       if (error) throw error;
       setClients(data || []);

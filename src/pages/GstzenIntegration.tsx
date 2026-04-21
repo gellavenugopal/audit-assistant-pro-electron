@@ -12,7 +12,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { gstzenKeys } from "@/hooks/useGstzenCustomer";
 import { gstzenApi } from "@/services/gstzen-api";
 import { useEngagement } from "@/contexts/EngagementContext";
-import { supabase } from "@/integrations/supabase/client";
+import { getSQLiteClient } from "@/integrations/sqlite/client";
+
+const db = getSQLiteClient();
 import type { Gstin } from "@/types/gstzen";
 
 type DialogType = "none" | "download" | "login" | "consolidated";
@@ -78,7 +80,7 @@ export default function GstzenIntegration() {
 
             setIsLoadingEngagementGstins(true);
             try {
-                const { data, error } = await supabase
+                const { data, error } = await db
                     .from('client_gstins')
                     .select('gstin')
                     .eq('client_id', currentEngagement.client_id);

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 export interface CAROClause {
   id: string;
@@ -29,11 +31,12 @@ export function useCAROClauseLibrary() {
 
   const fetchClauses = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('caro_clause_library')
         .select('*')
-        .eq('is_active', true)
-        .order('sort_order');
+        .eq('is_active', 1)
+        .order('sort_order', { ascending: true })
+        .execute();
 
       if (error) throw error;
       setClauses(data || []);

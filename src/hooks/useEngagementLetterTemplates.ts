@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient, auth as sqliteAuth } from '@/integrations/sqlite/client';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export interface EngagementLetterTemplate {
   id: string;
@@ -20,10 +22,11 @@ export function useEngagementLetterTemplates() {
   const fetchTemplates = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('engagement_letter_templates')
         .select('*')
-        .order('template_type');
+        .order('template_type', { ascending: true })
+        .execute();
 
       if (error) throw error;
       setTemplates(data || []);
@@ -46,8 +49,7 @@ export function useEngagementLetterTemplates() {
     fileName: string
   ): Promise<boolean> => {
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
+      const { data: userData } = await sqliteAuth.getUser();
       if (!userData.user) {
         throw new Error('You must be signed in to upload templates');
       }
@@ -57,20 +59,21 @@ export function useEngagementLetterTemplates() {
 
       if (existing) {
         // Update existing template
-        const { error } = await supabase
+        const { error } = await db
           .from('engagement_letter_templates')
           .update({
             template_name: templateName,
             file_content: fileContent,
             file_name: fileName,
           })
-          .eq('id', existing.id);
+          .eq('id', existing.id)
+          .execute();
 
         if (error) throw error;
         toast.success('Template updated successfully');
       } else {
         // Insert new template
-        const { error } = await supabase
+        const { error } = await db
           .from('engagement_letter_templates')
           .insert({
             template_type: templateType,
@@ -78,7 +81,8 @@ export function useEngagementLetterTemplates() {
             file_content: fileContent,
             file_name: fileName,
             uploaded_by: userData.user.id,
-          });
+          })
+          .execute();
 
         if (error) throw error;
         toast.success('Template uploaded successfully');
@@ -95,10 +99,11 @@ export function useEngagementLetterTemplates() {
 
   const deleteTemplate = async (id: string): Promise<boolean> => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from('engagement_letter_templates')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .execute();
 
       if (error) throw error;
       toast.success('Template deleted');

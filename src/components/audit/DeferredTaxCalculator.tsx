@@ -28,7 +28,9 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { Plus, Edit2, Save, X, Trash2, FileDown } from 'lucide-react';
 import { useEngagement } from '@/contexts/EngagementContext';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 // =====================================================
 // MASTER DATA - Exact conversion from Python
@@ -108,7 +110,7 @@ export default function DeferredTaxCalculator() {
     // Fetch team members
     const fetchTeamMembers = async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('profiles')
           .select('user_id, full_name')
           .order('full_name');

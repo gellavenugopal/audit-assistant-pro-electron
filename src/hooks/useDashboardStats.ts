@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
+
+const db = getSQLiteClient();
 
 interface DashboardStats {
   engagements: {
@@ -53,7 +55,7 @@ export function useDashboardStats(engagementId?: string) {
   const fetchStats = async () => {
     try {
       // Fetch all data in parallel
-      let activityQuery = supabase
+      let activityQuery = db
         .from('activity_logs')
         .select('id, user_name, action, entity, details, created_at')
         .order('created_at', { ascending: false })
@@ -69,18 +71,19 @@ export function useDashboardStats(engagementId?: string) {
         evidenceRes,
         activityRes,
       ] = await Promise.all([
-        supabase
+        db
           .from('engagements')
           .select('id, name, client_name, status, financial_year, materiality_amount, performance_materiality, updated_at, created_at')
           .order('updated_at', { ascending: false })
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })
+          .execute(),
         engagementId
-          ? supabase.from('risks').select('id, combined_risk, status').eq('engagement_id', engagementId)
-          : supabase.from('risks').select('id, combined_risk, status'),
+          ? db.from('risks').select('id, combined_risk, status').eq('engagement_id', engagementId).execute()
+          : db.from('risks').select('id, combined_risk, status').execute(),
         engagementId
-          ? supabase.from('evidence_files').select('id, file_size').eq('engagement_id', engagementId)
-          : supabase.from('evidence_files').select('id, file_size'),
-        activityQuery,
+          ? db.from('evidence_files').select('id, file_size').eq('engagement_id', engagementId).execute()
+          : db.from('evidence_files').select('id, file_size').execute(),
+        activityQuery.execute(),
       ]);
 
       // Calculate engagement stats
@@ -148,19 +151,10 @@ export function useDashboardStats(engagementId?: string) {
   useEffect(() => {
     fetchStats();
 
-    // Subscribe to realtime updates for key tables
-    const channel = supabase
-      .channel('dashboard-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagements' }, fetchStats)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'risks' }, fetchStats)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'evidence_files' }, fetchStats)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'review_notes' }, fetchStats)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, fetchStats)
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Real-time subscriptions not available in SQLite
+    // Use polling if real-time updates are needed
+    // const interval = setInterval(fetchStats, 30000);
+    // return () => clearInterval(interval);
   }, [engagementId]);
 
   return { stats, loading, refetch: fetchStats };

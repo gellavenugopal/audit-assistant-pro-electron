@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+
+const db = getSQLiteClient();
 
 export type OpinionType = 'unqualified' | 'qualified' | 'adverse' | 'disclaimer';
 
@@ -190,11 +192,11 @@ export function useAuditReportContent(engagementId: string | undefined) {
 
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_report_main_content')
         .select('*')
         .eq('engagement_id', engagementId)
-        .maybeSingle();
+        .single();
 
       if (error) throw error;
       setContent(data ? normalizeRow(data) : null);
@@ -209,7 +211,7 @@ export function useAuditReportContent(engagementId: string | undefined) {
     if (!canCreate || !engagementId || !user) return null;
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_report_main_content')
         .insert({
           engagement_id: engagementId,
@@ -235,7 +237,7 @@ export function useAuditReportContent(engagementId: string | undefined) {
     if (!content) return null;
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('audit_report_main_content')
         .update(sanitizeUpdate(patch) as any)
         .eq('id', content.id)
