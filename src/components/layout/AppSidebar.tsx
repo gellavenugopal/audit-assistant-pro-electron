@@ -38,7 +38,7 @@ type SidebarItem = {
 
 const navItems: SidebarItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Engagements', href: '/engagements', icon: Briefcase },
+  { name: 'Assignments', href: '/engagements', icon: Briefcase },
   { name: 'Appointment & Engagement', href: '/appointment', icon: FileSignature, requiresEngagement: true },
   { name: 'Compliance Applicability', href: '/compliance-applicability', icon: Shield },
   {

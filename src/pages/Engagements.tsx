@@ -182,8 +182,8 @@ export default function Engagements() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Engagements</h1>
-          <p className="text-muted-foreground mt-1">Manage all audit engagements</p>
+          <h1 className="text-2xl font-bold text-foreground">Assignments</h1>
+          <p className="text-muted-foreground mt-1">Manage all Assurance Assignments</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
