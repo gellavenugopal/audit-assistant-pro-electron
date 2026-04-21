@@ -134,7 +134,7 @@
     "date-fns": "^3.6.0",
     "docx": "^9.5.1",
     "electron-log": "^5.4.3",
-    "electron-updater": "^6.7.3",
+    "electron-updater": "^6.8.3",
     "embla-carousel-react": "^8.6.0",
     "exceljs": "^4.4.0",
     "input-otp": "^1.4.2",
