@@ -157,16 +157,29 @@ function SetupPanel({
   setup,
   saving,
   onSave,
+  client,
 }: {
   setup: TaxAuditSetup;
   saving: boolean;
   onSave: (updates: Partial<TaxAuditSetup>) => Promise<unknown>;
+  client: any | null;
 }) {
   const [draft, setDraft] = useState<TaxAuditSetup>(setup);
 
   useEffect(() => {
     setDraft(setup);
   }, [setup]);
+
+  // Auto-populate PAN and Address from client master
+  useEffect(() => {
+    if (client) {
+      setDraft((prev) => ({
+        ...prev,
+        pan: client.pan || prev.pan,
+        address: client.address || prev.address,
+      }));
+    }
+  }, [client]);
 
   const setupSourceLinks = parseJson<TaxAuditSourceLink[]>(draft.source_links_json, []);
   const selectedReportForm = draft.form_type || (toBool(draft.books_audited_under_other_law) ? '3CA' : '3CB');
@@ -237,7 +250,13 @@ function SetupPanel({
           </div>
           <div className="space-y-1">
             <Label>PAN</Label>
-            <Input value={draft.pan || ''} onChange={(e) => updateDraft({ pan: e.target.value.toUpperCase() })} maxLength={10} />
+            <Input 
+              value={draft.pan || ''} 
+              readOnly 
+              className="bg-muted cursor-not-allowed"
+              title="Auto-populated from Client Master"
+            />
+            <p className="text-xs text-muted-foreground">From Client Master</p>
           </div>
           <div className="space-y-1">
             <Label>Assessment Year</Label>
@@ -252,7 +271,13 @@ function SetupPanel({
         <div className="grid gap-3 md:grid-cols-4">
           <div className="space-y-1 md:col-span-2">
             <Label>Address</Label>
-            <Input value={draft.address || ''} onChange={(e) => updateDraft({ address: e.target.value })} />
+            <Input 
+              value={draft.address || ''} 
+              readOnly 
+              className="bg-muted cursor-not-allowed"
+              title="Auto-populated from Client Master"
+            />
+            <p className="text-xs text-muted-foreground">From Client Master</p>
           </div>
           <div className="space-y-1">
             <Label>Business / Profession</Label>
@@ -803,6 +828,7 @@ export default function TaxAudit() {
     setup,
     clauses,
     evidenceLinks,
+    client,
     loading,
     saving,
     summary,
@@ -891,7 +917,7 @@ export default function TaxAudit() {
         </div>
       </div>
 
-      <SetupPanel setup={setup} saving={saving} onSave={updateSetup} />
+      <SetupPanel setup={setup} saving={saving} onSave={updateSetup} client={client} />
 
       <div className="rounded-md border bg-background p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
