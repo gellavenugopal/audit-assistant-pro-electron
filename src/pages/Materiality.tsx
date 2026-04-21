@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Calculator, AlertCircle, Trash2, Plus, FileDown, AlertTriangle } from 'lucide-react';
+import { Calculator, AlertCircle, Trash2, Plus, FileDown, AlertTriangle, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import ExcelJS from 'exceljs';
 import { useEngagement } from '@/contexts/EngagementContext';
@@ -19,6 +19,8 @@ import { useTeamMembers } from '@/hooks/useTeamMembers';
 import { RiskRegisterContent } from '@/pages/RiskRegister';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSQLiteClient } from '@/integrations/sqlite/client';
+import { toast } from 'sonner';
+import { getUserFriendlyError } from '@/utils/errorMessages';
 
 const db = getSQLiteClient();
 
@@ -172,6 +174,14 @@ export default function Materiality() {
   // CAQD Guidance
   const [caqdSuggestion, setCaqdSuggestion] = useState('\u2014');
   const isHydratingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+
+  const UNIT_MAP: Record<string, number> = {
+    "Ones (\u20B9)": 1,
+    "Thousands (\u20B91,000)": 1_000,
+    "Lakhs (\u20B91,00,000)": 1_00_000,
+    "Crores (\u20B91,00,00,000)": 1_00_00_000,
+  };
 
   const buildRiskStatePayload = () => ({
     riskFactors,
@@ -209,6 +219,53 @@ export default function Materiality() {
     rationale,
     caqdSuggestion,
   });
+
+  // Load compliance applicability data to auto-populate financial fields
+  useEffect(() => {
+    const loadComplianceData = async () => {
+      if (!currentEngagement?.id) return;
+      
+      try {
+        const { data, error } = await db
+          .from('compliance_applicability')
+          .select('*')
+          .eq('engagement_id', currentEngagement.id)
+          .maybeSingle()
+          .execute();
+
+        if (error) throw error;
+        if (!data) return;
+
+        // Parse JSON fields
+        const inputs = typeof data.inputs === 'string' 
+          ? JSON.parse(data.inputs || '{}') 
+          : (data.inputs || {}) as Record<string, string>;
+
+        // Extract financial data
+        const denomination = inputs.denomination || "Ones (\u20B9)";
+        const multiplier = UNIT_MAP[denomination] || 1;
+
+        // Convert values to base currency (Ones) if they exist and current fields are empty
+        if (inputs.pyNetprofit && !profitBeforeTax) {
+          const value = parseFloat(inputs.pyNetprofit) * multiplier;
+          setProfitBeforeTax(formatIndianNumber(String(value)));
+        }
+        if (inputs.pyTurnover && !revenue) {
+          const value = parseFloat(inputs.pyTurnover) * multiplier;
+          setRevenue(formatIndianNumber(String(value)));
+        }
+        if (inputs.pyNetworth && !netWorth) {
+          const value = parseFloat(inputs.pyNetworth) * multiplier;
+          setNetWorth(formatIndianNumber(String(value)));
+        }
+        // Note: Compliance doesn't have totalAssets, so we don't auto-populate it
+      } catch (e) {
+        console.error('Failed to load compliance applicability data:', e);
+      }
+    };
+
+    loadComplianceData();
+  }, [currentEngagement?.id]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -504,6 +561,70 @@ export default function Materiality() {
     setIsRiskFinalized(false);
   };
 
+  const recalculateRisk = () => {
+    // Recalculate the system risk based on current questionnaire responses
+    // This allows users to update their assessment without losing data
+    setIsRiskFinalized(false);
+    
+    // The useEffect hooks will automatically recalculate totalRiskScore, riskPercentage, and systemRisk
+    // Then update the finalRisk to match the new systemRisk
+    setTimeout(() => {
+      setFinalRisk(systemRisk);
+    }, 50);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!currentEngagement?.id) {
+      toast.error('No engagement selected');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = {
+        engagement_id: currentEngagement.id,
+        risk_state: JSON.stringify(buildRiskStatePayload()),
+        materiality_state: JSON.stringify(buildMaterialityStatePayload()),
+        updated_by: user?.id || null,
+        created_by: user?.id || null,
+      };
+
+      // Check if record exists (upsert logic for SQLite)
+      const { data: existing } = await db
+        .from('materiality_risk_assessment')
+        .select('id')
+        .eq('engagement_id', currentEngagement.id)
+        .single();
+
+      if (existing) {
+        // Update existing record
+        const { error } = await db
+          .from('materiality_risk_assessment')
+          .update(payload)
+          .eq('engagement_id', currentEngagement.id)
+          .execute();
+        
+        if (error) throw error;
+      } else {
+        // Insert new record
+        const { error } = await db
+          .from('materiality_risk_assessment')
+          .insert(payload)
+          .execute();
+        
+        if (error) throw error;
+      }
+
+      toast.success('Materiality & Risk data saved successfully');
+    } catch (error: any) {
+      const friendlyMessage = getUserFriendlyError(error);
+      toast.error(friendlyMessage);
+      console.error('Failed to save materiality risk assessment:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const finalizeRisk = () => {
     if (!finalRisk) {
       alert('Please select a risk level (Low Risk, Medium Risk, or High Risk) before finalizing.');
@@ -683,6 +804,15 @@ export default function Materiality() {
             <FileDown className="h-4 w-4" />
             Export to Excel
           </Button>
+          <Button 
+            variant="default" 
+            className="gap-2" 
+            onClick={handleSaveDraft}
+            disabled={saving}
+          >
+            <Save className="h-4 w-4" />
+            {saving ? 'Saving...' : 'Save Draft'}
+          </Button>
         </div>
       </div>
 
@@ -694,9 +824,22 @@ export default function Materiality() {
             <div className="audit-card">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="font-semibold text-foreground">Risk Assessment Questionnaire</h2>
-                <Button variant="outline" size="sm" onClick={resetAllQuestions}>
-                  Reset All Questions
-                </Button>
+                <div className="flex gap-2">
+                  {isRiskFinalized && (
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      onClick={recalculateRisk}
+                      className="gap-2"
+                    >
+                      <Calculator className="h-4 w-4" />
+                      Recalculate Risk
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={resetAllQuestions}>
+                    Reset All Questions
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-3 max-h-[600px] overflow-y-auto">
@@ -935,7 +1078,15 @@ export default function Materiality() {
 
             {/* Financial Base */}
             <div className="audit-card">
-              <h2 className="font-semibold text-foreground mb-4">Financial Base</h2>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h2 className="font-semibold text-foreground">Financial Base</h2>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    <AlertCircle className="h-3 w-3 inline mr-1" />
+                    Financial data is auto-populated from Compliance Applicability (if available)
+                  </p>
+                </div>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Profit Before Tax</Label>
