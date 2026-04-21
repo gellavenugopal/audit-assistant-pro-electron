@@ -257,6 +257,33 @@ CREATE TABLE IF NOT EXISTS caro_standard_answers (
 
 CREATE INDEX IF NOT EXISTS idx_caro_standard_answers_clause_id ON caro_standard_answers(clause_id);
 
+-- IFC Report Content (Internal Financial Controls Report)
+CREATE TABLE IF NOT EXISTS audit_report_ifc_content (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    engagement_id TEXT NOT NULL UNIQUE,
+    opinion_type TEXT DEFAULT 'unmodified' CHECK (opinion_type IN ('unmodified', 'qualified', 'adverse', 'disclaimer')),
+    opinion_paragraph TEXT,
+    basis_for_opinion TEXT,
+    management_responsibility_section TEXT,
+    auditor_responsibility_section TEXT,
+    ifc_meaning_section TEXT,
+    inherent_limitations_section TEXT,
+    has_material_weaknesses INTEGER DEFAULT 0,
+    material_weaknesses TEXT DEFAULT '[]', -- JSON array
+    has_significant_deficiencies INTEGER DEFAULT 0,
+    significant_deficiencies TEXT DEFAULT '[]', -- JSON array
+    additional_sections TEXT DEFAULT '[]', -- JSON array
+    report_status TEXT DEFAULT 'draft',
+    version_number INTEGER DEFAULT 1,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES profiles(user_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_report_ifc_content_engagement_id ON audit_report_ifc_content(engagement_id);
+
 -- ============================================================================
 -- TRIGGERS
 -- ============================================================================
@@ -301,4 +328,10 @@ CREATE TRIGGER IF NOT EXISTS update_caro_standard_answers_timestamp
 AFTER UPDATE ON caro_standard_answers
 BEGIN
     UPDATE caro_standard_answers SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_audit_report_ifc_content_timestamp
+AFTER UPDATE ON audit_report_ifc_content
+BEGIN
+    UPDATE audit_report_ifc_content SET updated_at = datetime('now') WHERE id = NEW.id;
 END;

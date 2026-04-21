@@ -114,6 +114,56 @@ function initializeDatabaseSchema(db) {
       .trim();
   };
 
+  // Smart SQL statement splitter that respects BEGIN...END blocks
+  const splitSqlStatements = (sql) => {
+    const statements = [];
+    let currentStatement = '';
+    let beginCount = 0;
+    
+    // Split by semicolon but track BEGIN/END depth
+    const lines = sql.split('\n');
+    
+    for (let line of lines) {
+      const trimmed = line.trim();
+      
+      // Skip comment-only lines
+      if (trimmed.startsWith('--')) {
+        continue;
+      }
+      
+      // Add line to current statement
+      currentStatement += line + '\n';
+      
+      // Track BEGIN/END depth (case-insensitive, word boundaries)
+      const upperLine = trimmed.toUpperCase();
+      if (/\bBEGIN\b/.test(upperLine)) {
+        beginCount++;
+      }
+      if (/\bEND\b/.test(upperLine)) {
+        beginCount--;
+      }
+      
+      // If line ends with semicolon and we're not inside a BEGIN...END block
+      if (trimmed.endsWith(';') && beginCount === 0) {
+        const cleaned = cleanStatement(currentStatement);
+        if (cleaned.length > 0) {
+          statements.push(cleaned);
+        }
+        currentStatement = '';
+      }
+    }
+    
+    // Add any remaining statement
+    if (currentStatement.trim().length > 0) {
+      const cleaned = cleanStatement(currentStatement);
+      if (cleaned.length > 0) {
+        statements.push(cleaned);
+      }
+    }
+    
+    return statements;
+  };
+
   // Determine schema directory location - try multiple paths
   let schemaDir = null;
   const possiblePaths = [];
@@ -181,11 +231,8 @@ function initializeDatabaseSchema(db) {
       return;
     }
 
-    // Split SQL into individual statements and execute each separately
-    const statements = sql
-      .split(';')
-      .map(stmt => cleanStatement(stmt))
-      .filter(stmt => stmt.length > 0);
+    // Use smart SQL splitter that handles BEGIN...END blocks properly
+    const statements = splitSqlStatements(sql);
 
     let successCount = 0;
     let skipCount = 0;
@@ -193,7 +240,8 @@ function initializeDatabaseSchema(db) {
 
     for (const statement of statements) {
       try {
-        db.exec(statement + ';');
+        // Execute statement (already includes semicolon from splitter)
+        db.exec(statement);
         successCount++;
       } catch (error) {
         // "already exists" errors are OK - table/index/trigger already there

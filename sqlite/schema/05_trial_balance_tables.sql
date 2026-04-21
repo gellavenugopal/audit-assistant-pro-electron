@@ -154,6 +154,51 @@ CREATE TABLE IF NOT EXISTS tb_new_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_tb_new_sessions_engagement_id ON tb_new_sessions(engagement_id);
 
+-- Engagement Trial Balance Header (one per engagement + period type + financial year)
+CREATE TABLE IF NOT EXISTS engagement_trial_balance_header (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    engagement_id TEXT NOT NULL,
+    period_type TEXT NOT NULL CHECK (period_type IN ('CY', 'PY')),
+    financial_year TEXT NOT NULL,
+    source_type TEXT,
+    imported_at TEXT,
+    imported_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE,
+    FOREIGN KEY (imported_by) REFERENCES profiles(user_id) ON DELETE SET NULL,
+    UNIQUE (engagement_id, financial_year, period_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_engagement_tb_header_engagement ON engagement_trial_balance_header(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_tb_header_period ON engagement_trial_balance_header(engagement_id, financial_year, period_type);
+
+-- Engagement Trial Balance Lines (ledger-wise)
+CREATE TABLE IF NOT EXISTS engagement_trial_balance_lines (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    tb_header_id TEXT NOT NULL,
+    engagement_id TEXT NOT NULL,
+    ledger_name TEXT NOT NULL,
+    ledger_guid TEXT,
+    primary_group TEXT,
+    parent_group TEXT,
+    composite_key TEXT NOT NULL,
+    opening REAL NOT NULL DEFAULT 0,
+    debit REAL NOT NULL DEFAULT 0,
+    credit REAL NOT NULL DEFAULT 0,
+    closing REAL NOT NULL DEFAULT 0,
+    dr_cr TEXT,
+    is_revenue INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (tb_header_id) REFERENCES engagement_trial_balance_header(id) ON DELETE CASCADE,
+    FOREIGN KEY (engagement_id) REFERENCES engagements(id) ON DELETE CASCADE,
+    UNIQUE (tb_header_id, composite_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_engagement_tb_lines_header ON engagement_trial_balance_lines(tb_header_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_tb_lines_engagement ON engagement_trial_balance_lines(engagement_id);
+
 -- ============================================================================
 -- TRIGGERS
 -- ============================================================================
@@ -198,4 +243,16 @@ CREATE TRIGGER IF NOT EXISTS update_tb_new_sessions_timestamp
 AFTER UPDATE ON tb_new_sessions
 BEGIN
     UPDATE tb_new_sessions SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_engagement_trial_balance_header_timestamp
+AFTER UPDATE ON engagement_trial_balance_header
+BEGIN
+    UPDATE engagement_trial_balance_header SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_engagement_trial_balance_lines_timestamp
+AFTER UPDATE ON engagement_trial_balance_lines
+BEGIN
+    UPDATE engagement_trial_balance_lines SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
