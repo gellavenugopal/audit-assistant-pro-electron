@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { PDFDocument } from "pdf-lib";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,8 +16,10 @@ import { useEngagement } from "@/contexts/EngagementContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTallyODBC } from "@/hooks/useTallyODBC";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { getSQLiteClient } from "@/integrations/sqlite/client";
 import { gstzenApi } from "@/services/gstzen-api";
+
+const db = getSQLiteClient();
 
 // Type definitions (moved from TallyContext)
 export interface TallyTrialBalanceLine {
@@ -2419,7 +2421,7 @@ const GSTTools = () => {
 
     setIsLoadingGstins(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("client_gstins")
         .select("id, gstin, created_at")
         .eq("client_id", clientId)
@@ -2525,11 +2527,13 @@ const GSTTools = () => {
       }
 
       // Step 2: Create in Supabase (engagement-specific) only if GSTZen creation succeeded
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("client_gstins")
         .insert({
           client_id: clientId,
           gstin: normalized,
+          name,
+          taxpayer_type: taxpayerType,
           created_by: user.id,
         })
         .select("id, gstin, created_at")
@@ -2591,7 +2595,7 @@ const GSTTools = () => {
 
     setIsUpdatingGstin(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("client_gstins")
         .update({ gstin: normalized })
         .eq("id", editingGstinId)
@@ -2621,7 +2625,7 @@ const GSTTools = () => {
 
     setIsDeletingGstinId(gstinId);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from("client_gstins")
         .delete()
         .eq("id", gstinId)
@@ -3802,7 +3806,15 @@ const AUDIT_TOOLS_TABS = ['tally', 'gst', 'mca', 'incometax', 'pdf', 'analytics'
 
 export default function AuditTools() {
   const { currentEngagement } = useEngagement();
-  const [activeTab, setActiveTab] = useState('tally');
+  const location = useLocation();
+  const queryTab = new URLSearchParams(location.search).get('tab');
+  const [activeTab, setActiveTab] = useState(AUDIT_TOOLS_TABS.includes(queryTab || '') ? queryTab || 'tally' : 'tally');
+
+  useEffect(() => {
+    if (queryTab && AUDIT_TOOLS_TABS.includes(queryTab) && queryTab !== activeTab) {
+      setActiveTab(queryTab);
+    }
+  }, [activeTab, queryTab]);
 
   // Enable tab keyboard shortcuts (Ctrl+1-6, Alt+Arrow)
   useTabShortcuts(AUDIT_TOOLS_TABS, activeTab, setActiveTab);

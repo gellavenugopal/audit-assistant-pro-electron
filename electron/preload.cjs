@@ -73,6 +73,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sqliteAuth: (payload) => ipcRenderer.invoke('sqlite-auth', payload),
   sqliteGetCurrentUser: () => ipcRenderer.invoke('sqlite-get-current-user'),
   sqliteQuery: (payload) => ipcRenderer.invoke('sqlite-query', payload),
+  saveFile: async ({ bucket, path, buffer, mimeType }) => {
+    const result = await ipcRenderer.invoke('file-save', { bucket, path, buffer, mimeType });
+    if (!result?.success) {
+      throw new Error(result?.error || 'File save failed');
+    }
+    return result.path;
+  },
+  getFilePath: async (bucket, path) => {
+    const result = await ipcRenderer.invoke('file-get-path', bucket, path);
+    if (!result?.success) {
+      throw new Error(result?.error || 'File path lookup failed');
+    }
+    return result.path;
+  },
+  downloadFile: async (bucket, path) => {
+    const result = await ipcRenderer.invoke('file-download', bucket, path);
+    if (!result?.success) {
+      throw new Error(result?.error || 'File download failed');
+    }
+    return { buffer: result.buffer, mimeType: result.mimeType };
+  },
+  deleteFile: async (bucket, path) => {
+    const result = await ipcRenderer.invoke('file-delete', bucket, path);
+    if (!result?.success) {
+      throw new Error(result?.error || 'File delete failed');
+    }
+    return true;
+  },
   gstzen: {
     login: (credentials) => ipcRenderer.invoke('gstzen-login', credentials),
     generateOtp: (data, token) => ipcRenderer.invoke('gstzen-generate-otp', { data, token }),
