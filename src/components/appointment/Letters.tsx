@@ -85,6 +85,20 @@ export function LettersPage({ engagementId }: LettersPageProps) {
     }
   }, [firmSettings]);
 
+  // Auto-populate partner name when partners load or engagement changes
+  useEffect(() => {
+    if (currentEngagement?.partner_id && partners.length > 0) {
+      const matched = partners.find((partner) => partner.id === currentEngagement.partner_id);
+      if (matched) {
+        setPartnerName(matched.name);
+        return;
+      }
+    }
+    if (partners.length > 0 && !partnerName) {
+      setPartnerName(partners[0].name);
+    }
+  }, [currentEngagement?.partner_id, partners]);
+
   // Prefill Entity Information from Client Master when engagement changes
   useEffect(() => {
     if (!client) return;

@@ -89,6 +89,7 @@ export function PartnersTabContent() {
 
   // Dialog states
   const [complianceDialogOpen, setComplianceDialogOpen] = useState(false);
+  const [addPartnerDialogOpen, setAddPartnerDialogOpen] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState<LinkedPartner | null>(null);
   const [complianceForm, setComplianceForm] = useState<ComplianceForm>({
     membership_number: '',
@@ -96,6 +97,13 @@ export function PartnersTabContent() {
     date_of_exit: '',
     pan: '',
     phone: '',
+  });
+  const [partnerForm, setPartnerForm] = useState({
+    full_name: '',
+    email: '',
+    phone: '',
+    membership_number: '',
+    date_of_joining: '',
   });
   const [saving, setSaving] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
@@ -341,13 +349,179 @@ export function PartnersTabContent() {
     }
   };
 
+  const handleAddPartner = async () => {
+    if (!partnerForm.full_name.trim() || !partnerForm.email.trim()) {
+      toast.error('Name and email are required');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Check if user already exists
+      const { data: existingUser } = await db
+        .from('profiles')
+        .select('*')
+        .eq('email', partnerForm.email.toLowerCase().trim())
+        .maybeSingle()
+        .execute();
+
+      let userId: string;
+      
+      if (existingUser) {
+        userId = existingUser.user_id;
+        toast.info('User already exists, adding partner role...');
+      } else {
+        // Create new user account
+        const tempPassword = Math.random().toString(36).slice(-12);
+        const { data: authData, error: signupError } = await db.signup(
+          partnerForm.email.toLowerCase().trim(),
+          tempPassword,
+          partnerForm.full_name.trim()
+        );
+
+        if (signupError) throw signupError;
+        if (!authData?.user) throw new Error('Failed to create user');
+        
+        userId = authData.user.id;
+
+        // Update phone if provided
+        if (partnerForm.phone) {
+          await db
+            .from('profiles')
+            .update({ phone: partnerForm.phone.trim() })
+            .eq('user_id', userId)
+            .execute();
+        }
+      }
+
+      // Add partner role
+      const { error: roleError } = await db
+        .from('user_roles')
+        .insert({
+          user_id: userId,
+          role: 'partner'
+        })
+        .execute();
+
+      if (roleError) throw roleError;
+
+      // Add compliance record if provided
+      if (partnerForm.membership_number || partnerForm.date_of_joining) {
+        const { error: complianceError } = await db
+          .from('partners')
+          .insert({
+            user_id: userId,
+            name: partnerForm.full_name.trim(),
+            email: partnerForm.email.toLowerCase().trim(),
+            phone: partnerForm.phone.trim() || null,
+            membership_number: partnerForm.membership_number.trim() || null,
+            date_of_joining: partnerForm.date_of_joining || null,
+            created_by: user?.id,
+          })
+          .execute();
+
+        if (complianceError) {
+          console.warn('Failed to create compliance record:', complianceError);
+        }
+      }
+
+      toast.success('Partner added successfully');
+      setAddPartnerDialogOpen(false);
+      setPartnerForm({
+        full_name: '',
+        email: '',
+        phone: '',
+        membership_number: '',
+        date_of_joining: '',
+      });
+      fetchData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to add partner');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Partner Users & Compliance</CardTitle>
-        <CardDescription>
-          Manage partner compliance details (ICAI membership, DOJ, etc.) for users with the partner role
-        </CardDescription>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle>Partner Users & Compliance</CardTitle>
+          <CardDescription>
+            Manage partner compliance details (ICAI membership, DOJ, etc.) for users with the partner role
+          </CardDescription>
+        </div>
+        <Dialog open={addPartnerDialogOpen} onOpenChange={setAddPartnerDialogOpen}>
+          <Button onClick={() => {
+            setPartnerForm({
+              full_name: '',
+              email: '',
+              phone: '',
+              membership_number: '',
+              date_of_joining: '',
+            });
+            setAddPartnerDialogOpen(true);
+          }}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Partner
+          </Button>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add New Partner</DialogTitle>
+              <DialogDescription>Create a new partner user account with compliance details</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Full Name *</Label>
+                <Input
+                  value={partnerForm.full_name}
+                  onChange={(e) => setPartnerForm(f => ({ ...f, full_name: e.target.value }))}
+                  placeholder="CA John Doe"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Email *</Label>
+                <Input
+                  type="email"
+                  value={partnerForm.email}
+                  onChange={(e) => setPartnerForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="john@example.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Phone Number</Label>
+                <Input
+                  value={partnerForm.phone}
+                  onChange={(e) => setPartnerForm(f => ({ ...f, phone: e.target.value }))}
+                  placeholder="+91 98765 43210"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>ICAI Membership Number</Label>
+                <Input
+                  value={partnerForm.membership_number}
+                  onChange={(e) => setPartnerForm(f => ({ ...f, membership_number: e.target.value }))}
+                  placeholder="123456"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Date of Joining</Label>
+                <Input
+                  type="date"
+                  value={partnerForm.date_of_joining}
+                  onChange={(e) => setPartnerForm(f => ({ ...f, date_of_joining: e.target.value }))}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAddPartnerDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleAddPartner} disabled={saving}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Add Partner
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Primary list: Partner Users */}

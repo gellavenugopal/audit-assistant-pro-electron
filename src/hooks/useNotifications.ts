@@ -47,8 +47,8 @@ export function useNotifications() {
     try {
       const { error } = await db
         .from('notifications')
-        .eq('id', id)
-        .update({ is_read: 1 });
+        .update({ is_read: 1 })
+        .eq('id', id);
 
       if (error) throw error;
       setNotifications(prev => 
@@ -80,8 +80,8 @@ export function useNotifications() {
     try {
       const { error } = await db
         .from('notifications')
-        .eq('id', id)
-        .delete();
+        .delete()
+        .eq('id', id);
 
       if (error) throw error;
       setNotifications(prev => prev.filter(n => n.id !== id));
@@ -96,8 +96,8 @@ export function useNotifications() {
     try {
       const { error } = await db
         .from('notifications')
-        .eq('user_id', user.id)
-        .delete();
+        .delete()
+        .eq('user_id', user.id);
 
       if (error) throw error;
       setNotifications([]);

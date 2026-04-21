@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { getUserFriendlyError } from '@/utils/errorMessages';
 
 const db = getSQLiteClient();
 import { Button } from '@/components/ui/button';
@@ -148,16 +149,16 @@ export function ClientFormDialog({
       if (isEditing && form.id) {
         const { error } = await db
           .from('clients')
-          .eq('id', form.id)
           .update(clientData)
+          .eq('id', form.id)
           .execute();
 
         if (error) throw error;
         if (client?.name && client.name !== clientData.name) {
           const { error: engagementError } = await db
             .from('engagements')
-            .eq('client_id', form.id)
             .update({ client_name: clientData.name })
+            .eq('client_id', form.id)
             .execute();
           if (engagementError) {
             console.warn('Failed to sync engagement client name', engagementError);
@@ -180,7 +181,8 @@ export function ClientFormDialog({
       onSuccess();
       onOpenChange(false);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to save client');
+      const friendlyMessage = getUserFriendlyError(error);
+      toast.error(friendlyMessage);
     } finally {
       setSaving(false);
     }

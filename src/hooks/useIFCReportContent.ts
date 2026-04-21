@@ -216,11 +216,11 @@ export function useIFCReportContent(engagementId: string | undefined) {
       if (content) {
         const { error } = await db
           .from('ifc_report_content')
-          .eq('id', content.id)
           .update({
             ...updates,
             updated_at: new Date().toISOString(),
-          });
+          })
+          .eq('id', content.id);
 
         if (error) throw error;
       } else {

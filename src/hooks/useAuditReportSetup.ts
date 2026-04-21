@@ -130,8 +130,8 @@ export function useAuditReportSetup(engagementId: string | undefined) {
     try {
       const { data: updatedSetup, error } = await db
         .from('audit_report_setup')
-        .eq('id', setup.id)
-        .update(data);
+        .update(data)
+        .eq('id', setup.id);
 
       if (error) throw error;
       setSetup(updatedSetup as AuditReportSetup);

@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Minus, XCircle } from "lucide-react";
+import { CheckCircle2, Minus, XCircle, Save } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { useEngagement } from "@/contexts/EngagementContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { getSQLiteClient } from "@/integrations/sqlite/client";
+import { toast } from "sonner";
+import { getUserFriendlyError } from "@/utils/errorMessages";
 
 const db = getSQLiteClient();
 
@@ -76,6 +78,7 @@ const ComplianceApplicability: React.FC = () => {
   // Results
   const [results, setResults] = useState<Array<[string, string, string]>>([]);
   const [resultReasons, setResultReasons] = useState<Array<[string, string]>>([]);
+  const [saving, setSaving] = useState(false);
   const isHydratingRef = useRef(false);
 
   const buildInputsPayload = () => ({
@@ -98,6 +101,40 @@ const ComplianceApplicability: React.FC = () => {
     dormant,
   });
 
+  // Manual save function
+  const handleSaveDraft = async () => {
+    if (!currentEngagement?.id) {
+      toast.error('No engagement selected');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = {
+        engagement_id: currentEngagement.id,
+        inputs: JSON.stringify(buildInputsPayload()),
+        results: JSON.stringify(results),
+        reasons: JSON.stringify(resultReasons),
+        updated_by: user?.id || null,
+        created_by: user?.id || null,
+      };
+
+      const { error } = await db
+        .from('compliance_applicability')
+        .upsert(payload, { onConflict: 'engagement_id' })
+        .execute();
+
+      if (error) throw error;
+      toast.success('Compliance data saved successfully');
+    } catch (error: any) {
+      const friendlyMessage = getUserFriendlyError(error);
+      toast.error(friendlyMessage);
+      console.error('Failed to save compliance applicability:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       if (!currentEngagement?.id) return;
@@ -107,12 +144,25 @@ const ComplianceApplicability: React.FC = () => {
           .from('compliance_applicability')
           .select('*')
           .eq('engagement_id', currentEngagement.id)
-          .maybeSingle();
+          .maybeSingle()
+          .execute();
 
         if (error) throw error;
         if (!data) return;
 
-        const inputs = (data.inputs || {}) as Record<string, string>;
+        // Parse JSON fields
+        const inputs = typeof data.inputs === 'string' 
+          ? JSON.parse(data.inputs || '{}') 
+          : (data.inputs || {}) as Record<string, string>;
+        
+        const results = typeof data.results === 'string'
+          ? JSON.parse(data.results || '[]')
+          : (data.results || []) as Array<[string, string, string]>;
+        
+        const reasons = typeof data.reasons === 'string'
+          ? JSON.parse(data.reasons || '[]')
+          : (data.reasons || []) as Array<[string, string]>;
+
         setDenomination(inputs.denomination || "Ones (\u20B9)");
         setCyTurnover(inputs.cyTurnover || "");
         setCyCapital(inputs.cyCapital || "");
@@ -130,10 +180,11 @@ const ComplianceApplicability: React.FC = () => {
         setConstitution(inputs.constitution || ENTITY_CLASSIFICATION_MAP["Company"][0]);
         setSubConstitution(inputs.subConstitution || "Neither");
         setDormant(inputs.dormant || "No");
-        setResults((data.results || []) as Array<[string, string, string]>);
-        setResultReasons((data.reasons || []) as Array<[string, string]>);
+        setResults(results);
+        setResultReasons(reasons);
       } catch (e) {
         console.error('Failed to load compliance applicability:', e);
+        toast.error('Failed to load saved data');
       } finally {
         isHydratingRef.current = false;
       }
@@ -150,20 +201,21 @@ const ComplianceApplicability: React.FC = () => {
       try {
         const payload = {
           engagement_id: currentEngagement.id,
-          inputs: buildInputsPayload(),
-          results,
-          reasons: resultReasons,
+          inputs: JSON.stringify(buildInputsPayload()),
+          results: JSON.stringify(results),
+          reasons: JSON.stringify(resultReasons),
           updated_by: user?.id || null,
           created_by: user?.id || null,
         };
 
         const { error } = await db
           .from('compliance_applicability')
-          .upsert(payload, { onConflict: 'engagement_id' });
+          .upsert(payload, { onConflict: 'engagement_id' })
+          .execute();
 
         if (error) throw error;
       } catch (e) {
-        console.error('Failed to save compliance applicability:', e);
+        console.error('Failed to auto-save compliance applicability:', e);
       }
     }, 800);
 
@@ -421,9 +473,24 @@ const ComplianceApplicability: React.FC = () => {
               Statutory applicability checks and audit planning signals in one view.
             </p>
           </div>
-          <Button className="px-6" onClick={evaluateCompliance}>
-            Evaluate Compliance
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleSaveDraft} disabled={saving}>
+              {saving ? (
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent mr-2" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Draft
+                </>
+              )}
+            </Button>
+            <Button className="px-6" onClick={evaluateCompliance}>
+              Evaluate Compliance
+            </Button>
+          </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">

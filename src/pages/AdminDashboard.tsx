@@ -300,8 +300,8 @@ export default function AdminDashboard() {
     try {
       const { error } = await db
         .from('user_roles')
-        .eq('user_id', userId)
-        .update({ role: newRole as 'partner' | 'manager' | 'senior' | 'staff' | 'viewer' });
+        .update({ role: newRole as 'partner' | 'manager' | 'senior' | 'staff' | 'viewer' })
+        .eq('user_id', userId);
 
       if (error) throw error;
 
@@ -335,16 +335,16 @@ export default function AdminDashboard() {
       // Delete from user_roles first (due to potential FK constraints)
       const { error: roleError } = await db
         .from('user_roles')
-        .eq('user_id', deletingUser.user_id)
-        .delete();
+        .delete()
+        .eq('user_id', deletingUser.user_id);
 
       if (roleError) throw roleError;
 
       // Delete from profiles
       const { error: profileError } = await db
         .from('profiles')
-        .eq('user_id', deletingUser.user_id)
-        .delete();
+        .delete()
+        .eq('user_id', deletingUser.user_id);
 
       if (profileError) throw profileError;
 
@@ -384,8 +384,8 @@ export default function AdminDashboard() {
     try {
       const { error } = await db
         .from('profiles')
-        .eq('user_id', targetUser.user_id)
-        .update({ is_active: newStatus ? 1 : 0 });
+        .update({ is_active: newStatus ? 1 : 0 })
+        .eq('user_id', targetUser.user_id);
 
       if (error) throw error;
 
