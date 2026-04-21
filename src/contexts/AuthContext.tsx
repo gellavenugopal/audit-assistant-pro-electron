@@ -26,6 +26,11 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const clearUserScopedClientState = () => {
+  localStorage.removeItem('auditpro_current_engagement');
+  window.dispatchEvent(new CustomEvent('auditpro:session-reset'));
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -195,6 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     console.log('🔓 Signing out...');
     await sqliteAuth.signOut();
+    clearUserScopedClientState();
     setUser(null);
     setSession(null);
     setProfile(null);

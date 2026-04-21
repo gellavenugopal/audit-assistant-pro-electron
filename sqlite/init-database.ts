@@ -47,7 +47,8 @@ export function initializeDatabase(dbPath: string): Database.Database {
     '05_trial_balance_tables.sql',
     '06_going_concern_tables.sql',
     '07_rule_engine_tables.sql',
-    '08_template_system_tables.sql'
+    '08_template_system_tables.sql',
+    '09_tax_audit_tables.sql'
   ];
   
   console.log('\n📊 Creating tables...');
@@ -78,11 +79,11 @@ export function initializeDatabase(dbPath: string): Database.Database {
   
   console.log('\n' + '='.repeat(60));
   console.log(`✅ Database initialized successfully!`);
-  console.log(`   Tables created: ${tableCount.count}/66`);
+  console.log(`   Tables created: ${tableCount.count}/74`);
   console.log('='.repeat(60));
   
-  if (tableCount.count !== 66) {
-    console.warn(`⚠️  Expected 66 tables, found ${tableCount.count}`);
+  if (tableCount.count !== 74) {
+    console.warn(`⚠️  Expected 74 tables, found ${tableCount.count}`);
   }
   
   return db;

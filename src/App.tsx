@@ -35,6 +35,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminSettings from "./pages/AdminSettings";
 import AuditTools from "./pages/AuditTools";
 import AuditReport from "./pages/AuditReport";
+import TaxAudit from "./pages/TaxAudit";
 import ComplianceApplicability from "./pages/ComplianceApplicability";
 import GstzenIntegration from "./pages/GstzenIntegration";
 import GstzenLogin from "./pages/GstzenLogin";
@@ -258,6 +259,16 @@ const App = () => (
                         <AuditTools />
                       </MainLayout>
                     </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tax-audit"
+                  element={
+                    <ProtectedEngagementRoute>
+                      <MainLayout>
+                        <TaxAudit />
+                      </MainLayout>
+                    </ProtectedEngagementRoute>
                   }
                 />
                 <Route

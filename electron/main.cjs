@@ -156,7 +156,8 @@ function initializeDatabaseSchema(db) {
     '05_trial_balance_tables.sql',
     '06_going_concern_tables.sql',
     '07_rule_engine_tables.sql',
-    '08_template_system_tables.sql'
+    '08_template_system_tables.sql',
+    '09_tax_audit_tables.sql'
   ];
 
   safeLog(`   Executing ${schemaFiles.length} schema files...`);
@@ -428,13 +429,21 @@ function registerIpcHandlers() {
     }
 
     // Extract table name outside try-catch so it's available in error handler
-    const { table, action, columns, filters, data, orderBy, limit } = payload || {};
+    const { table, action, columns, filters, data, orderBy, limit, onConflict } = payload || {};
 
     try {
       if (!table || !action) {
         return { data: null, error: { message: 'Table and action are required.' } };
       }
 
+      const safeIdentifier = (identifier) => {
+        if (typeof identifier !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
+          throw new Error(`Invalid SQL identifier: ${identifier}`);
+        }
+        return identifier;
+      };
+
+      const safeTable = safeIdentifier(table);
       const colList = columns && typeof columns === 'string' ? columns : '*';
       const whereClauses = [];
       const params = [];
@@ -442,8 +451,42 @@ function registerIpcHandlers() {
       if (Array.isArray(filters)) {
         for (const f of filters) {
           if (f && f.column) {
-            whereClauses.push(`${f.column} = ?`);
-            params.push(f.value);
+            const column = safeIdentifier(f.column);
+            const operator = f.operator || 'eq';
+            if (operator === 'in') {
+              const values = Array.isArray(f.value) ? f.value : [];
+              if (values.length === 0) {
+                whereClauses.push('1 = 0');
+              } else {
+                whereClauses.push(`${column} IN (${values.map(() => '?').join(', ')})`);
+                params.push(...values);
+              }
+            } else if (operator === 'neq') {
+              whereClauses.push(`${column} != ?`);
+              params.push(f.value);
+            } else if (operator === 'gte') {
+              whereClauses.push(`${column} >= ?`);
+              params.push(f.value);
+            } else if (operator === 'lte') {
+              whereClauses.push(`${column} <= ?`);
+              params.push(f.value);
+            } else if (operator === 'gt') {
+              whereClauses.push(`${column} > ?`);
+              params.push(f.value);
+            } else if (operator === 'lt') {
+              whereClauses.push(`${column} < ?`);
+              params.push(f.value);
+            } else if (operator === 'is') {
+              if (f.value === null) {
+                whereClauses.push(`${column} IS NULL`);
+              } else {
+                whereClauses.push(`${column} IS ?`);
+                params.push(f.value);
+              }
+            } else {
+              whereClauses.push(`${column} = ?`);
+              params.push(f.value);
+            }
           }
         }
       }
@@ -453,8 +496,9 @@ function registerIpcHandlers() {
       // Build ORDER BY clause
       let orderSql = '';
       if (orderBy && orderBy.column) {
+        const orderColumn = safeIdentifier(orderBy.column);
         const direction = orderBy.ascending ? 'ASC' : 'DESC';
-        orderSql = ` ORDER BY ${orderBy.column} ${direction}`;
+        orderSql = ` ORDER BY ${orderColumn} ${direction}`;
       }
 
       // Build LIMIT clause
@@ -464,7 +508,7 @@ function registerIpcHandlers() {
       }
 
       if (action === 'select') {
-        const sql = `SELECT ${colList} FROM ${table}${whereSql}${orderSql}${limitSql}`;
+        const sql = `SELECT ${colList} FROM ${safeTable}${whereSql}${orderSql}${limitSql}`;
         const stmt = db.prepare(sql);
         const rows = stmt.all(...params);
         return { data: rows, error: null };
@@ -486,15 +530,64 @@ function registerIpcHandlers() {
 
           const keys = Object.keys(cleanRow);
           const placeholders = keys.map(() => '?').join(', ');
-          const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
+          const safeKeys = keys.map(safeIdentifier);
+          const sql = `INSERT INTO ${safeTable} (${safeKeys.join(', ')}) VALUES (${placeholders})`;
           const stmt = db.prepare(sql);
           const result = stmt.run(...keys.map((k) => cleanRow[k]));
 
           // Fetch the inserted row to get the auto-generated ID
-          const insertedRow = db.prepare(`SELECT * FROM ${table} WHERE rowid = ?`).get(result.lastInsertRowid);
+          const insertedRow = db.prepare(`SELECT * FROM ${safeTable} WHERE rowid = ?`).get(result.lastInsertRowid);
           inserted.push(insertedRow || cleanRow);
         }
         return { data: inserted, error: null };
+      }
+
+      if (action === 'upsert') {
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          return { data: null, error: { message: 'No data to upsert.' } };
+        }
+        const rows = Array.isArray(data) ? data : [data];
+        const conflictColumns = typeof onConflict === 'string' && onConflict.trim()
+          ? onConflict.split(',').map((column) => safeIdentifier(column.trim())).filter(Boolean)
+          : [];
+        const upserted = [];
+
+        for (const row of rows) {
+          const cleanRow = { ...row };
+          const keys = Object.keys(cleanRow);
+          const safeKeys = keys.map(safeIdentifier);
+          const placeholders = keys.map(() => '?').join(', ');
+
+          let conflictSql = '';
+          if (conflictColumns.length > 0) {
+            const updateKeys = safeKeys.filter((key) => !conflictColumns.includes(key));
+            if (updateKeys.length > 0) {
+              conflictSql = ` ON CONFLICT(${conflictColumns.join(', ')}) DO UPDATE SET ${updateKeys.map((key) => `${key} = excluded.${key}`).join(', ')}`;
+            } else {
+              conflictSql = ` ON CONFLICT(${conflictColumns.join(', ')}) DO NOTHING`;
+            }
+          } else {
+            conflictSql = ' OR REPLACE';
+          }
+
+          const sql = conflictColumns.length > 0
+            ? `INSERT INTO ${safeTable} (${safeKeys.join(', ')}) VALUES (${placeholders})${conflictSql}`
+            : `INSERT${conflictSql} INTO ${safeTable} (${safeKeys.join(', ')}) VALUES (${placeholders})`;
+          const stmt = db.prepare(sql);
+          const result = stmt.run(...keys.map((k) => cleanRow[k]));
+
+          if (conflictColumns.length > 0) {
+            const lookupWhere = conflictColumns.map((column) => `${column} = ?`).join(' AND ');
+            const lookupParams = conflictColumns.map((column) => cleanRow[column]);
+            const upsertedRow = db.prepare(`SELECT * FROM ${safeTable} WHERE ${lookupWhere}`).get(...lookupParams);
+            upserted.push(upsertedRow || cleanRow);
+          } else {
+            const upsertedRow = db.prepare(`SELECT * FROM ${safeTable} WHERE rowid = ?`).get(result.lastInsertRowid);
+            upserted.push(upsertedRow || cleanRow);
+          }
+        }
+
+        return { data: upserted, error: null };
       }
 
       if (action === 'update') {
@@ -502,15 +595,15 @@ function registerIpcHandlers() {
           return { data: null, error: { message: 'No data to update.' } };
         }
         const keys = Object.keys(data);
-        const setSql = keys.map((k) => `${k} = ?`).join(', ');
-        const sql = `UPDATE ${table} SET ${setSql}${whereSql}`;
+        const setSql = keys.map((k) => `${safeIdentifier(k)} = ?`).join(', ');
+        const sql = `UPDATE ${safeTable} SET ${setSql}${whereSql}`;
         const stmt = db.prepare(sql);
         stmt.run(...keys.map((k) => data[k]), ...params);
         return { data: null, error: null };
       }
 
       if (action === 'delete') {
-        const sql = `DELETE FROM ${table}${whereSql}`;
+        const sql = `DELETE FROM ${safeTable}${whereSql}`;
         const stmt = db.prepare(sql);
         stmt.run(...params);
         return { data: null, error: null };
@@ -529,6 +622,71 @@ function registerIpcHandlers() {
       }
 
       return { data: null, error: { message: error.message || 'SQLite query failed' } };
+    }
+  });
+
+  const resolveStoragePath = (bucket, relativePath) => {
+    if (!bucket || !relativePath) {
+      throw new Error('Bucket and path are required.');
+    }
+    const safeBucket = String(bucket).replace(/[^A-Za-z0-9_-]/g, '');
+    if (!safeBucket) {
+      throw new Error('Invalid storage bucket.');
+    }
+    const storageRoot = path.join(app.getPath('userData'), 'files', safeBucket);
+    const resolved = path.resolve(storageRoot, String(relativePath));
+    const rootResolved = path.resolve(storageRoot);
+    if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
+      throw new Error('Invalid file path.');
+    }
+    return { storageRoot, resolved };
+  };
+
+  ipcMain.handle('file-save', async (event, payload) => {
+    try {
+      const { bucket, path: relativePath, buffer } = payload || {};
+      const { storageRoot, resolved } = resolveStoragePath(bucket, relativePath);
+      fs.mkdirSync(path.dirname(resolved), { recursive: true });
+      fs.mkdirSync(storageRoot, { recursive: true });
+      fs.writeFileSync(resolved, Buffer.from(buffer));
+      return { success: true, path: relativePath };
+    } catch (error) {
+      safeLog('File save error:', error.message);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('file-get-path', async (event, bucket, relativePath) => {
+    try {
+      const { resolved } = resolveStoragePath(bucket, relativePath);
+      return { success: true, path: resolved };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('file-download', async (event, bucket, relativePath) => {
+    try {
+      const { resolved } = resolveStoragePath(bucket, relativePath);
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: 'File not found' };
+      }
+      const buffer = fs.readFileSync(resolved);
+      return { success: true, buffer, mimeType: null };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('file-delete', async (event, bucket, relativePath) => {
+    try {
+      const { resolved } = resolveStoragePath(bucket, relativePath);
+      if (fs.existsSync(resolved)) {
+        fs.unlinkSync(resolved);
+      }
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   });
 

@@ -44,116 +44,214 @@ export function getSQLiteClient(): DatabaseManager {
 function createIPCClient(electronAPI: any): DatabaseManager {
   return {
     from: (table: string) => {
-      // Helper to build query chain
-      const buildSelectChain = (columns?: string, filters: any[] = [], orderBy?: { column: string; ascending: boolean }, limit?: number) => ({
-        eq: (column: string, value: any) => buildSelectChain(columns, [...filters, { column, value }], orderBy, limit),
-        order: (column: string, options?: { ascending?: boolean }) => 
-          buildSelectChain(columns, filters, { column, ascending: options?.ascending ?? true }, limit),
-        limit: (count: number) => buildSelectChain(columns, filters, orderBy, count),
-        execute: async () => {
-          const result = await electronAPI.sqliteQuery?.({
-            table,
-            action: 'select',
-            columns,
-            filters,
-            orderBy,
-            limit
-          });
-          return { data: result?.data || [], error: result?.error || null };
-        },
-        single: () => ({
-          execute: async () => {
-            const result = await electronAPI.sqliteQuery?.({
-              table,
-              action: 'select',
-              columns,
-              filters,
-              orderBy,
-              limit
-            });
-            const data = result?.data?.[0] || null;
-            return { data, error: result?.error || null };
-          }
-        })
+      const normalizeResult = (result: any) => ({
+        data: result?.data ?? null,
+        error: result?.error ?? null,
       });
 
-      return {
-        select: (columns?: string) => buildSelectChain(columns),
-        insert: (data: any) => {
-          const insertChain = {
-            select: (columns?: string) => ({
-              single: () => ({
-                execute: async () => {
-                  const result = await electronAPI.sqliteQuery?.({
-                    table,
-                    action: 'insert',
-                    data,
-                    returnData: true
-                  });
-                  // If result.data is an array, return first item, otherwise return the data
-                  const insertedData = Array.isArray(result?.data) ? result?.data[0] : result?.data;
-                  return { data: insertedData || null, error: result?.error || null };
-                }
+      const asExecutable = (execute: () => Promise<any>) => ({
+        execute,
+        then: (resolve: any, reject: any) => execute().then(resolve, reject),
+      });
+
+      const createQuery = (
+        action: 'select' | 'update' | 'delete',
+        options: {
+          columns?: string;
+          data?: any;
+          filters?: any[];
+          orderBy?: { column: string; ascending: boolean };
+          limit?: number;
+        } = {}
+      ) => {
+        const state = {
+          columns: options.columns,
+          data: options.data,
+          filters: options.filters || [],
+          orderBy: options.orderBy,
+          limit: options.limit,
+        };
+
+        const execute = async () => {
+          const result = await electronAPI.sqliteQuery?.({
+            table,
+            action,
+            columns: state.columns,
+            filters: state.filters,
+            data: state.data,
+            orderBy: state.orderBy,
+            limit: state.limit,
+          });
+          return normalizeResult(result);
+        };
+
+        const chain: any = {
+          eq: (column: string, value: any) =>
+            createQuery(action, {
+              ...state,
+              filters: [...state.filters, { column, operator: 'eq', value }],
+            }),
+          neq: (column: string, value: any) =>
+            createQuery(action, {
+              ...state,
+              filters: [...state.filters, { column, operator: 'neq', value }],
+            }),
+          in: (column: string, values: any[]) =>
+            createQuery(action, {
+              ...state,
+              filters: [...state.filters, { column, operator: 'in', value: values }],
+            }),
+          is: (column: string, value: any) =>
+            createQuery(action, {
+              ...state,
+              filters: [...state.filters, { column, operator: 'is', value }],
+            }),
+          gte: (column: string, value: any) =>
+            createQuery(action, {
+              ...state,
+              filters: [...state.filters, { column, operator: 'gte', value }],
+            }),
+          lte: (column: string, value: any) =>
+            createQuery(action, {
+              ...state,
+              filters: [...state.filters, { column, operator: 'lte', value }],
+            }),
+          gt: (column: string, value: any) =>
+            createQuery(action, {
+              ...state,
+              filters: [...state.filters, { column, operator: 'gt', value }],
+            }),
+          lt: (column: string, value: any) =>
+            createQuery(action, {
+              ...state,
+              filters: [...state.filters, { column, operator: 'lt', value }],
+            }),
+          order: (column: string, options?: { ascending?: boolean }) =>
+            createQuery(action, {
+              ...state,
+              orderBy: { column, ascending: options?.ascending ?? true },
+            }),
+          limit: (count: number) =>
+            createQuery(action, {
+              ...state,
+              limit: count,
+            }),
+          select: (columns?: string) =>
+            createQuery('select', {
+              ...state,
+              columns,
+            }),
+          execute,
+          then: (resolve: any, reject: any) => execute().then(resolve, reject),
+          single: () =>
+            asExecutable(async () => {
+              const result = await execute();
+              if (result.error) return result;
+              const rows = Array.isArray(result.data) ? result.data : [];
+              if (rows.length === 0) {
+                return { data: null, error: { message: 'No rows returned' } };
+              }
+              if (rows.length > 1) {
+                return { data: rows[0], error: { message: 'Multiple rows returned' } };
+              }
+              return { data: rows[0], error: null };
+            }),
+          maybeSingle: () =>
+            asExecutable(async () => {
+              const result = await execute();
+              if (result.error) return result;
+              const rows = Array.isArray(result.data) ? result.data : [];
+              if (rows.length === 0) return { data: null, error: null };
+              if (rows.length > 1) {
+                return { data: rows[0], error: { message: 'Multiple rows returned' } };
+              }
+              return { data: rows[0], error: null };
+            }),
+        };
+
+        return chain;
+      };
+
+      const createInsertQuery = (data: any) => {
+        const execute = async () => {
+          const result = await electronAPI.sqliteQuery?.({
+            table,
+            action: 'insert',
+            data,
+            returnData: true
+          });
+          return normalizeResult(result);
+        };
+
+        const chain: any = {
+          execute,
+          then: (resolve: any, reject: any) => execute().then(resolve, reject),
+          select: (columns?: string) => {
+            const selectChain: any = {
+              execute,
+              then: (resolve: any, reject: any) => execute().then(resolve, reject),
+              single: () =>
+                asExecutable(async () => {
+                  const result = await execute();
+                  const insertedData = Array.isArray(result.data) ? result.data[0] : result.data;
+                  return { data: insertedData || null, error: result.error || null };
+                }),
+            };
+            return selectChain;
+          },
+          single: () =>
+            asExecutable(async () => {
+              const result = await execute();
+              const insertedData = Array.isArray(result.data) ? result.data[0] : result.data;
+              return { data: insertedData || null, error: result.error || null };
+            }),
+        };
+
+        return chain;
+      };
+
+      const createUpsertQuery = (data: any, options?: { onConflict?: string }) => {
+        const execute = async () => {
+          const result = await electronAPI.sqliteQuery?.({
+            table,
+            action: 'upsert',
+            data,
+            onConflict: options?.onConflict,
+            returnData: true
+          });
+          return normalizeResult(result);
+        };
+
+        const chain: any = {
+          execute,
+          then: (resolve: any, reject: any) => execute().then(resolve, reject),
+          select: () => ({
+            execute,
+            then: (resolve: any, reject: any) => execute().then(resolve, reject),
+            single: () =>
+              asExecutable(async () => {
+                const result = await execute();
+                const upsertedData = Array.isArray(result.data) ? result.data[0] : result.data;
+                return { data: upsertedData || null, error: result.error || null };
               }),
-              execute: async () => {
-                const result = await electronAPI.sqliteQuery?.({
-                  table,
-                  action: 'insert',
-                  data,
-                  returnData: true
-                });
-                return { data: result?.data || null, error: result?.error || null };
-              }
+          }),
+          single: () =>
+            asExecutable(async () => {
+              const result = await execute();
+              const upsertedData = Array.isArray(result.data) ? result.data[0] : result.data;
+              return { data: upsertedData || null, error: result.error || null };
             }),
-            single: () => ({
-              execute: async () => {
-                const result = await electronAPI.sqliteQuery?.({
-                  table,
-                  action: 'insert',
-                  data,
-                  returnData: true
-                });
-                const insertedData = Array.isArray(result?.data) ? result?.data[0] : result?.data;
-                return { data: insertedData || null, error: result?.error || null };
-              }
-            }),
-            execute: async () => {
-              const result = await electronAPI.sqliteQuery?.({
-                table,
-                action: 'insert',
-                data,
-                returnData: true
-              });
-              return { data: result?.data || null, error: result?.error || null };
-            }
-          };
-          return insertChain;
-        },
-        update: (data: any) => ({
-          eq: (column: string, value: any) => ({
-            execute: async () => {
-              const result = await electronAPI.sqliteQuery?.({
-                table,
-                action: 'update',
-                data,
-                filters: [{ column, value }]
-              });
-              return { data: result?.data || null, error: result?.error || null };
-            }
-          })
-        }),
-        delete: () => ({
-          eq: (column: string, value: any) => ({
-            execute: async () => {
-              const result = await electronAPI.sqliteQuery?.({
-                table,
-                action: 'delete',
-                filters: [{ column, value }]
-              });
-              return { data: result?.data || null, error: result?.error || null };
-            }
-          })
-        })
+        };
+
+        return chain;
+      };
+
+      return {
+        select: (columns?: string) => createQuery('select', { columns }),
+        insert: createInsertQuery,
+        upsert: createUpsertQuery,
+        update: (data: any) => createQuery('update', { data }),
+        delete: () => createQuery('delete'),
       };
     },
     login: async (email: string, password: string) => {
@@ -364,7 +462,7 @@ export const auth = {
       return { data: { user: null }, error: new Error('Not authenticated') };
     }
     
-    const result = await db.from('profiles').eq('id', user.id).update(data).execute();
+    const result = await db.from('profiles').update(data).eq('id', user.id).execute();
     
     if (result.error) {
       return { data: { user: null }, error: result.error };
@@ -385,7 +483,13 @@ export const storage = {
     upload: async (path: string, file: File | Blob, options?: any) => {
       try {
         // In Electron, save to userData/files directory
-        const filePath = (window as any).electronAPI?.saveFile?.(bucket, path, file);
+        const arrayBuffer = await file.arrayBuffer();
+        const filePath = await (window as any).electronAPI?.saveFile?.({
+          bucket,
+          path,
+          buffer: arrayBuffer,
+          mimeType: file.type || options?.contentType || null,
+        });
         
         if (!filePath) {
           throw new Error('File save not implemented');
@@ -406,8 +510,8 @@ export const storage = {
     /**
      * Get public URL (local file path)
      */
-    getPublicUrl: (path: string) => {
-      const publicPath = (window as any).electronAPI?.getFilePath?.(bucket, path) || path;
+    getPublicUrl: async (path: string) => {
+      const publicPath = await (window as any).electronAPI?.getFilePath?.(bucket, path) || path;
       return {
         data: { publicUrl: publicPath }
       };
@@ -417,7 +521,10 @@ export const storage = {
      * Download file
      */
     download: async (path: string) => {
-      const data = await (window as any).electronAPI?.downloadFile?.(bucket, path);
+      const result = await (window as any).electronAPI?.downloadFile?.(bucket, path);
+      const data = result?.buffer
+        ? new Blob([result.buffer], { type: result.mimeType || 'application/octet-stream' })
+        : null;
       return {
         data,
         error: data ? null : new Error('File not found')

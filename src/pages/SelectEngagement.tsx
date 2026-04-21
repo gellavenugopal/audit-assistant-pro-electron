@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 export default function SelectEngagement() {
   const navigate = useNavigate();
   const { profile, signOut } = useAuth();
-  const { engagements, loading, setCurrentEngagement } = useEngagement();
+  const { engagements, loading, setCurrentEngagement, clearEngagement } = useEngagement();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [clientFilter, setClientFilter] = useState<string>('all');
@@ -46,8 +46,9 @@ export default function SelectEngagement() {
   };
 
   const handleSignOut = async () => {
+    clearEngagement();
     await signOut();
-    navigate('/auth');
+    navigate('/auth', { replace: true });
   };
 
   const getStatusColor = (status: string) => {
