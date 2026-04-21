@@ -47,6 +47,30 @@ export const ERROR_MESSAGES = {
   VALIDATION_ERROR: 'Please check your input and try again.',
   PERMISSION_DENIED: 'You do not have permission to perform this action.',
   OPERATION_CANCELLED: 'Operation was cancelled.',
+  
+  // Audit Execution errors
+  AUDIT_PROGRAM_CREATE_FAILED: 'Failed to create audit execution program. Please try again.',
+  AUDIT_PROGRAM_UPDATE_FAILED: 'Failed to update audit execution program.',
+  AUDIT_PROGRAM_DELETE_FAILED: 'Failed to delete audit execution program.',
+  AUDIT_PROGRAM_NOT_FOUND: 'Audit execution program not found.',
+  AUDIT_SECTION_CREATE_FAILED: 'Failed to create section. Please try again.',
+  AUDIT_SECTION_UPDATE_FAILED: 'Failed to update section.',
+  AUDIT_SECTION_NOT_FOUND: 'Section not found.',
+  AUDIT_BOX_CREATE_FAILED: 'Failed to create box. Please try again.',
+  AUDIT_BOX_UPDATE_FAILED: 'Failed to update box content.',
+  AUDIT_BOX_DELETE_FAILED: 'Failed to delete box.',
+  AUDIT_BOX_NOT_FOUND: 'Box not found.',
+  AUDIT_PROGRAM_MISSING_ENGAGEMENT: 'Please select an engagement before creating an audit execution.',
+  AUDIT_PROGRAM_MISSING_CLIENT: 'The selected engagement is missing client information.',
+  AUDIT_PROGRAM_MISSING_YEAR: 'Financial year not found. Please add it in Settings.',
+  AUDIT_SECTION_ORDER_FAILED: 'Failed to reorder sections.',
+  
+  // SQL-specific errors
+  SQL_SYNTAX_ERROR: 'Database syntax error. Please contact support if this persists.',
+  SQL_RESERVED_KEYWORD: 'Database operation failed due to reserved keyword conflict.',
+  SQL_COLUMN_NOT_EXISTS: 'Database column not found. The database schema may need updating.',
+  SQL_TABLE_NOT_EXISTS: 'Database table not found. Please restart the application.',
+  SQL_DUPLICATE_KEY: 'A record with this unique identifier already exists.',
 };
 
 export type ErrorCode = keyof typeof ERROR_MESSAGES;
@@ -70,6 +94,31 @@ export function getUserFriendlyError(error: any): string {
   
   const errorMessage = error.message || '';
   const errorCode = error.code || '';
+  
+  // Log technical error for debugging
+  if (errorMessage && !errorMessage.includes('user-friendly')) {
+    console.error('Technical error:', errorMessage, error);
+  }
+  
+  // SQL Syntax errors
+  if (errorMessage.includes('syntax error') || errorMessage.includes('near')) {
+    if (errorMessage.includes('near "order"') || errorMessage.includes("near 'order'")) {
+      return ERROR_MESSAGES.SQL_RESERVED_KEYWORD;
+    }
+    return ERROR_MESSAGES.SQL_SYNTAX_ERROR;
+  }
+  
+  if (errorMessage.includes('no such table')) {
+    return ERROR_MESSAGES.SQL_TABLE_NOT_EXISTS;
+  }
+  
+  if (errorMessage.includes('no such column')) {
+    return ERROR_MESSAGES.SQL_COLUMN_NOT_EXISTS;
+  }
+  
+  if (errorMessage.includes('duplicate key') || errorMessage.includes('already exists')) {
+    return ERROR_MESSAGES.SQL_DUPLICATE_KEY;
+  }
   
   // Database specific errors
   if (errorMessage.includes('UNIQUE constraint failed')) {

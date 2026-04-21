@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getSQLiteClient } from '@/integrations/sqlite/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { getUserFriendlyError } from '@/utils/errorMessages';
 
 const db = getSQLiteClient();
 import {
@@ -37,9 +38,10 @@ export function useAuditExecution(engagementId?: string | null) {
 
       if (error) throw error;
       setPrograms((data || []) as AuditExecutionProgram[]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching audit executions:', error);
-      toast.error('Failed to load audit executions');
+      const friendlyMessage = getUserFriendlyError(error);
+      toast.error(friendlyMessage);
     } finally {
       setLoading(false);
     }
@@ -152,7 +154,8 @@ export function useAuditExecution(engagementId?: string | null) {
       return program.id;
     } catch (error: any) {
       console.error('Error creating audit execution:', error);
-      toast.error(error.message || 'Failed to create audit execution');
+      const friendlyMessage = getUserFriendlyError(error);
+      toast.error(friendlyMessage);
       return null;
     }
   };
@@ -171,7 +174,8 @@ export function useAuditExecution(engagementId?: string | null) {
       await fetchPrograms();
     } catch (error: any) {
       console.error('Error updating audit execution:', error);
-      toast.error(error.message || 'Failed to update audit execution');
+      const friendlyMessage = getUserFriendlyError(error);
+      toast.error(friendlyMessage);
     }
   };
 
@@ -189,7 +193,8 @@ export function useAuditExecution(engagementId?: string | null) {
       await fetchPrograms();
     } catch (error: any) {
       console.error('Error deleting audit execution:', error);
-      toast.error(error.message || 'Failed to delete audit execution');
+      const friendlyMessage = getUserFriendlyError(error);
+      toast.error(friendlyMessage);
     }
   };
 
@@ -254,7 +259,7 @@ export function useAuditExecutionSections(programId?: string | null) {
       if (error) throw error;
     } catch (error: any) {
       console.error('Error updating section status:', error);
-      toast.error(error.message || 'Failed to update section status');
+      toast.error(getUserFriendlyError(error));
       await fetchSections();
     }
   };
@@ -280,7 +285,7 @@ export function useAuditExecutionSections(programId?: string | null) {
       if (error) throw error;
     } catch (error: any) {
       console.error('Error toggling section lock:', error);
-      toast.error(error.message || 'Failed to update section lock');
+      toast.error(getUserFriendlyError(error));
       await fetchSections();
     }
   };
@@ -302,7 +307,7 @@ export function useAuditExecutionSections(programId?: string | null) {
       if (error) throw error;
     } catch (error: any) {
       console.error('Error updating section name:', error);
-      toast.error(error.message || 'Failed to update section name');
+      toast.error(getUserFriendlyError(error));
       await fetchSections();
     }
   };
@@ -328,7 +333,7 @@ export function useAuditExecutionSections(programId?: string | null) {
       if (error) throw error;
     } catch (error: any) {
       console.error('Error toggling section applicability:', error);
-      toast.error(error.message || 'Failed to update section applicability');
+      toast.error(getUserFriendlyError(error));
       await fetchSections();
     }
   };
@@ -473,7 +478,7 @@ export function useAuditExecutionSections(programId?: string | null) {
       await fetchSections();
     } catch (error: any) {
       console.error('Error deleting section:', error);
-      toast.error(error.message || 'Failed to delete line item');
+      toast.error(getUserFriendlyError(error));
     }
   };
 
@@ -549,7 +554,7 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
       await fetchBoxes();
     } catch (error: any) {
       console.error('Error creating box:', error);
-      toast.error(error.message || 'Failed to create box');
+      toast.error(getUserFriendlyError(error));
     }
   };
 
@@ -567,7 +572,7 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
       if (error) throw error;
     } catch (error: any) {
       console.error('Error updating box:', error);
-      toast.error(error.message || 'Failed to update box');
+      toast.error(getUserFriendlyError(error));
       await fetchBoxes();
     }
   };
@@ -594,7 +599,7 @@ export function useWorkingSectionBoxes(sectionId?: string | null) {
       await fetchBoxes();
     } catch (error: any) {
       console.error('Error deleting box:', error);
-      toast.error(error.message || 'Failed to delete box');
+      toast.error(getUserFriendlyError(error));
     }
   };
 
@@ -717,7 +722,7 @@ export function useAuditExecutionAttachments(programId?: string | null) {
       await fetchAttachments();
     } catch (error: any) {
       console.error('Error deleting attachment:', error);
-      toast.error(error.message || 'Failed to delete attachment');
+      toast.error(getUserFriendlyError(error));
     }
   };
 

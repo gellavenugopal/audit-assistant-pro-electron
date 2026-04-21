@@ -440,7 +440,8 @@ function registerIpcHandlers() {
         if (typeof identifier !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
           throw new Error(`Invalid SQL identifier: ${identifier}`);
         }
-        return identifier;
+        // Wrap in double quotes to handle SQL reserved keywords like "order"
+        return `"${identifier}"`;
       };
 
       const safeTable = safeIdentifier(table);
