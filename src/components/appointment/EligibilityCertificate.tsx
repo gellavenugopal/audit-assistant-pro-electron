@@ -452,22 +452,26 @@ export function EligibilityCertificate() {
   const initializedRef = useRef<string | null>(null);
   const certificateInputRef = useRef<HTMLInputElement>(null);
 
+  // Auto-populate client data when available
+  // Auto-populate client data whenever client loads or changes
   useEffect(() => {
     if (client) {
       setEntityName(client.name || '');
       setEntityAddress(client.address || '');
     }
-  }, [client?.id]);
+  }, [client]);
 
+  // Auto-populate firm settings whenever they load or change
   useEffect(() => {
     if (firmSettings) {
-      setFirmName((prev) => prev || firmSettings.firm_name || '');
-      setFirmRegNo((prev) => prev || firmSettings.firm_registration_no || '');
+      setFirmName(firmSettings.firm_name || '');
+      setFirmRegNo(firmSettings.firm_registration_no || '');
     }
   }, [firmSettings]);
 
+  // Auto-populate partner data when available
   useEffect(() => {
-    if (currentEngagement?.partner_id) {
+    if (currentEngagement?.partner_id && partners.length > 0) {
       const matched = partners.find((partner) => partner.id === currentEngagement.partner_id);
       if (matched) {
         setPartnerName(matched.name);
@@ -475,11 +479,11 @@ export function EligibilityCertificate() {
         return;
       }
     }
-    if (partners.length && !partnerName) {
+    if (partners.length > 0 && !partnerName) {
       setPartnerName(partners[0].name);
       setPartnerMemNo(partners[0].membership_number);
     }
-  }, [currentEngagement?.partner_id, partners, partnerName]);
+  }, [currentEngagement?.partner_id, partners]);
 
   const templateValues = useMemo(() => {
     return {
@@ -532,6 +536,14 @@ export function EligibilityCertificate() {
     setEditorHtml('');
     setPrefillOpen(true);
     setDate(new Date().toISOString().split('T')[0]);
+    
+    // Reset form fields to be repopulated by data hooks
+    setEntityName('');
+    setEntityAddress('');
+    setFirmName('');
+    setFirmRegNo('');
+    setPartnerName('');
+    setPartnerMemNo('');
   }, [currentEngagement?.id]);
 
   useEffect(() => {

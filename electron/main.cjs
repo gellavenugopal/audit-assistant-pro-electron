@@ -260,7 +260,7 @@ function initializeDatabaseSchema(db) {
 
 let currentUserId = null;
 
-const isDev = process.env.NODE_ENV === 'development' || (app && !app.isPackaged);
+const isDev = process.env.NODE_ENV !== 'production' && (process.env.NODE_ENV === 'development' || (app && !app.isPackaged));
 
 // ODBC connection handling
 let odbcConnection = null;
