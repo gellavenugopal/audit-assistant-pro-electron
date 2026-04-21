@@ -982,7 +982,7 @@ export default function TaxAudit() {
         </TabsList>
 
         <TabsContent value="workspace">
-          <div className="grid h-[680px] gap-4 lg:grid-cols-[300px_minmax(0,1fr)_340px]">
+          <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)] h-[800px]">
             <ClauseNavigator
               selectedKey={selectedClause?.clause_key || selectedClauseKey}
               clausesByKey={clausesByKey}
@@ -990,19 +990,23 @@ export default function TaxAudit() {
               onSelect={openClause}
             />
             {selectedClause ? (
-              <>
-                <ClauseEditor
-                  clause={selectedClause}
-                  onUpdate={(updates) => updateClause(selectedClause.id, updates)}
-                  onStatus={(status) => updateClauseStatus(selectedClause.id, status)}
-                />
-                <EvidenceRail
-                  clause={selectedClause}
-                  evidenceLinks={evidenceLinks}
-                  onLink={(evidenceFileId) => linkEvidence(selectedClause, evidenceFileId)}
-                  onUnlink={unlinkEvidence}
-                />
-              </>
+              <div className="flex flex-col gap-4 min-h-0">
+                <div className="flex-1 min-h-0">
+                  <ClauseEditor
+                    clause={selectedClause}
+                    onUpdate={(updates) => updateClause(selectedClause.id, updates)}
+                    onStatus={(status) => updateClauseStatus(selectedClause.id, status)}
+                  />
+                </div>
+                <div className="h-[300px] shrink-0">
+                  <EvidenceRail
+                    clause={selectedClause}
+                    evidenceLinks={evidenceLinks}
+                    onLink={(evidenceFileId) => linkEvidence(selectedClause, evidenceFileId)}
+                    onUnlink={unlinkEvidence}
+                  />
+                </div>
+              </div>
             ) : (
               <div className="rounded-md border p-6 text-sm text-muted-foreground">No clause selected.</div>
             )}
