@@ -19,8 +19,9 @@ import {
   Shield,
   FileText,
   FileSignature,
+  Landmark,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEngagement } from '@/contexts/EngagementContext';
@@ -49,6 +50,7 @@ const navItems: SidebarItem[] = [
   { name: 'Audit Execution', href: '/audit-execution', icon: ClipboardList, requiresEngagement: true },
   { name: 'VERA Tools', href: '/audit-tools', icon: Wrench, requiresEngagement: true },
   { name: 'Financial Review', href: '/financial-review', icon: FileSpreadsheet, requiresEngagement: true },
+  { name: 'Tax Audit', href: '/tax-audit', icon: Landmark, requiresEngagement: true },
   { name: 'Review Notes', href: '/review-notes', icon: MessageSquare, requiresEngagement: true },
   { name: 'Evidence Vault', href: '/evidence', icon: FileCheck, requiresEngagement: true },
   { name: 'Audit Report', href: '/audit-report', icon: FileText, requiresEngagement: true },
@@ -66,10 +68,14 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { currentEngagement } = useEngagement();
   const isAdmin = role === 'partner' || role === 'manager' || role === 'admin';
   const hasEngagement = !!currentEngagement;
+
+  useEffect(() => {
+    setCollapsed(false);
+  }, [user?.id]);
 
   const handleLogoClick = () => {
     navigate('/');
@@ -203,7 +209,7 @@ export function AppSidebar() {
   return (
     <aside
       className={cn(
-        'flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-in-out',
+        'flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-in-out',
         collapsed ? 'w-16' : 'w-64'
       )}
       style={{ background: 'var(--gradient-sidebar)' }}

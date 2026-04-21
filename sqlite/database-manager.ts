@@ -60,7 +60,8 @@ export class DatabaseManager {
       '05_trial_balance_tables.sql',
       '06_going_concern_tables.sql',
       '07_rule_engine_tables.sql',
-      '08_template_system_tables.sql'
+      '08_template_system_tables.sql',
+      '09_tax_audit_tables.sql'
     ];
 
     // Check if database is already initialized

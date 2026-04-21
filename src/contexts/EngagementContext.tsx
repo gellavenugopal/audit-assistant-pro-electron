@@ -45,7 +45,7 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
     if (!user) {
       setEngagements([]);
       setLoading(false);
-      return;
+      return [] as Engagement[];
     }
 
     try {
@@ -61,8 +61,15 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
         client_name: client?.name || item.client_name,
       })) || [];
       setEngagements(resolved);
+      setCurrentEngagementState((current) => {
+        if (!current || resolved.some((item) => item.id === current.id)) return current;
+        localStorage.removeItem(STORAGE_KEY);
+        return null;
+      });
+      return resolved;
     } catch (error) {
       console.error('Error fetching engagements:', error);
+      return [] as Engagement[];
     } finally {
       setLoading(false);
     }
@@ -71,6 +78,7 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
   // Load saved engagement from localStorage on mount
   useEffect(() => {
     if (user) {
+      setLoading(true);
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         try {
@@ -91,7 +99,11 @@ export function EngagementProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!currentEngagement || engagements.length === 0) return;
     const refreshed = engagements.find((item) => item.id === currentEngagement.id);
-    if (!refreshed) return;
+    if (!refreshed) {
+      setCurrentEngagementState(null);
+      localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
     const fieldsToCheck: Array<keyof Engagement> = [
       'client_id',
       'client_name',

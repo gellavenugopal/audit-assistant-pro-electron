@@ -219,7 +219,7 @@ export const auth = {
       return { data: { user: null }, error: new Error('Not authenticated') };
     }
     
-    const result = await db.from('profiles').eq('id', user.id).update(data).execute();
+    const result = await db.from('profiles').update(data).eq('id', user.id).execute();
     
     if (result.error) {
       return { data: { user: null }, error: result.error };

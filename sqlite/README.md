@@ -61,8 +61,9 @@ ac.validateAccess(user, 'engagements', 'update', recordId);
 - `06_going_concern_tables.sql` - GC workpapers, annexures
 - `07_rule_engine_tables.sql` - AILE rules, validation
 - `08_template_system_tables.sql` - Templates, logs, feedback
+- `09_tax_audit_tables.sql` - Tax Audit setup, Form 3CD clauses, evidence links
 
-**Total: 66 tables**
+**Total: 74 tables**
 
 ### Core Modules
 

@@ -120,28 +120,55 @@ export default function EvidenceVault() {
 
         if (programError) throw programError;
 
+        const nextTags: Record<string, string[]> = {};
         const programIds = (programs || []).map((program) => program.id);
-        if (programIds.length === 0) {
-          setModuleTags({});
-          return;
+        if (programIds.length > 0) {
+          const { data: attachments, error: attachmentError } = await db
+            .from('audit_program_attachments')
+            .select('file_path,audit_program_id')
+            .in('audit_program_id', programIds);
+
+          if (attachmentError) throw attachmentError;
+
+          (attachments || []).forEach((attachment) => {
+            if (!attachment.file_path) return;
+            const tags = nextTags[attachment.file_path] || [];
+            if (!tags.includes('Audit Execution')) {
+              tags.push('Audit Execution');
+            }
+            nextTags[attachment.file_path] = tags;
+          });
         }
 
-        const { data: attachments, error: attachmentError } = await db
-          .from('audit_program_attachments')
-          .select('file_path,audit_program_id')
-          .in('audit_program_id', programIds);
+        const { data: taxAudits, error: taxAuditError } = await db
+          .from('tax_audit_engagements')
+          .select('id')
+          .eq('engagement_id', currentEngagement.id)
+          .execute();
 
-        if (attachmentError) throw attachmentError;
+        if (taxAuditError) throw taxAuditError;
 
-        const nextTags: Record<string, string[]> = {};
-        (attachments || []).forEach((attachment) => {
-          if (!attachment.file_path) return;
-          const tags = nextTags[attachment.file_path] || [];
-          if (!tags.includes('Audit Execution')) {
-            tags.push('Audit Execution');
-          }
-          nextTags[attachment.file_path] = tags;
-        });
+        const taxAuditIds = (taxAudits || []).map((item) => item.id);
+        if (taxAuditIds.length > 0) {
+          const { data: taxAuditLinks, error: taxAuditLinkError } = await db
+            .from('tax_audit_clause_evidence')
+            .select('evidence_file_id')
+            .in('tax_audit_id', taxAuditIds)
+            .execute();
+
+          if (taxAuditLinkError) throw taxAuditLinkError;
+
+          const filePathById = new Map(files.map((file) => [file.id, file.file_path]));
+          (taxAuditLinks || []).forEach((link) => {
+            const filePath = filePathById.get(link.evidence_file_id);
+            if (!filePath) return;
+            const tags = nextTags[filePath] || [];
+            if (!tags.includes('Tax Audit')) {
+              tags.push('Tax Audit');
+            }
+            nextTags[filePath] = tags;
+          });
+        }
 
         setModuleTags(nextTags);
       } catch (error) {
